@@ -1,0 +1,1 @@
+cmd/ holds main packages: wolfci (server), wolfci-agent (executor on nodes), wolfci-ctl (admin CLI).

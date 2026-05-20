@@ -1,0 +1,1 @@
+builds/ holds per-build outputs at runtime (builds/<job>/<n>/log and result.json). Contents are gitignored; only this .gitkeep is tracked.

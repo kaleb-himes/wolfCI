@@ -1,0 +1,49 @@
+# Compiled output
+*.a
+*.o
+*.so
+*.dylib
+*.exe
+*.test
+*.out
+bin/
+build/
+dist/
+
+# Go
+vendor/
+go.work
+go.work.sum
+
+# wolfSSL build artifacts inside the submodule (keep submodule itself)
+third_party/wolfssl/**/*.la
+third_party/wolfssl/**/*.lo
+third_party/wolfssl/**/.libs/
+third_party/wolfssl/**/Makefile
+third_party/wolfssl/**/Makefile.in
+third_party/wolfssl/configure
+third_party/wolfssl/autom4te.cache/
+third_party/wolfssl/aclocal.m4
+
+# wolfCI runtime data: gitkeep stays, everything else is local
+/jobs/*
+!/jobs/.gitkeep
+/builds/*
+!/builds/.gitkeep
+/config-files/runtime/
+/nodes/runtime/
+
+# OS and editor noise
+.DS_Store
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# Logs
+*.log
+
+# Local environment
+.env
+.env.local

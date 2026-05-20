@@ -1,0 +1,1 @@
+config-files/ holds server configuration. Static templates live here in git; runtime config (config-files/runtime/) is gitignored.

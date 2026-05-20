@@ -1,0 +1,1 @@
+web/ holds HTML, CSS, and JS for the embedded UI (Phase 6). Embedded into the server binary via //go:embed.

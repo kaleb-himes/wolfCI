@@ -1,0 +1,1 @@
+third_party/ holds vendored or submoduled external code. wolfSSL is added here as a git submodule in Phase 1.1.

@@ -1,0 +1,1 @@
+jobs/ holds per-job definitions at runtime (jobs/<name>/job.yaml). Contents are gitignored; only this .gitkeep is tracked.

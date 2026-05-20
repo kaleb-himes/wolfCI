@@ -1,0 +1,1 @@
+plugins/ holds the plugin SDK (plugins/sdk) and built-in plugins (plugins/examples, plugins/email-on-failure, etc.). Added in Phase 7.

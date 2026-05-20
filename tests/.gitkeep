@@ -1,0 +1,1 @@
+tests/ holds integration tests that exercise multiple internal packages or whole-binary end-to-end flows.

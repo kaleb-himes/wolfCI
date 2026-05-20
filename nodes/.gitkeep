@@ -1,0 +1,1 @@
+nodes/ holds node descriptors (on-prem and GCE). Static templates live here in git; runtime data (nodes/runtime/) is gitignored.

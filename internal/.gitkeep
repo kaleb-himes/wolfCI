@@ -1,0 +1,1 @@
+internal/ holds private Go packages: tlsutil, storage, auth, authz, scheduler, nodes, plugin, server, ui.
