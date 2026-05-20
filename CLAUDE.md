@@ -88,9 +88,9 @@ owner and override defaults.
   (ephemeral, provisioned on demand). Configurable executors per node.
 - Plugins: out-of-process gRPC plugins, modeled on HashiCorp
   go-plugin.
-- License: GPL-2.0 (matches wolfSSL open license). If wolfSSL Inc.
-  later needs different terms, update LICENSE and this paragraph in
-  the same commit.
+- License: GPL-3.0 (see LICENSE). If wolfSSL Inc. later needs
+  different terms, update LICENSE and this paragraph in the same
+  commit.
 
 ## Directory Layout
 
@@ -99,7 +99,7 @@ wolfCI/
   CLAUDE.md              this file
   PLAN.md                durable plan; updated every loop
   README.md
-  LICENSE                GPL-2.0
+  LICENSE                GPL-3.0
   go.mod                 Go module (path: github.com/kaleb-himes/wolfCI)
   cmd/                   main packages
     wolfci/              the server

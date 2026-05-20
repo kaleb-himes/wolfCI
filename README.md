@@ -36,7 +36,7 @@ tests/         integration tests
 
 ## License
 
-GPL-2.0. See LICENSE.
+GPL-3.0. See LICENSE.
 
 ## Author
 

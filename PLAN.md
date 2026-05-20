@@ -53,8 +53,8 @@ initial planning session.
 Bring up TLS using the project's chosen crypto library.
 
 - [ ] 1.1 Add wolfSSL as a git submodule under third_party/wolfssl
-        pinned to the current latest-stable release tag. Record the
-        tag in third_party/wolfssl-version.txt.
+        pinned to tag v5.9.1-stable. Record the tag in
+        third_party/wolfssl-version.txt.
 - [ ] 1.2 Write scripts/build-wolfssl.sh to compile wolfSSL with
         options suitable for a CI server (TLS 1.2 and 1.3, modern
         cipher suites, no SSLv3 or insecure protocols, FIPS off by
