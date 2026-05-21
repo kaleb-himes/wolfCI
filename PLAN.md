@@ -1195,36 +1195,51 @@ before the phase started):
               when the vendored wolfSSL project is missing a
               wrapper, we ADD it to the vendored copy and
               capture as a patch rather than hand-rolling.
-              Wrappers to add (mirroring the wc_* C API
-              one-to-one):
-                ed25519.go     wc_ed25519_init / _free /
-                               _make_key / _import_public /
-                               _import_private_key /
-                               _export_public /
-                               _export_private_only /
-                               _sign_msg / _verify_msg
-                rsa_verify.go  wc_InitRsaKey / wc_FreeRsaKey /
-                               wc_RsaPublicKeyDecodeRaw /
-                               wc_SignatureVerify with
-                               WC_HASH_TYPE_SHA256 and
-                               WC_SIGNATURE_TYPE_RSA_W_ENC
-                certgen.go     wc_InitCert / wc_MakeCert /
-                               wc_SignCert / wc_SetIssuerBuffer /
-                               wc_SetExtKeyUsage (+ the small C
-                               helper for copying subject CN /
-                               Organization into the
-                               fixed-size Cert.subject arrays)
-              Each new file lands as a numbered patch under
-              third_party/go-wolfssl-patches/
-              (0002-add-ed25519.patch, 0003-add-rsa-verify.patch,
-              0004-add-certgen.patch); the submodule worktree
-              stays at the upstream pinned SHA in the committed
-              state. Patches re-apply automatically via
-              scripts/test-go-wolfssl.sh on fresh clones. When
-              Phase 10 closes, the project owner files an
-              upstream PR from kaleb-himes/go-wolfssl carrying
-              these wrappers; merged + tagged upstream drops the
-              patches from third_party/go-wolfssl-patches/.
+              Sub-divided per wrapper area; each sub-checkpoint
+              ships one numbered patch under
+              third_party/go-wolfssl-patches/.
+              - [x] 10.6c-i  ed25519.go (patch 0003).
+                    Done: Wc_ed25519_init / _free / _make_key /
+                    _import_public / _import_private_key /
+                    _export_public / _export_private_only /
+                    _sign_msg / _verify_msg, plus the type
+                    alias Ed25519_key = C.struct_ed25519_key.
+                    Style mirrors go-wolfssl's curve25519.go
+                    (Wc_* names, []byte buffers, BAD_FUNC_ARG
+                    on empty-input, #ifndef HAVE_ED25519
+                    fallback stubs).
+                    Gate:
+                    internal/wolfcrypt/gowolf_smoke_test.go's
+                    TestGoWolfSSL_Ed25519_RFC8032_TC2_Verify
+                    (RFC 8032 Test 2 KAT) and
+                    TestGoWolfSSL_Ed25519_RoundTrip (make_key
+                    + sign + verify roundtrip) exercise every
+                    new wrapper.
+                    third_party/go-wolfssl-patches/README.md
+                    documents the patch and the upstream-PR
+                    drop condition.
+              - [ ] 10.6c-ii rsa_verify.go (patch 0004).
+                    Wc_InitRsaKey / Wc_FreeRsaKey /
+                    Wc_RsaPublicKeyDecodeRaw /
+                    Wc_SignatureVerify with
+                    WC_HASH_TYPE_SHA256 and
+                    WC_SIGNATURE_TYPE_RSA_W_ENC; type alias
+                    RsaKey = C.struct_RsaKey. Gate: the
+                    existing RSA PKCS#1 v1.5 vector test in
+                    internal/wolfcrypt/verify_test.go re-runs
+                    against a go-wolfssl-side smoke test.
+              - [ ] 10.6c-iii certgen.go (patch 0005).
+                    Wc_InitCert / Wc_MakeCert / Wc_SignCert /
+                    Wc_SetIssuerBuffer / Wc_SetExtKeyUsage,
+                    plus a C-side helper for copying
+                    CommonName + Organization into the
+                    fixed-size Cert.subject char arrays. Type
+                    alias Cert = C.struct_Cert. Constant
+                    CTC_SHA256wECDSA exposed as a Go int.
+                    Gate: an end-to-end CA + leaf mint flow
+                    similar to internal/wolfcrypt/cert_test.go's
+                    TestMintCert_LeafSignatureVerifiesAgainstCA,
+                    but driving go-wolfssl directly.
         - [ ] 10.6d Rewire internal/wolfcrypt to call the
               extended go-wolfssl API for Ed25519, RSA verify,
               and MintCert. Delete every remaining

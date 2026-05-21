@@ -68,3 +68,41 @@ of `build/wolfssl-install/` and into a path go-wolfssl
 recognizes (system include paths), OR go-wolfssl learns a
 `WOLFSSL_INSTALL_PREFIX` env var that its `#cgo` directives can
 consume.
+
+## 0003-add-ed25519-wrappers.patch
+
+Adds `ed25519.go` to go-wolfssl with Go wrappers for the
+wolfCrypt Ed25519 C API:
+
+  Wc_ed25519_init / _free / _make_key
+  Wc_ed25519_import_public / _import_private_key
+  Wc_ed25519_export_public / _export_private_only
+  Wc_ed25519_sign_msg / _verify_msg
+
+Plus the type alias `Ed25519_key = C.struct_ed25519_key`. The
+style mirrors go-wolfssl's existing curve25519.go: `Wc_*` Go
+function names, `[]byte` for buffers, `BAD_FUNC_ARG` on
+empty-input checks, and a `#ifndef HAVE_ED25519` fallback stub
+block so the file still compiles on a wolfSSL build without
+Ed25519 support.
+
+**Why:** internal/wolfcrypt's Ed25519 path (sign.go +
+verify.go's Ed25519Verify) is still hand-rolled CGO as of
+Phase 10.6b. CLAUDE.md Hard Rule #11 (extended on 2026-05-21)
+says missing go-wolfssl wrappers should be ADDED to the
+vendored copy and tracked as patches, not hand-rolled in
+wolfCI's tree. This patch is the Ed25519 piece of that work;
+patch 0004 covers RSA verify, patch 0005 covers cert
+generation. 10.6d then rewires internal/wolfcrypt to use
+these wrappers and deletes the corresponding hand-rolled CGO.
+
+**Gate:** `internal/wolfcrypt/gowolf_smoke_test.go` ships
+`TestGoWolfSSL_Ed25519_RFC8032_TC2_Verify` (KAT verify) and
+`TestGoWolfSSL_Ed25519_RoundTrip` (make_key + sign + verify
+round-trip) which exercise every function in the patch.
+
+**What would let us drop this patch:** the project owner files
+the upstream PR (carrying this file as-is) at
+https://github.com/wolfSSL/go-wolfssl and it merges + a release
+tag lands. The submodule pointer advances to that tag and this
+patch falls out of the directory.
