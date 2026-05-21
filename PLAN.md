@@ -21,14 +21,16 @@ Format conventions:
 
 ## Current Phase
 
-Phase 9 - Packaging, docs, polish
+All numbered phases (0-9) are complete. The active queue is the
+Backlog section at the bottom of this file. Promote an item into a
+new "## Phase N" heading when work on it starts.
 
-(Update this line when a phase completes. Phase 0 was completed in
-the initial planning turn. Phase 1 completed in iteration 4,
-Phase 2 in iteration 5, Phase 3 in iteration 8, Phase 4 in
-iteration 10, Phase 5 in iteration 21, Phase 6 in iteration 25,
-Phase 7 in iteration 28, Phase 8 in iteration 32 of the
-slash-loop run.)
+(Phase completion log. Phase 0 was completed in the initial
+planning turn. Phase 1 completed in iteration 4, Phase 2 in
+iteration 5, Phase 3 in iteration 8, Phase 4 in iteration 10,
+Phase 5 in iteration 21, Phase 6 in iteration 25, Phase 7 in
+iteration 28, Phase 8 in iteration 32, Phase 9 in iteration 37
+of the slash-loop run.)
 
 ## Phase 0 - Bootstrap
 
@@ -811,7 +813,23 @@ RPC.
         fenced code block contains the +-- / --+ / | tokens
         of an ASCII component diagram. Wired into
         scripts/test.sh.
-- [ ] 9.5 README.md final pass.
+- [x] 9.5 README.md final pass.
+        Done: README.md replaces the Phase 0 stub with a real
+        feature list (one binary per role, wolfSSL mTLS gRPC,
+        SSH-key + bcrypt auth, role matrix, on-prem + GCE
+        overflow, build matrix, embedded UI with SSE log tail,
+        out-of-process plugins, self-contained on disk), a
+        binary-role table (wolfci / wolfci-agent / wolfci-ctl), a
+        quick build recipe (git submodule + build-wolfssl.sh +
+        build.sh), and a docs index linking GETTING-STARTED,
+        ARCHITECTURE, SECURITY, PLUGINS, and CREDITS. Status
+        line reflects "Phases 0-9 complete" and points readers at
+        PLAN.md for the per-task log and Current Phase.
+        Gate: scripts/test-readme.sh asserts the bootstrap
+        language is gone, every binary is named, every long-form
+        doc is linked, the build recipe is present, and the
+        GPL-3.0 + author footer is intact. Wired into
+        scripts/test.sh.
 
 ## Backlog (not in main flow)
 
