@@ -796,7 +796,21 @@ RPC.
         marker is present so the doc and the actual scripts
         cannot drift apart silently. Wired into
         scripts/test.sh.
-- [ ] 9.4 docs/ARCHITECTURE.md with an ASCII component diagram.
+- [x] 9.4 docs/ARCHITECTURE.md with an ASCII component diagram.
+        Done: docs/ARCHITECTURE.md ships two ASCII diagrams (a
+        deployment view with server, on-prem and GCE agents,
+        operator browser/CLI; a server-internals view with the
+        package map and the wires between them) plus a
+        package-by-package responsibilities list, an end-to-end
+        "one build" walk-through, the runtime data layout under
+        WorkingDirectory, and a "why these choices" section that
+        links each design decision back to the five goals in
+        CLAUDE.md. Gate: scripts/test-architecture.sh asserts
+        every top-level Go package and every runtime data dir
+        is named, plus an awk-based check that at least one
+        fenced code block contains the +-- / --+ / | tokens
+        of an ASCII component diagram. Wired into
+        scripts/test.sh.
 - [ ] 9.5 README.md final pass.
 
 ## Backlog (not in main flow)
