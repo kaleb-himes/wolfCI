@@ -117,6 +117,7 @@ fi
     --enable-alpn \
     --enable-session-ticket \
     --enable-supportedcurves \
+    --enable-pwdbased \
     --enable-keygen \
     --enable-certgen \
     --enable-certext \

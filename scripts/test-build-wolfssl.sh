@@ -28,6 +28,10 @@ if [ ! -x "$SCRIPT" ]; then
 fi
 
 # 2. Source must reference the required CI-profile configure flags.
+#    These map 1:1 to wolfCrypt primitives the auth stack relies on;
+#    docs/SECURITY.md "wolfSSL build profile -> wolfCrypt primitive
+#    map" documents the linkage. Adding to this list is a profile
+#    contract change; do not silently drop entries.
 for flag in \
     --enable-tls13 \
     --disable-sslv3 \
@@ -36,14 +40,19 @@ for flag in \
     --disable-shared \
     --enable-aesgcm \
     --enable-chacha \
+    --enable-poly1305 \
     --enable-ecc \
     --enable-curve25519 \
     --enable-ed25519 \
+    --enable-supportedcurves \
     --enable-sni \
     --enable-alpn \
+    --enable-session-ticket \
+    --enable-pwdbased \
     --enable-keygen \
     --enable-certgen \
-    --enable-certext
+    --enable-certext \
+    --enable-certreq
 do
     if ! grep -qF -- "$flag" "$SCRIPT"; then
         fail "$SCRIPT is missing required configure flag $flag"

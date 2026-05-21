@@ -21,14 +21,14 @@ Format conventions:
 
 ## Current Phase
 
-Phase 10 - wolfCrypt-only crypto pass
+Phase 11 - cmd/wolfci wiring (placeholder)
 
 (Phase completion log. Phase 0 was completed in the initial
 planning turn. Phase 1 completed in iteration 4, Phase 2 in
 iteration 5, Phase 3 in iteration 8, Phase 4 in iteration 10,
 Phase 5 in iteration 21, Phase 6 in iteration 25, Phase 7 in
-iteration 28, Phase 8 in iteration 32, Phase 9 in iteration 37
-of the slash-loop run.)
+iteration 28, Phase 8 in iteration 32, Phase 9 in iteration 37,
+Phase 10 in iteration 49 of the slash-loop run.)
 
 ## Phase 0 - Bootstrap
 
@@ -1496,7 +1496,7 @@ before the phase started):
                                 cmd/wolfci-ctl/client.go
            -> empty
          The full scripts/test.sh remains green.
-- [ ] 10.11 docs/SECURITY.md update: document the
+- [x] 10.11 docs/SECURITY.md update: document the
          wolfCrypt-only rule (CLAUDE.md Hard Rule #10's
          realization in the source tree), the ask-first rule
          (CLAUDE.md Hard Rule #11), which wolfSSL configure
@@ -1507,6 +1507,58 @@ before the phase started):
          scripts/test-build-wolfssl.sh that the configure
          command keeps the required flags so a profile
          regression cannot silently break the auth stack.
+         Done: docs/SECURITY.md grew a "Cryptography source"
+         section with four subsections - the wolfCrypt-only
+         rule (with grep recipe + the deliberate test-only
+         crypto/tls interop carve-out), the ask-first rule
+         keyed to CLAUDE.md Hard Rule #11 (with the
+         in-tree wolfSSL projects table), the
+         cryptobyte transitive-dep boundary (traced through
+         internal/nodes/gce -> google.golang.org/api ->
+         google/s2a-go -> cryptobyte; cryptobyte is a byte
+         builder/parser utility with no cryptographic
+         primitives, so it is a known boundary not a
+         violation), and the wolfSSL build profile to
+         wolfCrypt primitive map (two tables, one for the
+         TLS/handshake surface and one for the wolfCrypt
+         primitives the auth stack consumes, naming the
+         configure flag every primitive depends on). Stale
+         bcrypt content from pre-Phase-10.2 days was rewritten
+         to PBKDF2HMACSHA256 (file extension .pbkdf2,
+         wolfci-pbkdf2-v1 sentinel, HMAC-both-sides verify
+         pattern, OWASP 2023 iteration default).
+         scripts/build-wolfssl.sh gained --enable-pwdbased
+         (the configure flag wolfSSL's PBKDF2 path depends on)
+         so the build profile makes the contract explicit
+         rather than relying on a wolfSSL default.
+         scripts/test-build-wolfssl.sh: required-flag list
+         widened to gate --enable-poly1305 (paired with
+         --enable-chacha for the ChaCha20-Poly1305 cipher
+         suite), --enable-supportedcurves (TLS 1.3 curve
+         negotiation), --enable-session-ticket (session
+         resumption tickets), --enable-pwdbased (PBKDF2 path
+         for password verify), --enable-certreq (used by the
+         certgen flow). Each addition has a one-to-one entry
+         in the SECURITY.md flag map, so neither side can
+         drift without the other catching the change.
+         Gate: new scripts/test-security.sh asserts the doc
+         names the wolfCrypt-only rule, internal/wolfcrypt,
+         the ask-first rule, CLAUDE.md Hard Rule #11, every
+         wolfCrypt primitive the auth stack consumes, every
+         configure flag those primitives depend on, the
+         cryptobyte boundary, and that no leftover bcrypt
+         references survive in the doc. Wired into
+         scripts/test.sh so a future commit that quietly
+         strips a wolfCrypt-only paragraph from SECURITY.md
+         is rejected by the fast suite. The slow
+         scripts/test-build-wolfssl.sh (full wolfSSL rebuild;
+         not in scripts/test.sh by design) was re-run
+         explicitly to confirm --enable-pwdbased builds
+         cleanly and the gate's widened required-flag list
+         still passes; the full scripts/test.sh remains
+         green.
+
+Phase 10 complete. "## Current Phase" advances to Phase 11.
 
 ## Phase 11 - cmd/wolfci wiring (placeholder)
 
