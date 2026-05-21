@@ -21,12 +21,12 @@ Format conventions:
 
 ## Current Phase
 
-Phase 4 - Job model and scheduler
+Phase 5 - Node management
 
 (Update this line when a phase completes. Phase 0 was completed in
 the initial planning turn. Phase 1 completed in iteration 4,
-Phase 2 in iteration 5, Phase 3 in iteration 8 of the slash-loop
-run.)
+Phase 2 in iteration 5, Phase 3 in iteration 8, Phase 4 in
+iteration 10 of the slash-loop run.)
 
 ## Phase 0 - Bootstrap
 
@@ -216,9 +216,15 @@ before the phase started):
         TestLocalExecutor_FailingStep,
         TestLocalExecutor_StopsAtFirstFailure,
         TestLocalExecutor_PerStepEnv.
-- [ ] 4.4 Build matrix support: a job can declare an axis (for
+- [x] 4.4 Build matrix support: a job can declare an axis (for
         example, OS x compiler), and the scheduler fans out into N
         runs.
+        Done: Scheduler.EnqueueMatrix expands Job.Axis into the
+        cartesian product and enqueues one build per combination,
+        each with axis values layered into every Step.Env. Gate:
+        TestScheduler_EnqueueMatrix_NoAxis,
+        TestScheduler_EnqueueMatrix_TwoDimensions,
+        TestScheduler_EnqueueMatrix_PreservesStepEnv.
 
 ## Phase 5 - Node management
 
