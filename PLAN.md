@@ -26,21 +26,6 @@ Phase 1 - wolfSSL TLS layer
 (Update this line when a phase completes. Phase 0 was completed in
 the initial planning turn.)
 
-## Resume Point
-
-Session paused 2026-05-20 mid-bootstrap of Phase 1. Working tree is
-clean; both bootstrap commits are on origin/main.
-
-Next concrete action when /loop resumes:
-
-  Task 1.1 - add wolfSSL as a git submodule under
-  third_party/wolfssl pinned to tag v5.9.1-stable, and record the
-  tag in third_party/wolfssl-version.txt.
-
-The /loop skill was invoked but interrupted before any Phase 1 work
-was performed. No work-in-progress exists on disk; just re-run
-/loop with the same instructions and it will pick up at 1.1.
-
 ## Phase 0 - Bootstrap
 
 Foundation that must exist before any feature work. Completed in the
@@ -67,9 +52,10 @@ initial planning session.
 
 Bring up TLS using the project's chosen crypto library.
 
-- [ ] 1.1 Add wolfSSL as a git submodule under third_party/wolfssl
+- [x] 1.1 Add wolfSSL as a git submodule under third_party/wolfssl
         pinned to tag v5.9.1-stable. Record the tag in
         third_party/wolfssl-version.txt.
+        Gate: scripts/test-wolfssl-submodule.sh.
 - [ ] 1.2 Write scripts/build-wolfssl.sh to compile wolfSSL with
         options suitable for a CI server (TLS 1.2 and 1.3, modern
         cipher suites, no SSLv3 or insecure protocols, FIPS off by
