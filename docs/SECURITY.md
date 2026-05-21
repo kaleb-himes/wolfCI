@@ -74,6 +74,43 @@ After the bootstrap completes, the bootstrap directory should be
 removed by the operator. (This step is enforced by Phase 3.x
 follow-up rather than the current build.)
 
+### User lifecycle
+
+wolfCI has NO self-signup endpoint. There is no "create account"
+form, no email invite flow. Every user after the bootstrap admin
+exists because an admin explicitly added them.
+
+Adding a user (admin action):
+
+1. Obtain the user's OpenSSH public key out of band.
+2. Write it to config-files/auth/keys/<username>.pub (mode 0644).
+3. Add an entry to config-files/auth/matrix.yaml under "users:"
+   mapping that username to a role (admin, developer, or viewer).
+
+Removing a user (admin action):
+
+1. Delete config-files/auth/keys/<username>.pub.
+2. Delete the user's entry from config-files/auth/matrix.yaml.
+3. Optional: delete config-files/auth/passwords/<username>.bcrypt
+   if password auth was enabled and the user had a password.
+
+Changing a user's role:
+
+1. Edit their entry in config-files/auth/matrix.yaml. No restart
+   required; the matrix is read on every authorization check.
+
+Promoting/demoting admins:
+
+1. Same as "changing a role" - move the user between admin /
+   developer / viewer in matrix.yaml. Only admins can edit
+   matrix.yaml in practice (file permissions + Phase 6 UI gate).
+
+The Phase 6 web UI exposes these operations as admin-only
+endpoints so the operator does not have to shell into the host
+for every onboarding/offboarding. The file-based model is the
+ground truth; the UI is a convenience layer that writes the same
+files.
+
 ## Authorization
 
 `internal/authz` implements a Jenkins-style role-based matrix.

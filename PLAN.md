@@ -230,6 +230,22 @@ before the phase started):
 
 On-prem and GCE.
 
+Decisions locked in for Phase 5 (confirmed with the project owner
+before the phase started):
+
+- Agent transport: gRPC over wolfSSL mTLS. Same wire protocol
+  carries plugin RPCs in Phase 7. Accept the dep cost of
+  google.golang.org/grpc.
+- GCE credential source: wolfCI-specific config. The path to the
+  service account JSON lives in config-files/nodes/gce.yaml under
+  a "service_account_key:" field. No reliance on
+  GOOGLE_APPLICATION_CREDENTIALS or VM metadata.
+- Node labels: each agent declares a labels list in
+  config-files/agent.yaml. A Job.node_label matches if the
+  agent's labels contain that string. Multiple labels per agent;
+  a single required label per job. Boolean label expressions
+  (a la Jenkins "linux && tpm") are backlog.
+
 - [ ] 5.1 cmd/wolfci-agent: a standalone binary that opens an mTLS
         connection back to the server and offers itself as an
         executor. Agent config
