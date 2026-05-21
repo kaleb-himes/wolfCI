@@ -246,11 +246,19 @@ before the phase started):
   a single required label per job. Boolean label expressions
   (a la Jenkins "linux && tpm") are backlog.
 
-- [ ] 5.1 cmd/wolfci-agent: a standalone binary that opens an mTLS
+- [x] 5.1 cmd/wolfci-agent: a standalone binary that opens an mTLS
         connection back to the server and offers itself as an
         executor. Agent config
         (config-files/agent.yaml) declares its executor count
         (concurrent jobs allowed).
+        Done: internal/agent/config.go (Config, DefaultConfig,
+        LoadConfig, Save, Validate, HasLabel) plus
+        cmd/wolfci-agent/main.go with --config and --dry-run
+        flags. The mTLS dial + gRPC protocol itself is task 5.3;
+        the binary currently exits with a clear message
+        directing the operator to --dry-run until 5.3 lands.
+        Gate: TestConfig_RoundTrip, TestConfig_Defaults,
+        TestLoadConfig_RejectsMissingFields, TestConfig_HasLabel.
 - [ ] 5.2 Failing test (tests/agent_e2e_test.go): an agent
         registers, receives a job, executes it, and returns the
         result.
