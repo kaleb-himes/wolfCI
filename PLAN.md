@@ -780,8 +780,22 @@ RPC.
         checks file presence, every section/key the loader
         actually reads, and (on macOS) runs plutil -lint on
         the plist. Wired into scripts/test.sh.
-- [ ] 9.3 docs/GETTING-STARTED.md: a 10-minute path from "git
+- [x] 9.3 docs/GETTING-STARTED.md: a 10-minute path from "git
         clone" to "first green build".
+        Done: docs/GETTING-STARTED.md walks an operator from
+        `git clone` through `git submodule update --init`,
+        scripts/build-wolfssl.sh (3 min one-time),
+        scripts/build.sh (30 sec), installing the systemd unit
+        or launchd plist from scripts/install/, the first-admin
+        one-time token bootstrap, `wolfci-ctl login`, dropping
+        in a hello job, `wolfci-ctl job run`, and tailing with
+        `wolfci-ctl build log`. Final section covers
+        cross-builds (musl-cross for linux/amd64; native Xcode
+        for darwin/arm64). Gate:
+        scripts/test-getting-started.sh asserts every step
+        marker is present so the doc and the actual scripts
+        cannot drift apart silently. Wired into
+        scripts/test.sh.
 - [ ] 9.4 docs/ARCHITECTURE.md with an ASCII component diagram.
 - [ ] 9.5 README.md final pass.
 

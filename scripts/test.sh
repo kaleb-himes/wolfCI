@@ -8,6 +8,7 @@
 #   - go test ./internal/... ./cmd/... ./plugins/email-on-failure   Go unit tests
 #   - scripts/test-build.sh              host-platform release build
 #   - scripts/test-install.sh            systemd unit + launchd plist
+#   - scripts/test-getting-started.sh    docs/GETTING-STARTED.md gate
 #
 # Intentionally NOT included:
 #   - scripts/test-build-wolfssl.sh: full wolfSSL build (minutes).
@@ -32,5 +33,6 @@ go test ./internal/... ./cmd/... ./plugins/email-on-failure
 
 scripts/test-build.sh
 scripts/test-install.sh
+scripts/test-getting-started.sh
 
 echo "scripts/test.sh: all fast checks passed."
