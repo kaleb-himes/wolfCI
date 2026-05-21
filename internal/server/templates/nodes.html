@@ -1,0 +1,25 @@
+{{ define "content" }}
+<section class="panel">
+<h2>Nodes</h2>
+{{ if .Nodes }}
+<table>
+<thead><tr><th>Agent ID</th><th>Status</th><th>Labels</th><th>Executors</th></tr></thead>
+<tbody>
+{{ range .Nodes }}
+<tr>
+<td><strong>{{ .AgentID }}</strong></td>
+<td>{{ if .Connected }}<span class="status-connected">connected</span>{{ else }}<span class="muted">offline</span>{{ end }}</td>
+<td>{{ range .Labels }}<code>{{ . }}</code> {{ end }}</td>
+<td>{{ .Executors }}</td>
+</tr>
+{{ end }}
+</tbody>
+</table>
+{{ else }}
+<p class="muted">No nodes registered. On-prem agents announce
+themselves by calling Register over the wolfCI mTLS gRPC
+endpoint; GCE overflow nodes appear here once they boot and
+join.</p>
+{{ end }}
+</section>
+{{ end }}

@@ -32,6 +32,43 @@ header h1 {
     margin: 0;
     font-size: 18px;
     font-weight: 600;
+    display: inline-block;
+    margin-right: 24px;
+}
+
+nav.topnav {
+    display: inline-block;
+}
+
+nav.topnav a {
+    color: var(--accent-fg);
+    text-decoration: none;
+    margin-right: 18px;
+    font-weight: 500;
+}
+
+nav.topnav a:hover { text-decoration: underline; }
+
+.logout-form {
+    display: inline-block;
+    margin: 0;
+}
+
+.link-button {
+    background: transparent;
+    color: var(--accent-fg);
+    border: 0;
+    padding: 0;
+    cursor: pointer;
+    font-weight: 500;
+    font-size: 14px;
+}
+
+.link-button:hover { text-decoration: underline; }
+
+.status-connected {
+    color: #2a8a2a;
+    font-weight: 600;
 }
 
 main {

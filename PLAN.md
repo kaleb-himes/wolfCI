@@ -21,12 +21,13 @@ Format conventions:
 
 ## Current Phase
 
-Phase 6 - Web UI
+Phase 7 - Plugins
 
 (Update this line when a phase completes. Phase 0 was completed in
 the initial planning turn. Phase 1 completed in iteration 4,
 Phase 2 in iteration 5, Phase 3 in iteration 8, Phase 4 in
-iteration 10, Phase 5 in iteration 21 of the slash-loop run.)
+iteration 10, Phase 5 in iteration 21, Phase 6 in iteration 25
+of the slash-loop run.)
 
 ## Phase 0 - Bootstrap
 
@@ -563,8 +564,19 @@ Additional Phase 6 task at the front of the list:
         so the page works for logged-in users only. Gate:
         TestUI_BuildLogPage, TestUI_BuildLogPage_BadNumber,
         TestUI_SSEEndpointRequiresAuth.
-- [ ] 6.5 Node management page lists registered on-prem and GCE
+- [x] 6.5 Node management page lists registered on-prem and GCE
         nodes.
+        Done: /nodes route renders nodes.html, which lists
+        every Agents() entry from the configured agentsvc with
+        status (connected vs offline, derived from
+        ConnectedAgents()), labels, and executor count. Header
+        nav links Jobs and Nodes plus a Sign-out button.
+        AgentSvc is an optional field on server.Options; if
+        nil, /nodes renders an empty-state message pointing
+        operators at the Register RPC and the GCE overflow
+        path. Gate: TestUI_NodesPage (registered agent shows
+        up with labels + executors + offline status),
+        TestUI_NodesPage_Empty (empty-state message).
 
 ## Phase 7 - Plugins
 

@@ -13,6 +13,8 @@ import (
 
 	"gopkg.in/yaml.v3"
 
+	wolfciv1 "github.com/kaleb-himes/wolfCI/api/v1"
+	"github.com/kaleb-himes/wolfCI/internal/agentsvc"
 	"github.com/kaleb-himes/wolfCI/internal/auth"
 	"github.com/kaleb-himes/wolfCI/internal/storage"
 )
@@ -63,6 +65,11 @@ type Options struct {
 	// only sends the cookie over HTTPS. Set false for local
 	// HTTP development and tests.
 	CookieSecure bool
+
+	// AgentSvc is the AgentService implementation; the /nodes
+	// page lists agents from this registry. Optional; when nil
+	// the /nodes page renders as empty.
+	AgentSvc *agentsvc.Server
 }
 
 // Server is the wolfCI HTTP handler tree. It satisfies
@@ -91,6 +98,7 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("/logout", s.handleLogout)
 	s.mux.HandleFunc("/jobs", s.requireSession(s.handleJobs))
 	s.mux.HandleFunc("/jobs/", s.requireSession(s.handleJobRoutes))
+	s.mux.HandleFunc("/nodes", s.requireSession(s.handleNodes))
 	logTail := &LogTailHandler{
 		Root:         s.opts.Storage.Root(),
 		PollInterval: 100 * time.Millisecond,
@@ -146,6 +154,38 @@ func (s *Server) handleJobRoutes(w http.ResponseWriter, r *http.Request) {
 			http.NotFound(w, r)
 		}
 	}
+}
+
+func (s *Server) handleNodes(w http.ResponseWriter, r *http.Request) {
+	var registered []*wolfciv1.AgentInfo
+	var connected []*wolfciv1.AgentInfo
+	if s.opts.AgentSvc != nil {
+		registered = s.opts.AgentSvc.Agents()
+		connected = s.opts.AgentSvc.ConnectedAgents()
+	}
+	connectedSet := make(map[string]bool, len(connected))
+	for _, a := range connected {
+		connectedSet[a.AgentId] = true
+	}
+	type nodeRow struct {
+		AgentID   string
+		Labels    []string
+		Executors int32
+		Connected bool
+	}
+	rows := make([]nodeRow, 0, len(registered))
+	for _, a := range registered {
+		rows = append(rows, nodeRow{
+			AgentID:   a.AgentId,
+			Labels:    a.Labels,
+			Executors: a.Executors,
+			Connected: connectedSet[a.AgentId],
+		})
+	}
+	s.render(w, "nodes.html", map[string]interface{}{
+		"Title": "Nodes",
+		"Nodes": rows,
+	})
 }
 
 // handleBuildLogPage renders the live-tailing page for a
