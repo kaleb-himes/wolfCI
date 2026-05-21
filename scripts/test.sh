@@ -32,6 +32,21 @@ scripts/check-ascii.sh
 scripts/test-check-ascii.sh
 scripts/test-wolfssl-submodule.sh
 
+# Apply local patches to the go-wolfssl submodule worktree (no-op
+# if the patches are already applied). Patches carry the
+# wolfCI-specific #cgo directives that point go-wolfssl at the
+# vendored wolfSSL build, so we do NOT need to set CGO_CFLAGS or
+# CGO_LDFLAGS globally (which would leak into non-cgo test binaries
+# and trip macOS dyld's missing-LC_UUID check).
+if [ -d third_party/go-wolfssl ] && [ -d third_party/go-wolfssl-patches ]; then
+    if [ -z "$(git -C third_party/go-wolfssl diff --name-only)" ]; then
+        for patch in third_party/go-wolfssl-patches/*.patch; do
+            [ -e "$patch" ] || continue
+            git -C third_party/go-wolfssl apply "../../$patch"
+        done
+    fi
+fi
+
 go test ./internal/... ./cmd/... ./plugins/email-on-failure
 
 scripts/test-build.sh

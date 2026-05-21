@@ -36,6 +36,8 @@ import (
 	"errors"
 	"fmt"
 	"unsafe"
+
+	gowolf "github.com/wolfssl/go-wolfssl"
 )
 
 // CertConfig is the input to MintCert. CommonName and DaysValid
@@ -68,19 +70,11 @@ type Cert struct {
 	PubSEC1 []byte
 }
 
-// SHA256 returns the SHA-256 digest of data via wolfCrypt.
+// SHA256 returns the SHA-256 digest of data via go-wolfssl.
 func SHA256(data []byte) ([]byte, error) {
 	out := make([]byte, sha256DigestSize)
-	var dataPtr *C.byte
-	if len(data) > 0 {
-		dataPtr = (*C.byte)(unsafe.Pointer(&data[0]))
-	}
-	rc := C.wc_Sha256Hash(
-		dataPtr, C.word32(len(data)),
-		(*C.byte)(unsafe.Pointer(&out[0])),
-	)
-	if rc != 0 {
-		return nil, fmt.Errorf("wolfcrypt.SHA256: wc_Sha256Hash: %d", int(rc))
+	if rc := gowolf.Wc_Sha256Hash(data, len(data), out); rc != 0 {
+		return nil, fmt.Errorf("wolfcrypt.SHA256: Wc_Sha256Hash: %d", rc)
 	}
 	return out, nil
 }

@@ -4,42 +4,40 @@
 // crypto/rand, crypto/ecdsa, crypto/x509, golang.org/x/crypto/*, or
 // any other library that performs cryptography.
 //
-// Phase 10.1a covers:
+// Phase 10.6b moved the primitives below from hand-rolled CGO
+// (Phase 10.1a) to thin wrappers over github.com/wolfssl/go-wolfssl
+// (the vendored copy under third_party/go-wolfssl). Phase 10.6c
+// adds the wrappers go-wolfssl is missing today (Ed25519, RSA
+// verify, cert minting) as patches under
+// third_party/go-wolfssl-patches/; 10.6d removes the remaining
+// hand-rolled CGO in this package.
 //
-//	RandBytes        wc_RNG_GenerateBlock
-//	HMACSHA256       wc_Hmac*  with WC_SHA256
-//	PBKDF2HMACSHA256 wc_PBKDF2 with WC_SHA256
+// Current state (post-10.6b):
 //
-// Later sub-checkpoints add signature verification (10.1b) and
-// X.509 cert minting (10.1c).
+//   RandBytes        -> go-wolfssl Wc_RNG_*
+//   HMACSHA256       -> go-wolfssl Wc_Hmac*  with WC_SHA256
+//   PBKDF2HMACSHA256 -> go-wolfssl Wc_PBKDF2 with WC_SHA256
+//   SHA256           -> go-wolfssl Wc_Sha256Hash (see cert.go)
+//   ECCVerifyP256    -> go-wolfssl Wc_ecc_* (see verify.go)
+//   Ed25519*         -> hand-rolled CGO (sign.go, verify.go)
+//   RSAVerify*       -> hand-rolled CGO (verify.go)
+//   MintCert         -> hand-rolled CGO (cert.go)
 package wolfcrypt
-
-/*
-#cgo CFLAGS: -I${SRCDIR}/../../build/wolfssl-install/include
-#cgo LDFLAGS: ${SRCDIR}/../../build/wolfssl-install/lib/libwolfssl.a
-#cgo darwin LDFLAGS: -framework Security -framework CoreFoundation
-
-#include <wolfssl/options.h>
-#include <wolfssl/wolfcrypt/random.h>
-#include <wolfssl/wolfcrypt/hmac.h>
-#include <wolfssl/wolfcrypt/pwdbased.h>
-#include <wolfssl/wolfcrypt/types.h>
-#include <stdlib.h>
-*/
-import "C"
 
 import (
 	"errors"
 	"fmt"
-	"unsafe"
+
+	gowolf "github.com/wolfssl/go-wolfssl"
 )
 
-// sha256DigestSize matches WC_SHA256_DIGEST_SIZE from
-// wolfssl/wolfcrypt/sha256.h. Hard-coded to avoid an extra CGO
-// indirection on every HMAC call.
+// sha256DigestSize matches WC_SHA256_DIGEST_SIZE from go-wolfssl.
+// Hard-coded so callers do not pay an extra package crossing on
+// every HMAC call.
 const sha256DigestSize = 32
 
-// RandBytes returns n bytes drawn from wolfCrypt's CSPRNG.
+// RandBytes returns n bytes drawn from wolfCrypt's CSPRNG via
+// go-wolfssl.
 func RandBytes(n int) ([]byte, error) {
 	if n < 0 {
 		return nil, errors.New("wolfcrypt.RandBytes: negative size")
@@ -47,62 +45,45 @@ func RandBytes(n int) ([]byte, error) {
 	if n == 0 {
 		return []byte{}, nil
 	}
-	var rng C.WC_RNG
-	if rc := C.wc_InitRng(&rng); rc != 0 {
-		return nil, fmt.Errorf("wolfcrypt.RandBytes: wc_InitRng: %d", int(rc))
+	var rng gowolf.WC_RNG
+	if rc := gowolf.Wc_InitRng(&rng); rc != 0 {
+		return nil, fmt.Errorf("wolfcrypt.RandBytes: Wc_InitRng: %d", rc)
 	}
-	defer C.wc_FreeRng(&rng)
+	defer gowolf.Wc_FreeRng(&rng)
 
 	out := make([]byte, n)
-	rc := C.wc_RNG_GenerateBlock(
-		&rng,
-		(*C.byte)(unsafe.Pointer(&out[0])),
-		C.word32(n),
-	)
-	if rc != 0 {
-		return nil, fmt.Errorf("wolfcrypt.RandBytes: wc_RNG_GenerateBlock: %d", int(rc))
+	if rc := gowolf.Wc_RNG_GenerateBlock(&rng, out, n); rc != 0 {
+		return nil, fmt.Errorf("wolfcrypt.RandBytes: Wc_RNG_GenerateBlock: %d", rc)
 	}
 	return out, nil
 }
 
 // HMACSHA256 returns HMAC-SHA-256(key, data). The output is always
-// 32 bytes.
+// 32 bytes. Implemented via go-wolfssl's Wc_Hmac* API.
 func HMACSHA256(key, data []byte) ([]byte, error) {
-	var h C.Hmac
-	if rc := C.wc_HmacInit(&h, nil, C.INVALID_DEVID); rc != 0 {
-		return nil, fmt.Errorf("wolfcrypt.HMACSHA256: wc_HmacInit: %d", int(rc))
+	var h gowolf.Hmac
+	if rc := gowolf.Wc_HmacInit(&h, nil, gowolf.INVALID_DEVID); rc != 0 {
+		return nil, fmt.Errorf("wolfcrypt.HMACSHA256: Wc_HmacInit: %d", rc)
 	}
-	defer C.wc_HmacFree(&h)
+	defer gowolf.Wc_HmacFree(&h)
 
-	var keyPtr *C.byte
-	if len(key) > 0 {
-		keyPtr = (*C.byte)(unsafe.Pointer(&key[0]))
+	if rc := gowolf.Wc_HmacSetKey(&h, gowolf.WC_SHA256, key, len(key)); rc != 0 {
+		return nil, fmt.Errorf("wolfcrypt.HMACSHA256: Wc_HmacSetKey: %d", rc)
 	}
-	if rc := C.wc_HmacSetKey(&h, C.int(C.WC_SHA256), keyPtr, C.word32(len(key))); rc != 0 {
-		return nil, fmt.Errorf("wolfcrypt.HMACSHA256: wc_HmacSetKey: %d", int(rc))
-	}
-
 	if len(data) > 0 {
-		rc := C.wc_HmacUpdate(
-			&h,
-			(*C.byte)(unsafe.Pointer(&data[0])),
-			C.word32(len(data)),
-		)
-		if rc != 0 {
-			return nil, fmt.Errorf("wolfcrypt.HMACSHA256: wc_HmacUpdate: %d", int(rc))
+		if rc := gowolf.Wc_HmacUpdate(&h, data, len(data)); rc != 0 {
+			return nil, fmt.Errorf("wolfcrypt.HMACSHA256: Wc_HmacUpdate: %d", rc)
 		}
 	}
-
 	out := make([]byte, sha256DigestSize)
-	rc := C.wc_HmacFinal(&h, (*C.byte)(unsafe.Pointer(&out[0])))
-	if rc != 0 {
-		return nil, fmt.Errorf("wolfcrypt.HMACSHA256: wc_HmacFinal: %d", int(rc))
+	if rc := gowolf.Wc_HmacFinal(&h, out); rc != 0 {
+		return nil, fmt.Errorf("wolfcrypt.HMACSHA256: Wc_HmacFinal: %d", rc)
 	}
 	return out, nil
 }
 
 // PBKDF2HMACSHA256 derives a keyLen-byte key from password and salt
-// using PBKDF2-HMAC-SHA-256 with the given iteration count.
+// using PBKDF2-HMAC-SHA-256 via go-wolfssl's Wc_PBKDF2.
 func PBKDF2HMACSHA256(password, salt []byte, iterations, keyLen int) ([]byte, error) {
 	if keyLen <= 0 {
 		return nil, errors.New("wolfcrypt.PBKDF2HMACSHA256: keyLen must be positive")
@@ -110,25 +91,10 @@ func PBKDF2HMACSHA256(password, salt []byte, iterations, keyLen int) ([]byte, er
 	if iterations <= 0 {
 		return nil, errors.New("wolfcrypt.PBKDF2HMACSHA256: iterations must be positive")
 	}
-
 	out := make([]byte, keyLen)
-	var pwdPtr, saltPtr *C.byte
-	if len(password) > 0 {
-		pwdPtr = (*C.byte)(unsafe.Pointer(&password[0]))
-	}
-	if len(salt) > 0 {
-		saltPtr = (*C.byte)(unsafe.Pointer(&salt[0]))
-	}
-	rc := C.wc_PBKDF2(
-		(*C.byte)(unsafe.Pointer(&out[0])),
-		pwdPtr, C.int(len(password)),
-		saltPtr, C.int(len(salt)),
-		C.int(iterations),
-		C.int(keyLen),
-		C.int(C.WC_SHA256),
-	)
+	rc := gowolf.Wc_PBKDF2(out, password, len(password), salt, len(salt), iterations, keyLen, gowolf.WC_SHA256)
 	if rc != 0 {
-		return nil, fmt.Errorf("wolfcrypt.PBKDF2HMACSHA256: wc_PBKDF2: %d", int(rc))
+		return nil, fmt.Errorf("wolfcrypt.PBKDF2HMACSHA256: Wc_PBKDF2: %d", rc)
 	}
 	return out, nil
 }

@@ -4,11 +4,14 @@ go 1.18
 
 require (
 	github.com/hashicorp/go-plugin v1.5.2
+	github.com/wolfssl/go-wolfssl v0.0.0-00010101000000-000000000000
 	google.golang.org/api v0.130.0
 	google.golang.org/grpc v1.56.3
 	google.golang.org/protobuf v1.31.0
 	gopkg.in/yaml.v3 v3.0.1
 )
+
+replace github.com/wolfssl/go-wolfssl => ./third_party/go-wolfssl
 
 require (
 	cloud.google.com/go/compute v1.19.3 // indirect

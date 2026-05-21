@@ -1142,18 +1142,52 @@ before the phase started):
               third_party/go-wolfssl-patches/README.md documents
               the why and the "what would let us drop this
               patch" condition (upstream fix or build tag).
-        - [ ] 10.6b Wire the primitives that go-wolfssl already
-              covers into internal/wolfcrypt: RandBytes,
-              HMACSHA256, PBKDF2HMACSHA256, SHA256,
-              ECCVerifyP256. Adds a `replace
-              github.com/wolfssl/go-wolfssl =>
-              ./third_party/go-wolfssl` directive to wolfCI's
-              go.mod so the vendored copy is used; existing
-              tests must still pass byte-for-byte (RFC KATs
-              already gate the behavior). The hand-rolled CGO
-              for these specific primitives gets deleted.
-              Hand-rolled CGO for Ed25519 / RSA verify / MintCert
-              stays for one more iteration; 10.6c removes it.
+        - [x] 10.6b Wire the primitives that go-wolfssl already
+              covers into internal/wolfcrypt.
+              Done: wolfcrypt.go's RandBytes / HMACSHA256 /
+              PBKDF2HMACSHA256 now call go-wolfssl's
+              Wc_InitRng + Wc_RNG_GenerateBlock + Wc_FreeRng,
+              Wc_HmacInit + Wc_HmacSetKey + Wc_HmacUpdate +
+              Wc_HmacFinal, and Wc_PBKDF2 respectively. SHA256
+              in cert.go now calls Wc_Sha256Hash. ECCVerifyP256
+              in verify.go now uses Wc_ecc_init +
+              Wc_ecc_import_x963_ex + Wc_ecc_verify_hash with
+              ECC_SECP256R1. Stack-allocated structs via the
+              gowolf.WC_RNG / gowolf.Hmac / gowolf.Ecc_key type
+              aliases - no manual malloc/free, no
+              unsafe.Pointer.
+              go.mod gains a
+              `require github.com/wolfssl/go-wolfssl ...` +
+              `replace github.com/wolfssl/go-wolfssl =>
+              ./third_party/go-wolfssl` so the vendored copy is
+              the canonical source.
+              Ed25519 (gen + sign + verify), RSA verify, and
+              MintCert + SHA256-using-cert-test still flow
+              through hand-rolled CGO in sign.go / verify.go /
+              cert.go - 10.6c adds the go-wolfssl wrappers for
+              those, and 10.6d swaps them in.
+              Build-flag rewiring: new patch
+              third_party/go-wolfssl-patches/0002-wolfci-cgo-
+              directives.patch injects
+              `#cgo CFLAGS: -I${SRCDIR}/../../build/wolfssl-
+              install/include` and the matching LDFLAGS into
+              go-wolfssl/random.go. The flags merge across
+              every file in the go-wolfssl package per cgo's
+              rules, so injecting them into one file covers
+              the whole package. This replaces the env-var
+              approach that poisoned non-cgo test binaries on
+              macOS (LC_UUID load command warnings on the
+              internal/plugin + email-on-failure subprocesses).
+              scripts/test.sh now auto-applies the
+              third_party/go-wolfssl-patches/*.patch set
+              before `go test`.
+              Gates: all existing internal/wolfcrypt tests
+              still pass byte-for-byte (RFC 4231 HMAC KAT,
+              RFC 7914 PBKDF2 KAT, NIST SHA256 KAT, RFC 6979
+              ECDSA-P256 KAT, plus the tamper negatives). The
+              full scripts/test.sh remains green, including
+              the previously-poisoned internal/plugin and
+              plugins/email-on-failure tests.
         - [ ] 10.6c Add the missing wrappers to
               third_party/go-wolfssl so internal/wolfcrypt can
               become a pure Go facade with zero CGO. Per

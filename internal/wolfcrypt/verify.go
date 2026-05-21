@@ -18,6 +18,8 @@ import "C"
 import (
 	"errors"
 	"fmt"
+
+	gowolf "github.com/wolfssl/go-wolfssl"
 	"unsafe"
 )
 
@@ -88,36 +90,18 @@ func ECCVerifyP256(publicKey, hash, signature []byte) (bool, error) {
 		return false, errors.New("wolfcrypt.ECCVerifyP256: publicKey must be SEC1 uncompressed (0x04 prefix)")
 	}
 
-	var key C.ecc_key
-	if rc := C.wc_ecc_init(&key); rc != 0 {
-		return false, fmt.Errorf("wolfcrypt.ECCVerifyP256: wc_ecc_init: %d", int(rc))
+	var key gowolf.Ecc_key
+	if rc := gowolf.Wc_ecc_init(&key); rc != 0 {
+		return false, fmt.Errorf("wolfcrypt.ECCVerifyP256: Wc_ecc_init: %d", rc)
 	}
-	defer C.wc_ecc_free(&key)
+	defer gowolf.Wc_ecc_free(&key)
 
-	rc := C.wc_ecc_import_x963(
-		(*C.byte)(unsafe.Pointer(&publicKey[0])),
-		C.word32(len(publicKey)),
-		&key,
-	)
-	if rc != 0 {
-		return false, fmt.Errorf("wolfcrypt.ECCVerifyP256: wc_ecc_import_x963: %d", int(rc))
+	if rc := gowolf.Wc_ecc_import_x963_ex(publicKey, len(publicKey), &key, gowolf.ECC_SECP256R1); rc != 0 {
+		return false, fmt.Errorf("wolfcrypt.ECCVerifyP256: Wc_ecc_import_x963_ex: %d", rc)
 	}
 
-	var hashPtr, sigPtr *C.byte
-	if len(hash) > 0 {
-		hashPtr = (*C.byte)(unsafe.Pointer(&hash[0]))
-	}
-	if len(signature) > 0 {
-		sigPtr = (*C.byte)(unsafe.Pointer(&signature[0]))
-	}
-
-	var result C.int
-	rc = C.wc_ecc_verify_hash(
-		sigPtr, C.word32(len(signature)),
-		hashPtr, C.word32(len(hash)),
-		&result, &key,
-	)
-	if rc != 0 {
+	var result int
+	if rc := gowolf.Wc_ecc_verify_hash(signature, len(signature), hash, len(hash), &result, &key); rc != 0 {
 		return false, nil
 	}
 	return result == 1, nil

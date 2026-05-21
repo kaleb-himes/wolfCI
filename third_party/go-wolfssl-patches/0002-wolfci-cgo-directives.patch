@@ -1,0 +1,14 @@
+diff --git a/random.go b/random.go
+index 1d48d92..3ff2ac6 100644
+--- a/random.go
++++ b/random.go
+@@ -21,6 +21,9 @@
+ 
+ package wolfSSL
+ 
++// #cgo CFLAGS: -I${SRCDIR}/../../build/wolfssl-install/include
++// #cgo LDFLAGS: -L${SRCDIR}/../../build/wolfssl-install/lib -lwolfssl
++// #cgo darwin LDFLAGS: -framework Security -framework CoreFoundation
+ // #include <wolfssl/options.h>
+ // #include <wolfssl/wolfcrypt/random.h>
+ // #ifdef WC_NO_RNG
