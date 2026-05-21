@@ -9,6 +9,7 @@ import (
 
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials/insecure"
+	"google.golang.org/grpc/metadata"
 
 	wolfciv1 "github.com/kaleb-himes/wolfCI/api/v1"
 	"github.com/kaleb-himes/wolfCI/internal/agentsvc"
@@ -78,7 +79,18 @@ func TestAgentService_ConnectStream(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 
-	stream, err := client.Connect(ctx)
+	// Register first; Connect now requires the agent to be known.
+	if _, err := client.Register(ctx, &wolfciv1.AgentInfo{
+		AgentId:   "stream-test-agent",
+		Executors: 1,
+	}); err != nil {
+		t.Fatalf("Register: %v", err)
+	}
+
+	streamCtx := metadata.NewOutgoingContext(ctx, metadata.New(map[string]string{
+		agentsvc.AgentIDMetadataKey: "stream-test-agent",
+	}))
+	stream, err := client.Connect(streamCtx)
 	if err != nil {
 		t.Fatalf("Connect: %v", err)
 	}

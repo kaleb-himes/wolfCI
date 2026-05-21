@@ -372,6 +372,29 @@ Additional priorities confirmed after Phase 5 mid-point review:
         Provision(ctx, label), the "new node" joins via the
         existing AgentService, runs the job, and the
         Provisioner is told to Terminate after the build.
+        Sub-checkpoints:
+        - [x] 5.5a Per-agent routing in agentsvc. Connect
+              streams keyed by agent_id (passed via gRPC
+              metadata under "agent-id"). New methods on
+              agentsvc.Server: AssignJob(agentID, job),
+              IdleAgentWithLabel(label), ConnectedAgents().
+              Connect rejects calls without metadata
+              (Unauthenticated) or for agents that did not
+              Register first (FailedPrecondition).
+              agent.Client now sends the metadata. Gate:
+              TestServer_AssignJob_TargetsAgent,
+              TestServer_AssignJob_UnknownAgent,
+              TestServer_IdleAgentWithLabel,
+              TestServer_ConnectRequiresMetadata,
+              TestServer_ConnectRequiresPriorRegister.
+        - [ ] 5.5b Scheduler talks to agentsvc to pick a
+              matching idle agent for each job and dispatches
+              via AssignJob. On-prem-first selector.
+        - [ ] 5.5c Provisioner integration: when 5.5b returns
+              no idle on-prem agent for a Job.node_label, the
+              scheduler asks the configured Provisioner for
+              one, waits for it to register, then dispatches.
+              Terminate after the build.
 - [ ] 5.6 Implement the GCE driver against the real API behind
         the nodes.Provisioner interface the fake satisfies.
         Live test (internal/nodes/gce/live_test.go) is a

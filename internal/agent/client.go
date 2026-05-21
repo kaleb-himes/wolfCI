@@ -12,8 +12,10 @@ import (
 
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials/insecure"
+	"google.golang.org/grpc/metadata"
 
 	wolfciv1 "github.com/kaleb-himes/wolfCI/api/v1"
+	"github.com/kaleb-himes/wolfCI/internal/agentsvc"
 	"github.com/kaleb-himes/wolfCI/internal/scheduler"
 	"github.com/kaleb-himes/wolfCI/internal/storage"
 	"github.com/kaleb-himes/wolfCI/internal/tlsutil"
@@ -78,7 +80,10 @@ func (c *Client) Run(ctx context.Context) error {
 		return fmt.Errorf("agent.Run: server rejected agent %q", c.cfg.AgentID)
 	}
 
-	stream, err := grpcClient.Connect(ctx)
+	streamCtx := metadata.NewOutgoingContext(ctx, metadata.New(map[string]string{
+		agentsvc.AgentIDMetadataKey: c.cfg.AgentID,
+	}))
+	stream, err := grpcClient.Connect(streamCtx)
 	if err != nil {
 		return fmt.Errorf("agent.Run: Connect: %w", err)
 	}
