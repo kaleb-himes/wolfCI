@@ -7,6 +7,7 @@ import (
 	"html/template"
 	"io/fs"
 	"net/http"
+	"strconv"
 	"strings"
 	"time"
 
@@ -90,6 +91,12 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("/logout", s.handleLogout)
 	s.mux.HandleFunc("/jobs", s.requireSession(s.handleJobs))
 	s.mux.HandleFunc("/jobs/", s.requireSession(s.handleJobRoutes))
+	logTail := &LogTailHandler{
+		Root:         s.opts.Storage.Root(),
+		PollInterval: 100 * time.Millisecond,
+		IdleTimeout:  5 * time.Minute,
+	}
+	s.mux.HandleFunc("/api/v1/builds/", s.requireSession(logTail.ServeHTTP))
 	s.mux.Handle("/static/", http.StripPrefix("/static/", http.FileServer(staticSub())))
 }
 
@@ -108,8 +115,8 @@ func (s *Server) handleJobRoutes(w http.ResponseWriter, r *http.Request) {
 			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 		}
 	default:
-		parts := strings.SplitN(rest, "/", 2)
-		if len(parts) != 2 || parts[1] != "edit" {
+		parts := strings.SplitN(rest, "/", 3)
+		if len(parts) < 2 {
 			http.NotFound(w, r)
 			return
 		}
@@ -118,15 +125,40 @@ func (s *Server) handleJobRoutes(w http.ResponseWriter, r *http.Request) {
 			http.Error(w, "invalid job name", http.StatusBadRequest)
 			return
 		}
-		switch r.Method {
-		case http.MethodGet:
-			s.handleJobEditGet(w, r, name)
-		case http.MethodPost:
-			s.handleJobEditPost(w, r, name)
+		switch {
+		case len(parts) == 2 && parts[1] == "edit":
+			switch r.Method {
+			case http.MethodGet:
+				s.handleJobEditGet(w, r, name)
+			case http.MethodPost:
+				s.handleJobEditPost(w, r, name)
+			default:
+				http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+			}
+		case len(parts) == 3 && parts[1] == "builds":
+			num, err := strconv.Atoi(parts[2])
+			if err != nil || num < 1 {
+				http.Error(w, "invalid build number", http.StatusBadRequest)
+				return
+			}
+			s.handleBuildLogPage(w, r, name, num)
 		default:
-			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+			http.NotFound(w, r)
 		}
 	}
+}
+
+// handleBuildLogPage renders the live-tailing page for a
+// specific (job, build) pair. The page embeds JavaScript that
+// connects to /api/v1/builds/{job}/{n}/log via EventSource and
+// appends decoded chunks to a <pre> element.
+func (s *Server) handleBuildLogPage(w http.ResponseWriter, r *http.Request, name string, num int) {
+	s.render(w, "buildlog.html", map[string]interface{}{
+		"Title":     fmt.Sprintf("Build %d - %s", num, name),
+		"JobName":   name,
+		"BuildNum":  num,
+		"StreamURL": fmt.Sprintf("/api/v1/builds/%s/%d/log", name, num),
+	})
 }
 
 func (s *Server) handleJobCreate(w http.ResponseWriter, r *http.Request) {

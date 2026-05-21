@@ -554,7 +554,15 @@ Additional Phase 6 task at the front of the list:
         TestUI_JobCreateAndEdit covers form render, happy-path
         create, duplicate rejection, edit pre-fill, rename
         rejection, and successful update.
-- [ ] 6.4 Build log live stream via Server-Sent Events.
+- [x] 6.4 Build log live stream via Server-Sent Events.
+        Done: /jobs/{name}/builds/{n} renders buildlog.html
+        which loads /api/v1/builds/{name}/{n}/log via vanilla
+        EventSource and appends decoded chunks to a <pre>
+        terminal-styled element. The SSE endpoint from task
+        6.0 is now mounted under the session-auth middleware
+        so the page works for logged-in users only. Gate:
+        TestUI_BuildLogPage, TestUI_BuildLogPage_BadNumber,
+        TestUI_SSEEndpointRequiresAuth.
 - [ ] 6.5 Node management page lists registered on-prem and GCE
         nodes.
 

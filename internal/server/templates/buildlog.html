@@ -1,0 +1,26 @@
+{{ define "content" }}
+<section class="panel">
+<h2>Build {{ .BuildNum }} - {{ .JobName }}</h2>
+<p class="muted">Live log; new output appends as it arrives.</p>
+<pre id="log" class="log"></pre>
+<script>
+(function () {
+  var el = document.getElementById("log");
+  var es = new EventSource({{ .StreamURL }});
+  es.addEventListener("log", function (ev) {
+    try {
+      var decoded = atob(ev.data);
+      el.appendChild(document.createTextNode(decoded));
+    } catch (e) {
+      el.appendChild(document.createTextNode("[wolfci: undecodable chunk]\n"));
+    }
+    window.scrollTo(0, document.body.scrollHeight);
+  });
+  es.addEventListener("error", function () {
+    el.appendChild(document.createTextNode("\n[wolfci: stream closed]\n"));
+    es.close();
+  });
+})();
+</script>
+</section>
+{{ end }}

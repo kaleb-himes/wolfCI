@@ -103,3 +103,16 @@ th, td {
 th { color: var(--muted); font-weight: 600; font-size: 13px; }
 
 .muted { color: var(--muted); }
+
+pre.log {
+    background: #111;
+    color: #e6e6e6;
+    padding: 16px;
+    border-radius: 6px;
+    font-family: "SFMono-Regular", Menlo, Consolas, monospace;
+    font-size: 12.5px;
+    line-height: 1.45;
+    overflow-x: auto;
+    white-space: pre-wrap;
+    word-break: break-word;
+}
