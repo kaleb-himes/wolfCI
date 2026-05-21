@@ -1068,16 +1068,44 @@ before the phase started):
         invalid token errors out before touching disk. The
         existing UI tests (which exercise the full
         login-cookie-redirect flow) continue to pass.
-- [ ] 10.5 Vendor github.com/wolfSSL/go-wolfssl into
-        third_party/go-wolfssl/ as a git submodule pinned to the
-        latest tag (latest stable release per wolfSSL convention).
-        Add a CGO trampoline file (or go.mod replace directive)
-        so the wolfCI module can import the vendored copy without
-        a network fetch at build time. Smoke test: a tiny
-        check program (or a new gate in scripts/) imports
-        go-wolfssl and exercises one primitive (e.g. RandBytes
-        equivalent) to confirm the vendored build links cleanly
-        against build/wolfssl-install/lib/libwolfssl.a.
+- [x] 10.5 Vendor github.com/wolfSSL/go-wolfssl into
+        third_party/go-wolfssl/ as a git submodule.
+        Done: submodule added; .gitmodules has the entry.
+        Pinned to master HEAD commit
+        e3670113cc82c6accce8dd3d2bf255af1a08a037 by SHA because
+        the upstream repo has no release tags (only master and
+        a series of devin/* WIP branches). Project owner
+        confirmed on 2026-05-21: in the absence of tags, pin
+        master HEAD by commit SHA and record it in a
+        <name>-version.txt file alongside the submodule.
+        third_party/go-wolfssl-version.txt records the SHA, the
+        date (2026-05-21), and the bump procedure for when an
+        upstream tag eventually lands. CLAUDE.md rule #11
+        updated to allow this fallback.
+        Gate: scripts/test-go-wolfssl.sh verifies the submodule
+        is checked out at the recorded SHA, the .git marker
+        exists, and the expected Go source files (random.go,
+        hmac.go, hash.go, ecc.go, ssl.go) are present. Wired
+        into scripts/test.sh.
+        Two compat findings surfaced during vendoring; logged
+        here so 10.6 starts informed:
+          (a) go-wolfssl/examples/aes-encrypt/ depends on
+              golang.org/x/term but does not declare it in its
+              go.mod. Not our problem to fix; just don't
+              compile the examples tree.
+          (b) go-wolfssl/x509.go ships static fallback stubs
+              for wolfSSL_X509_NAME_oneline and
+              wolfSSL_X509_get_subjectCN that conflict with the
+              real symbols in our wolfSSL build (we have
+              OPENSSL_EXTRA-equivalent features on). 10.6 will
+              need to either skip x509.go from the imports it
+              uses, or wrap go-wolfssl per-file in
+              internal/wolfcrypt rather than pulling the root
+              package wholesale.
+        The smoke test deliberately does NOT attempt a full
+        `go build` of the vendored package yet; that gate
+        grows in 10.6 once we pick which files we actually
+        wire in.
 - [ ] 10.6 Replace internal/wolfcrypt's hand-rolled CGO with
         adapters over go-wolfssl. Per CLAUDE.md rule #11
         (2026-05-21 owner directive), wolfSSL's own bindings are

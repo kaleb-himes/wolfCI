@@ -11,6 +11,7 @@
 #   - scripts/test-getting-started.sh    docs/GETTING-STARTED.md gate
 #   - scripts/test-architecture.sh       docs/ARCHITECTURE.md gate
 #   - scripts/test-readme.sh             README.md final-pass gate
+#   - scripts/test-go-wolfssl.sh         vendored go-wolfssl submodule
 #
 # Intentionally NOT included:
 #   - scripts/test-build-wolfssl.sh: full wolfSSL build (minutes).
@@ -38,5 +39,6 @@ scripts/test-install.sh
 scripts/test-getting-started.sh
 scripts/test-architecture.sh
 scripts/test-readme.sh
+scripts/test-go-wolfssl.sh
 
 echo "scripts/test.sh: all fast checks passed."

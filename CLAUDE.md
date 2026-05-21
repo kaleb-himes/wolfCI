@@ -60,9 +60,12 @@ owner and override defaults.
         github.com/wolfSSL/wolfssh      SSH server + client in C
     When the project owner confirms a wolfSSL project is the right
     answer, clone it into third_party/<name>/ as a submodule and
-    check out the latest tag (latest stable release). Do not pull
-    a non-wolfSSL alternative unless the owner explicitly waives
-    this rule for that specific dependency.
+    check out the latest tag (latest stable release). If the
+    project has no tags (some wolfSSL Go bindings do not yet),
+    pin master HEAD by commit SHA and record the SHA + the date
+    in third_party/<name>-version.txt. Do not pull a non-wolfSSL
+    alternative unless the owner explicitly waives this rule for
+    that specific dependency.
 
 ## Operating Procedure (every session)
 

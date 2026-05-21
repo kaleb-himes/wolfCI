@@ -1,0 +1,14 @@
+e3670113cc82c6accce8dd3d2bf255af1a08a037 (master HEAD, 2026-05-21)
+
+# Why a commit SHA and not a tag:
+#
+# wolfSSL/go-wolfssl has no release tags as of 2026-05-21; the only
+# branches are master and a series of devin/* work-in-progress
+# refactors. CLAUDE.md rule #11 says to pin the latest tag of any
+# wolfSSL project we vendor; in the absence of tags we pin master
+# HEAD by commit SHA and record it here so a fresh clone can verify
+# the exact bytes a build was made against.
+#
+# Bump procedure: when a tagged release lands upstream, replace this
+# file's first line with the tag name and update the submodule
+# pointer in the same commit.
