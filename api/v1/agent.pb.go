@@ -31,16 +31,9 @@ type AgentInfo struct {
 	sizeCache     protoimpl.SizeCache
 	unknownFields protoimpl.UnknownFields
 
-	// agent_id is a stable identifier chosen by the agent
-	// (typically derived from its TLS cert CN).
-	AgentId string `protobuf:"bytes,1,opt,name=agent_id,json=agentId,proto3" json:"agent_id,omitempty"`
-	// labels are the strings the agent advertises for node-label
-	// matching. A Job.node_label matches an agent if this list
-	// contains that string.
-	Labels []string `protobuf:"bytes,2,rep,name=labels,proto3" json:"labels,omitempty"`
-	// executors is the maximum number of concurrent jobs this
-	// agent is willing to run.
-	Executors int32 `protobuf:"varint,3,opt,name=executors,proto3" json:"executors,omitempty"`
+	AgentId   string   `protobuf:"bytes,1,opt,name=agent_id,json=agentId,proto3" json:"agent_id,omitempty"`
+	Labels    []string `protobuf:"bytes,2,rep,name=labels,proto3" json:"labels,omitempty"`
+	Executors int32    `protobuf:"varint,3,opt,name=executors,proto3" json:"executors,omitempty"`
 }
 
 func (x *AgentInfo) Reset() {
@@ -102,13 +95,8 @@ type RegisterResponse struct {
 	sizeCache     protoimpl.SizeCache
 	unknownFields protoimpl.UnknownFields
 
-	// server_version is the wolfCI server's build identifier.
 	ServerVersion string `protobuf:"bytes,1,opt,name=server_version,json=serverVersion,proto3" json:"server_version,omitempty"`
-	// accepted is true if the server is willing to dispatch jobs
-	// to this agent. False means the agent's identity was
-	// recognized but is currently blocked (e.g. removed from the
-	// matrix).
-	Accepted bool `protobuf:"varint,2,opt,name=accepted,proto3" json:"accepted,omitempty"`
+	Accepted      bool   `protobuf:"varint,2,opt,name=accepted,proto3" json:"accepted,omitempty"`
 }
 
 func (x *RegisterResponse) Reset() {
@@ -157,6 +145,413 @@ func (x *RegisterResponse) GetAccepted() bool {
 	return false
 }
 
+// AgentMessage is anything an agent sends on the Connect stream.
+type AgentMessage struct {
+	state         protoimpl.MessageState
+	sizeCache     protoimpl.SizeCache
+	unknownFields protoimpl.UnknownFields
+
+	// Types that are assignable to Body:
+	//	*AgentMessage_Log
+	//	*AgentMessage_Complete
+	Body isAgentMessage_Body `protobuf_oneof:"body"`
+}
+
+func (x *AgentMessage) Reset() {
+	*x = AgentMessage{}
+	if protoimpl.UnsafeEnabled {
+		mi := &file_api_v1_agent_proto_msgTypes[2]
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		ms.StoreMessageInfo(mi)
+	}
+}
+
+func (x *AgentMessage) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*AgentMessage) ProtoMessage() {}
+
+func (x *AgentMessage) ProtoReflect() protoreflect.Message {
+	mi := &file_api_v1_agent_proto_msgTypes[2]
+	if protoimpl.UnsafeEnabled && x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use AgentMessage.ProtoReflect.Descriptor instead.
+func (*AgentMessage) Descriptor() ([]byte, []int) {
+	return file_api_v1_agent_proto_rawDescGZIP(), []int{2}
+}
+
+func (m *AgentMessage) GetBody() isAgentMessage_Body {
+	if m != nil {
+		return m.Body
+	}
+	return nil
+}
+
+func (x *AgentMessage) GetLog() *LogChunk {
+	if x, ok := x.GetBody().(*AgentMessage_Log); ok {
+		return x.Log
+	}
+	return nil
+}
+
+func (x *AgentMessage) GetComplete() *BuildComplete {
+	if x, ok := x.GetBody().(*AgentMessage_Complete); ok {
+		return x.Complete
+	}
+	return nil
+}
+
+type isAgentMessage_Body interface {
+	isAgentMessage_Body()
+}
+
+type AgentMessage_Log struct {
+	Log *LogChunk `protobuf:"bytes,1,opt,name=log,proto3,oneof"`
+}
+
+type AgentMessage_Complete struct {
+	Complete *BuildComplete `protobuf:"bytes,2,opt,name=complete,proto3,oneof"`
+}
+
+func (*AgentMessage_Log) isAgentMessage_Body() {}
+
+func (*AgentMessage_Complete) isAgentMessage_Body() {}
+
+// ServerMessage is anything the server sends on the Connect
+// stream.
+type ServerMessage struct {
+	state         protoimpl.MessageState
+	sizeCache     protoimpl.SizeCache
+	unknownFields protoimpl.UnknownFields
+
+	// Types that are assignable to Body:
+	//	*ServerMessage_Assignment
+	Body isServerMessage_Body `protobuf_oneof:"body"`
+}
+
+func (x *ServerMessage) Reset() {
+	*x = ServerMessage{}
+	if protoimpl.UnsafeEnabled {
+		mi := &file_api_v1_agent_proto_msgTypes[3]
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		ms.StoreMessageInfo(mi)
+	}
+}
+
+func (x *ServerMessage) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ServerMessage) ProtoMessage() {}
+
+func (x *ServerMessage) ProtoReflect() protoreflect.Message {
+	mi := &file_api_v1_agent_proto_msgTypes[3]
+	if protoimpl.UnsafeEnabled && x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ServerMessage.ProtoReflect.Descriptor instead.
+func (*ServerMessage) Descriptor() ([]byte, []int) {
+	return file_api_v1_agent_proto_rawDescGZIP(), []int{3}
+}
+
+func (m *ServerMessage) GetBody() isServerMessage_Body {
+	if m != nil {
+		return m.Body
+	}
+	return nil
+}
+
+func (x *ServerMessage) GetAssignment() *JobAssignment {
+	if x, ok := x.GetBody().(*ServerMessage_Assignment); ok {
+		return x.Assignment
+	}
+	return nil
+}
+
+type isServerMessage_Body interface {
+	isServerMessage_Body()
+}
+
+type ServerMessage_Assignment struct {
+	Assignment *JobAssignment `protobuf:"bytes,1,opt,name=assignment,proto3,oneof"`
+}
+
+func (*ServerMessage_Assignment) isServerMessage_Body() {}
+
+// JobAssignment is a build the server wants the agent to run.
+type JobAssignment struct {
+	state         protoimpl.MessageState
+	sizeCache     protoimpl.SizeCache
+	unknownFields protoimpl.UnknownFields
+
+	JobName     string  `protobuf:"bytes,1,opt,name=job_name,json=jobName,proto3" json:"job_name,omitempty"`
+	BuildNumber int32   `protobuf:"varint,2,opt,name=build_number,json=buildNumber,proto3" json:"build_number,omitempty"`
+	Steps       []*Step `protobuf:"bytes,3,rep,name=steps,proto3" json:"steps,omitempty"`
+}
+
+func (x *JobAssignment) Reset() {
+	*x = JobAssignment{}
+	if protoimpl.UnsafeEnabled {
+		mi := &file_api_v1_agent_proto_msgTypes[4]
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		ms.StoreMessageInfo(mi)
+	}
+}
+
+func (x *JobAssignment) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*JobAssignment) ProtoMessage() {}
+
+func (x *JobAssignment) ProtoReflect() protoreflect.Message {
+	mi := &file_api_v1_agent_proto_msgTypes[4]
+	if protoimpl.UnsafeEnabled && x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use JobAssignment.ProtoReflect.Descriptor instead.
+func (*JobAssignment) Descriptor() ([]byte, []int) {
+	return file_api_v1_agent_proto_rawDescGZIP(), []int{4}
+}
+
+func (x *JobAssignment) GetJobName() string {
+	if x != nil {
+		return x.JobName
+	}
+	return ""
+}
+
+func (x *JobAssignment) GetBuildNumber() int32 {
+	if x != nil {
+		return x.BuildNumber
+	}
+	return 0
+}
+
+func (x *JobAssignment) GetSteps() []*Step {
+	if x != nil {
+		return x.Steps
+	}
+	return nil
+}
+
+// Step is one shell command in a job's pipeline.
+type Step struct {
+	state         protoimpl.MessageState
+	sizeCache     protoimpl.SizeCache
+	unknownFields protoimpl.UnknownFields
+
+	Name  string            `protobuf:"bytes,1,opt,name=name,proto3" json:"name,omitempty"`
+	Shell string            `protobuf:"bytes,2,opt,name=shell,proto3" json:"shell,omitempty"`
+	Env   map[string]string `protobuf:"bytes,3,rep,name=env,proto3" json:"env,omitempty" protobuf_key:"bytes,1,opt,name=key,proto3" protobuf_val:"bytes,2,opt,name=value,proto3"`
+}
+
+func (x *Step) Reset() {
+	*x = Step{}
+	if protoimpl.UnsafeEnabled {
+		mi := &file_api_v1_agent_proto_msgTypes[5]
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		ms.StoreMessageInfo(mi)
+	}
+}
+
+func (x *Step) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*Step) ProtoMessage() {}
+
+func (x *Step) ProtoReflect() protoreflect.Message {
+	mi := &file_api_v1_agent_proto_msgTypes[5]
+	if protoimpl.UnsafeEnabled && x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use Step.ProtoReflect.Descriptor instead.
+func (*Step) Descriptor() ([]byte, []int) {
+	return file_api_v1_agent_proto_rawDescGZIP(), []int{5}
+}
+
+func (x *Step) GetName() string {
+	if x != nil {
+		return x.Name
+	}
+	return ""
+}
+
+func (x *Step) GetShell() string {
+	if x != nil {
+		return x.Shell
+	}
+	return ""
+}
+
+func (x *Step) GetEnv() map[string]string {
+	if x != nil {
+		return x.Env
+	}
+	return nil
+}
+
+// LogChunk is a piece of build output streamed from the agent
+// back to the server.
+type LogChunk struct {
+	state         protoimpl.MessageState
+	sizeCache     protoimpl.SizeCache
+	unknownFields protoimpl.UnknownFields
+
+	BuildNumber int32  `protobuf:"varint,1,opt,name=build_number,json=buildNumber,proto3" json:"build_number,omitempty"`
+	Data        []byte `protobuf:"bytes,2,opt,name=data,proto3" json:"data,omitempty"`
+}
+
+func (x *LogChunk) Reset() {
+	*x = LogChunk{}
+	if protoimpl.UnsafeEnabled {
+		mi := &file_api_v1_agent_proto_msgTypes[6]
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		ms.StoreMessageInfo(mi)
+	}
+}
+
+func (x *LogChunk) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*LogChunk) ProtoMessage() {}
+
+func (x *LogChunk) ProtoReflect() protoreflect.Message {
+	mi := &file_api_v1_agent_proto_msgTypes[6]
+	if protoimpl.UnsafeEnabled && x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use LogChunk.ProtoReflect.Descriptor instead.
+func (*LogChunk) Descriptor() ([]byte, []int) {
+	return file_api_v1_agent_proto_rawDescGZIP(), []int{6}
+}
+
+func (x *LogChunk) GetBuildNumber() int32 {
+	if x != nil {
+		return x.BuildNumber
+	}
+	return 0
+}
+
+func (x *LogChunk) GetData() []byte {
+	if x != nil {
+		return x.Data
+	}
+	return nil
+}
+
+// BuildComplete reports the final outcome of a build.
+type BuildComplete struct {
+	state         protoimpl.MessageState
+	sizeCache     protoimpl.SizeCache
+	unknownFields protoimpl.UnknownFields
+
+	BuildNumber int32 `protobuf:"varint,1,opt,name=build_number,json=buildNumber,proto3" json:"build_number,omitempty"`
+	// status is one of "success", "failure", "cancelled", "error".
+	Status   string `protobuf:"bytes,2,opt,name=status,proto3" json:"status,omitempty"`
+	ExitCode int32  `protobuf:"varint,3,opt,name=exit_code,json=exitCode,proto3" json:"exit_code,omitempty"`
+	Error    string `protobuf:"bytes,4,opt,name=error,proto3" json:"error,omitempty"`
+}
+
+func (x *BuildComplete) Reset() {
+	*x = BuildComplete{}
+	if protoimpl.UnsafeEnabled {
+		mi := &file_api_v1_agent_proto_msgTypes[7]
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		ms.StoreMessageInfo(mi)
+	}
+}
+
+func (x *BuildComplete) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*BuildComplete) ProtoMessage() {}
+
+func (x *BuildComplete) ProtoReflect() protoreflect.Message {
+	mi := &file_api_v1_agent_proto_msgTypes[7]
+	if protoimpl.UnsafeEnabled && x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use BuildComplete.ProtoReflect.Descriptor instead.
+func (*BuildComplete) Descriptor() ([]byte, []int) {
+	return file_api_v1_agent_proto_rawDescGZIP(), []int{7}
+}
+
+func (x *BuildComplete) GetBuildNumber() int32 {
+	if x != nil {
+		return x.BuildNumber
+	}
+	return 0
+}
+
+func (x *BuildComplete) GetStatus() string {
+	if x != nil {
+		return x.Status
+	}
+	return ""
+}
+
+func (x *BuildComplete) GetExitCode() int32 {
+	if x != nil {
+		return x.ExitCode
+	}
+	return 0
+}
+
+func (x *BuildComplete) GetError() string {
+	if x != nil {
+		return x.Error
+	}
+	return ""
+}
+
 var File_api_v1_agent_proto protoreflect.FileDescriptor
 
 var file_api_v1_agent_proto_rawDesc = []byte{
@@ -173,12 +568,58 @@ var file_api_v1_agent_proto_rawDesc = []byte{
 	0x69, 0x6f, 0x6e, 0x18, 0x01, 0x20, 0x01, 0x28, 0x09, 0x52, 0x0d, 0x73, 0x65, 0x72, 0x76, 0x65,
 	0x72, 0x56, 0x65, 0x72, 0x73, 0x69, 0x6f, 0x6e, 0x12, 0x1a, 0x0a, 0x08, 0x61, 0x63, 0x63, 0x65,
 	0x70, 0x74, 0x65, 0x64, 0x18, 0x02, 0x20, 0x01, 0x28, 0x08, 0x52, 0x08, 0x61, 0x63, 0x63, 0x65,
-	0x70, 0x74, 0x65, 0x64, 0x32, 0x4d, 0x0a, 0x0c, 0x41, 0x67, 0x65, 0x6e, 0x74, 0x53, 0x65, 0x72,
-	0x76, 0x69, 0x63, 0x65, 0x12, 0x3d, 0x0a, 0x08, 0x52, 0x65, 0x67, 0x69, 0x73, 0x74, 0x65, 0x72,
-	0x12, 0x14, 0x2e, 0x77, 0x6f, 0x6c, 0x66, 0x63, 0x69, 0x2e, 0x76, 0x31, 0x2e, 0x41, 0x67, 0x65,
-	0x6e, 0x74, 0x49, 0x6e, 0x66, 0x6f, 0x1a, 0x1b, 0x2e, 0x77, 0x6f, 0x6c, 0x66, 0x63, 0x69, 0x2e,
-	0x76, 0x31, 0x2e, 0x52, 0x65, 0x67, 0x69, 0x73, 0x74, 0x65, 0x72, 0x52, 0x65, 0x73, 0x70, 0x6f,
-	0x6e, 0x73, 0x65, 0x42, 0x2f, 0x5a, 0x2d, 0x67, 0x69, 0x74, 0x68, 0x75, 0x62, 0x2e, 0x63, 0x6f,
+	0x70, 0x74, 0x65, 0x64, 0x22, 0x77, 0x0a, 0x0c, 0x41, 0x67, 0x65, 0x6e, 0x74, 0x4d, 0x65, 0x73,
+	0x73, 0x61, 0x67, 0x65, 0x12, 0x27, 0x0a, 0x03, 0x6c, 0x6f, 0x67, 0x18, 0x01, 0x20, 0x01, 0x28,
+	0x0b, 0x32, 0x13, 0x2e, 0x77, 0x6f, 0x6c, 0x66, 0x63, 0x69, 0x2e, 0x76, 0x31, 0x2e, 0x4c, 0x6f,
+	0x67, 0x43, 0x68, 0x75, 0x6e, 0x6b, 0x48, 0x00, 0x52, 0x03, 0x6c, 0x6f, 0x67, 0x12, 0x36, 0x0a,
+	0x08, 0x63, 0x6f, 0x6d, 0x70, 0x6c, 0x65, 0x74, 0x65, 0x18, 0x02, 0x20, 0x01, 0x28, 0x0b, 0x32,
+	0x18, 0x2e, 0x77, 0x6f, 0x6c, 0x66, 0x63, 0x69, 0x2e, 0x76, 0x31, 0x2e, 0x42, 0x75, 0x69, 0x6c,
+	0x64, 0x43, 0x6f, 0x6d, 0x70, 0x6c, 0x65, 0x74, 0x65, 0x48, 0x00, 0x52, 0x08, 0x63, 0x6f, 0x6d,
+	0x70, 0x6c, 0x65, 0x74, 0x65, 0x42, 0x06, 0x0a, 0x04, 0x62, 0x6f, 0x64, 0x79, 0x22, 0x53, 0x0a,
+	0x0d, 0x53, 0x65, 0x72, 0x76, 0x65, 0x72, 0x4d, 0x65, 0x73, 0x73, 0x61, 0x67, 0x65, 0x12, 0x3a,
+	0x0a, 0x0a, 0x61, 0x73, 0x73, 0x69, 0x67, 0x6e, 0x6d, 0x65, 0x6e, 0x74, 0x18, 0x01, 0x20, 0x01,
+	0x28, 0x0b, 0x32, 0x18, 0x2e, 0x77, 0x6f, 0x6c, 0x66, 0x63, 0x69, 0x2e, 0x76, 0x31, 0x2e, 0x4a,
+	0x6f, 0x62, 0x41, 0x73, 0x73, 0x69, 0x67, 0x6e, 0x6d, 0x65, 0x6e, 0x74, 0x48, 0x00, 0x52, 0x0a,
+	0x61, 0x73, 0x73, 0x69, 0x67, 0x6e, 0x6d, 0x65, 0x6e, 0x74, 0x42, 0x06, 0x0a, 0x04, 0x62, 0x6f,
+	0x64, 0x79, 0x22, 0x74, 0x0a, 0x0d, 0x4a, 0x6f, 0x62, 0x41, 0x73, 0x73, 0x69, 0x67, 0x6e, 0x6d,
+	0x65, 0x6e, 0x74, 0x12, 0x19, 0x0a, 0x08, 0x6a, 0x6f, 0x62, 0x5f, 0x6e, 0x61, 0x6d, 0x65, 0x18,
+	0x01, 0x20, 0x01, 0x28, 0x09, 0x52, 0x07, 0x6a, 0x6f, 0x62, 0x4e, 0x61, 0x6d, 0x65, 0x12, 0x21,
+	0x0a, 0x0c, 0x62, 0x75, 0x69, 0x6c, 0x64, 0x5f, 0x6e, 0x75, 0x6d, 0x62, 0x65, 0x72, 0x18, 0x02,
+	0x20, 0x01, 0x28, 0x05, 0x52, 0x0b, 0x62, 0x75, 0x69, 0x6c, 0x64, 0x4e, 0x75, 0x6d, 0x62, 0x65,
+	0x72, 0x12, 0x25, 0x0a, 0x05, 0x73, 0x74, 0x65, 0x70, 0x73, 0x18, 0x03, 0x20, 0x03, 0x28, 0x0b,
+	0x32, 0x0f, 0x2e, 0x77, 0x6f, 0x6c, 0x66, 0x63, 0x69, 0x2e, 0x76, 0x31, 0x2e, 0x53, 0x74, 0x65,
+	0x70, 0x52, 0x05, 0x73, 0x74, 0x65, 0x70, 0x73, 0x22, 0x94, 0x01, 0x0a, 0x04, 0x53, 0x74, 0x65,
+	0x70, 0x12, 0x12, 0x0a, 0x04, 0x6e, 0x61, 0x6d, 0x65, 0x18, 0x01, 0x20, 0x01, 0x28, 0x09, 0x52,
+	0x04, 0x6e, 0x61, 0x6d, 0x65, 0x12, 0x14, 0x0a, 0x05, 0x73, 0x68, 0x65, 0x6c, 0x6c, 0x18, 0x02,
+	0x20, 0x01, 0x28, 0x09, 0x52, 0x05, 0x73, 0x68, 0x65, 0x6c, 0x6c, 0x12, 0x2a, 0x0a, 0x03, 0x65,
+	0x6e, 0x76, 0x18, 0x03, 0x20, 0x03, 0x28, 0x0b, 0x32, 0x18, 0x2e, 0x77, 0x6f, 0x6c, 0x66, 0x63,
+	0x69, 0x2e, 0x76, 0x31, 0x2e, 0x53, 0x74, 0x65, 0x70, 0x2e, 0x45, 0x6e, 0x76, 0x45, 0x6e, 0x74,
+	0x72, 0x79, 0x52, 0x03, 0x65, 0x6e, 0x76, 0x1a, 0x36, 0x0a, 0x08, 0x45, 0x6e, 0x76, 0x45, 0x6e,
+	0x74, 0x72, 0x79, 0x12, 0x10, 0x0a, 0x03, 0x6b, 0x65, 0x79, 0x18, 0x01, 0x20, 0x01, 0x28, 0x09,
+	0x52, 0x03, 0x6b, 0x65, 0x79, 0x12, 0x14, 0x0a, 0x05, 0x76, 0x61, 0x6c, 0x75, 0x65, 0x18, 0x02,
+	0x20, 0x01, 0x28, 0x09, 0x52, 0x05, 0x76, 0x61, 0x6c, 0x75, 0x65, 0x3a, 0x02, 0x38, 0x01, 0x22,
+	0x41, 0x0a, 0x08, 0x4c, 0x6f, 0x67, 0x43, 0x68, 0x75, 0x6e, 0x6b, 0x12, 0x21, 0x0a, 0x0c, 0x62,
+	0x75, 0x69, 0x6c, 0x64, 0x5f, 0x6e, 0x75, 0x6d, 0x62, 0x65, 0x72, 0x18, 0x01, 0x20, 0x01, 0x28,
+	0x05, 0x52, 0x0b, 0x62, 0x75, 0x69, 0x6c, 0x64, 0x4e, 0x75, 0x6d, 0x62, 0x65, 0x72, 0x12, 0x12,
+	0x0a, 0x04, 0x64, 0x61, 0x74, 0x61, 0x18, 0x02, 0x20, 0x01, 0x28, 0x0c, 0x52, 0x04, 0x64, 0x61,
+	0x74, 0x61, 0x22, 0x7d, 0x0a, 0x0d, 0x42, 0x75, 0x69, 0x6c, 0x64, 0x43, 0x6f, 0x6d, 0x70, 0x6c,
+	0x65, 0x74, 0x65, 0x12, 0x21, 0x0a, 0x0c, 0x62, 0x75, 0x69, 0x6c, 0x64, 0x5f, 0x6e, 0x75, 0x6d,
+	0x62, 0x65, 0x72, 0x18, 0x01, 0x20, 0x01, 0x28, 0x05, 0x52, 0x0b, 0x62, 0x75, 0x69, 0x6c, 0x64,
+	0x4e, 0x75, 0x6d, 0x62, 0x65, 0x72, 0x12, 0x16, 0x0a, 0x06, 0x73, 0x74, 0x61, 0x74, 0x75, 0x73,
+	0x18, 0x02, 0x20, 0x01, 0x28, 0x09, 0x52, 0x06, 0x73, 0x74, 0x61, 0x74, 0x75, 0x73, 0x12, 0x1b,
+	0x0a, 0x09, 0x65, 0x78, 0x69, 0x74, 0x5f, 0x63, 0x6f, 0x64, 0x65, 0x18, 0x03, 0x20, 0x01, 0x28,
+	0x05, 0x52, 0x08, 0x65, 0x78, 0x69, 0x74, 0x43, 0x6f, 0x64, 0x65, 0x12, 0x14, 0x0a, 0x05, 0x65,
+	0x72, 0x72, 0x6f, 0x72, 0x18, 0x04, 0x20, 0x01, 0x28, 0x09, 0x52, 0x05, 0x65, 0x72, 0x72, 0x6f,
+	0x72, 0x32, 0x8f, 0x01, 0x0a, 0x0c, 0x41, 0x67, 0x65, 0x6e, 0x74, 0x53, 0x65, 0x72, 0x76, 0x69,
+	0x63, 0x65, 0x12, 0x3d, 0x0a, 0x08, 0x52, 0x65, 0x67, 0x69, 0x73, 0x74, 0x65, 0x72, 0x12, 0x14,
+	0x2e, 0x77, 0x6f, 0x6c, 0x66, 0x63, 0x69, 0x2e, 0x76, 0x31, 0x2e, 0x41, 0x67, 0x65, 0x6e, 0x74,
+	0x49, 0x6e, 0x66, 0x6f, 0x1a, 0x1b, 0x2e, 0x77, 0x6f, 0x6c, 0x66, 0x63, 0x69, 0x2e, 0x76, 0x31,
+	0x2e, 0x52, 0x65, 0x67, 0x69, 0x73, 0x74, 0x65, 0x72, 0x52, 0x65, 0x73, 0x70, 0x6f, 0x6e, 0x73,
+	0x65, 0x12, 0x40, 0x0a, 0x07, 0x43, 0x6f, 0x6e, 0x6e, 0x65, 0x63, 0x74, 0x12, 0x17, 0x2e, 0x77,
+	0x6f, 0x6c, 0x66, 0x63, 0x69, 0x2e, 0x76, 0x31, 0x2e, 0x41, 0x67, 0x65, 0x6e, 0x74, 0x4d, 0x65,
+	0x73, 0x73, 0x61, 0x67, 0x65, 0x1a, 0x18, 0x2e, 0x77, 0x6f, 0x6c, 0x66, 0x63, 0x69, 0x2e, 0x76,
+	0x31, 0x2e, 0x53, 0x65, 0x72, 0x76, 0x65, 0x72, 0x4d, 0x65, 0x73, 0x73, 0x61, 0x67, 0x65, 0x28,
+	0x01, 0x30, 0x01, 0x42, 0x2f, 0x5a, 0x2d, 0x67, 0x69, 0x74, 0x68, 0x75, 0x62, 0x2e, 0x63, 0x6f,
 	0x6d, 0x2f, 0x6b, 0x61, 0x6c, 0x65, 0x62, 0x2d, 0x68, 0x69, 0x6d, 0x65, 0x73, 0x2f, 0x77, 0x6f,
 	0x6c, 0x66, 0x43, 0x49, 0x2f, 0x61, 0x70, 0x69, 0x2f, 0x76, 0x31, 0x3b, 0x77, 0x6f, 0x6c, 0x66,
 	0x63, 0x69, 0x76, 0x31, 0x62, 0x06, 0x70, 0x72, 0x6f, 0x74, 0x6f, 0x33,
@@ -196,19 +637,33 @@ func file_api_v1_agent_proto_rawDescGZIP() []byte {
 	return file_api_v1_agent_proto_rawDescData
 }
 
-var file_api_v1_agent_proto_msgTypes = make([]protoimpl.MessageInfo, 2)
+var file_api_v1_agent_proto_msgTypes = make([]protoimpl.MessageInfo, 9)
 var file_api_v1_agent_proto_goTypes = []interface{}{
 	(*AgentInfo)(nil),        // 0: wolfci.v1.AgentInfo
 	(*RegisterResponse)(nil), // 1: wolfci.v1.RegisterResponse
+	(*AgentMessage)(nil),     // 2: wolfci.v1.AgentMessage
+	(*ServerMessage)(nil),    // 3: wolfci.v1.ServerMessage
+	(*JobAssignment)(nil),    // 4: wolfci.v1.JobAssignment
+	(*Step)(nil),             // 5: wolfci.v1.Step
+	(*LogChunk)(nil),         // 6: wolfci.v1.LogChunk
+	(*BuildComplete)(nil),    // 7: wolfci.v1.BuildComplete
+	nil,                      // 8: wolfci.v1.Step.EnvEntry
 }
 var file_api_v1_agent_proto_depIdxs = []int32{
-	0, // 0: wolfci.v1.AgentService.Register:input_type -> wolfci.v1.AgentInfo
-	1, // 1: wolfci.v1.AgentService.Register:output_type -> wolfci.v1.RegisterResponse
-	1, // [1:2] is the sub-list for method output_type
-	0, // [0:1] is the sub-list for method input_type
-	0, // [0:0] is the sub-list for extension type_name
-	0, // [0:0] is the sub-list for extension extendee
-	0, // [0:0] is the sub-list for field type_name
+	6, // 0: wolfci.v1.AgentMessage.log:type_name -> wolfci.v1.LogChunk
+	7, // 1: wolfci.v1.AgentMessage.complete:type_name -> wolfci.v1.BuildComplete
+	4, // 2: wolfci.v1.ServerMessage.assignment:type_name -> wolfci.v1.JobAssignment
+	5, // 3: wolfci.v1.JobAssignment.steps:type_name -> wolfci.v1.Step
+	8, // 4: wolfci.v1.Step.env:type_name -> wolfci.v1.Step.EnvEntry
+	0, // 5: wolfci.v1.AgentService.Register:input_type -> wolfci.v1.AgentInfo
+	2, // 6: wolfci.v1.AgentService.Connect:input_type -> wolfci.v1.AgentMessage
+	1, // 7: wolfci.v1.AgentService.Register:output_type -> wolfci.v1.RegisterResponse
+	3, // 8: wolfci.v1.AgentService.Connect:output_type -> wolfci.v1.ServerMessage
+	7, // [7:9] is the sub-list for method output_type
+	5, // [5:7] is the sub-list for method input_type
+	5, // [5:5] is the sub-list for extension type_name
+	5, // [5:5] is the sub-list for extension extendee
+	0, // [0:5] is the sub-list for field type_name
 }
 
 func init() { file_api_v1_agent_proto_init() }
@@ -241,6 +696,85 @@ func file_api_v1_agent_proto_init() {
 				return nil
 			}
 		}
+		file_api_v1_agent_proto_msgTypes[2].Exporter = func(v interface{}, i int) interface{} {
+			switch v := v.(*AgentMessage); i {
+			case 0:
+				return &v.state
+			case 1:
+				return &v.sizeCache
+			case 2:
+				return &v.unknownFields
+			default:
+				return nil
+			}
+		}
+		file_api_v1_agent_proto_msgTypes[3].Exporter = func(v interface{}, i int) interface{} {
+			switch v := v.(*ServerMessage); i {
+			case 0:
+				return &v.state
+			case 1:
+				return &v.sizeCache
+			case 2:
+				return &v.unknownFields
+			default:
+				return nil
+			}
+		}
+		file_api_v1_agent_proto_msgTypes[4].Exporter = func(v interface{}, i int) interface{} {
+			switch v := v.(*JobAssignment); i {
+			case 0:
+				return &v.state
+			case 1:
+				return &v.sizeCache
+			case 2:
+				return &v.unknownFields
+			default:
+				return nil
+			}
+		}
+		file_api_v1_agent_proto_msgTypes[5].Exporter = func(v interface{}, i int) interface{} {
+			switch v := v.(*Step); i {
+			case 0:
+				return &v.state
+			case 1:
+				return &v.sizeCache
+			case 2:
+				return &v.unknownFields
+			default:
+				return nil
+			}
+		}
+		file_api_v1_agent_proto_msgTypes[6].Exporter = func(v interface{}, i int) interface{} {
+			switch v := v.(*LogChunk); i {
+			case 0:
+				return &v.state
+			case 1:
+				return &v.sizeCache
+			case 2:
+				return &v.unknownFields
+			default:
+				return nil
+			}
+		}
+		file_api_v1_agent_proto_msgTypes[7].Exporter = func(v interface{}, i int) interface{} {
+			switch v := v.(*BuildComplete); i {
+			case 0:
+				return &v.state
+			case 1:
+				return &v.sizeCache
+			case 2:
+				return &v.unknownFields
+			default:
+				return nil
+			}
+		}
+	}
+	file_api_v1_agent_proto_msgTypes[2].OneofWrappers = []interface{}{
+		(*AgentMessage_Log)(nil),
+		(*AgentMessage_Complete)(nil),
+	}
+	file_api_v1_agent_proto_msgTypes[3].OneofWrappers = []interface{}{
+		(*ServerMessage_Assignment)(nil),
 	}
 	type x struct{}
 	out := protoimpl.TypeBuilder{
@@ -248,7 +782,7 @@ func file_api_v1_agent_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: file_api_v1_agent_proto_rawDesc,
 			NumEnums:      0,
-			NumMessages:   2,
+			NumMessages:   9,
 			NumExtensions: 0,
 			NumServices:   1,
 		},

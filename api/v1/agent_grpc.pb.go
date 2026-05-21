@@ -24,15 +24,22 @@ const _ = grpc.SupportPackageIsVersion7
 
 const (
 	AgentService_Register_FullMethodName = "/wolfci.v1.AgentService/Register"
+	AgentService_Connect_FullMethodName  = "/wolfci.v1.AgentService/Connect"
 )
 
 // AgentServiceClient is the client API for AgentService service.
 //
 // For semantics around ctx use and closing/ending streaming RPCs, please refer to https://pkg.go.dev/google.golang.org/grpc/?tab=doc#ClientConn.NewStream.
 type AgentServiceClient interface {
-	// Register lets an agent announce itself to the server. The
-	// server returns its version and an accepted flag.
+	// Register lets an agent announce itself. Returns the server's
+	// version and whether the agent is currently accepted.
 	Register(ctx context.Context, in *AgentInfo, opts ...grpc.CallOption) (*RegisterResponse, error)
+	// Connect is the long-lived bidirectional stream used to
+	// dispatch jobs to the agent and to receive log chunks and
+	// build completions back. The first message in each direction
+	// is delivered by the side that has data; both sides are free
+	// to send at any time.
+	Connect(ctx context.Context, opts ...grpc.CallOption) (AgentService_ConnectClient, error)
 }
 
 type agentServiceClient struct {
@@ -52,13 +59,50 @@ func (c *agentServiceClient) Register(ctx context.Context, in *AgentInfo, opts .
 	return out, nil
 }
 
+func (c *agentServiceClient) Connect(ctx context.Context, opts ...grpc.CallOption) (AgentService_ConnectClient, error) {
+	stream, err := c.cc.NewStream(ctx, &AgentService_ServiceDesc.Streams[0], AgentService_Connect_FullMethodName, opts...)
+	if err != nil {
+		return nil, err
+	}
+	x := &agentServiceConnectClient{stream}
+	return x, nil
+}
+
+type AgentService_ConnectClient interface {
+	Send(*AgentMessage) error
+	Recv() (*ServerMessage, error)
+	grpc.ClientStream
+}
+
+type agentServiceConnectClient struct {
+	grpc.ClientStream
+}
+
+func (x *agentServiceConnectClient) Send(m *AgentMessage) error {
+	return x.ClientStream.SendMsg(m)
+}
+
+func (x *agentServiceConnectClient) Recv() (*ServerMessage, error) {
+	m := new(ServerMessage)
+	if err := x.ClientStream.RecvMsg(m); err != nil {
+		return nil, err
+	}
+	return m, nil
+}
+
 // AgentServiceServer is the server API for AgentService service.
 // All implementations must embed UnimplementedAgentServiceServer
 // for forward compatibility
 type AgentServiceServer interface {
-	// Register lets an agent announce itself to the server. The
-	// server returns its version and an accepted flag.
+	// Register lets an agent announce itself. Returns the server's
+	// version and whether the agent is currently accepted.
 	Register(context.Context, *AgentInfo) (*RegisterResponse, error)
+	// Connect is the long-lived bidirectional stream used to
+	// dispatch jobs to the agent and to receive log chunks and
+	// build completions back. The first message in each direction
+	// is delivered by the side that has data; both sides are free
+	// to send at any time.
+	Connect(AgentService_ConnectServer) error
 	mustEmbedUnimplementedAgentServiceServer()
 }
 
@@ -68,6 +112,9 @@ type UnimplementedAgentServiceServer struct {
 
 func (UnimplementedAgentServiceServer) Register(context.Context, *AgentInfo) (*RegisterResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method Register not implemented")
+}
+func (UnimplementedAgentServiceServer) Connect(AgentService_ConnectServer) error {
+	return status.Errorf(codes.Unimplemented, "method Connect not implemented")
 }
 func (UnimplementedAgentServiceServer) mustEmbedUnimplementedAgentServiceServer() {}
 
@@ -100,6 +147,32 @@ func _AgentService_Register_Handler(srv interface{}, ctx context.Context, dec fu
 	return interceptor(ctx, in, info, handler)
 }
 
+func _AgentService_Connect_Handler(srv interface{}, stream grpc.ServerStream) error {
+	return srv.(AgentServiceServer).Connect(&agentServiceConnectServer{stream})
+}
+
+type AgentService_ConnectServer interface {
+	Send(*ServerMessage) error
+	Recv() (*AgentMessage, error)
+	grpc.ServerStream
+}
+
+type agentServiceConnectServer struct {
+	grpc.ServerStream
+}
+
+func (x *agentServiceConnectServer) Send(m *ServerMessage) error {
+	return x.ServerStream.SendMsg(m)
+}
+
+func (x *agentServiceConnectServer) Recv() (*AgentMessage, error) {
+	m := new(AgentMessage)
+	if err := x.ServerStream.RecvMsg(m); err != nil {
+		return nil, err
+	}
+	return m, nil
+}
+
 // AgentService_ServiceDesc is the grpc.ServiceDesc for AgentService service.
 // It's only intended for direct use with grpc.RegisterService,
 // and not to be introspected or modified (even as a copy)
@@ -112,6 +185,13 @@ var AgentService_ServiceDesc = grpc.ServiceDesc{
 			Handler:    _AgentService_Register_Handler,
 		},
 	},
-	Streams:  []grpc.StreamDesc{},
+	Streams: []grpc.StreamDesc{
+		{
+			StreamName:    "Connect",
+			Handler:       _AgentService_Connect_Handler,
+			ServerStreams: true,
+			ClientStreams: true,
+		},
+	},
 	Metadata: "api/v1/agent.proto",
 }

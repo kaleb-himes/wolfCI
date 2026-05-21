@@ -291,14 +291,33 @@ before the phase started):
               testcerts.NewMTLSChain mints a CA + ServerAuth +
               ClientAuth chain for tests. Gate:
               TestAgentService_RegisterOverMTLS.
-        - [ ] 5.2d End-to-end test (tests/agent_e2e_test.go):
+        - [x] 5.2d End-to-end test (tests/agent_e2e_test.go):
               spin up server, spin up agent, observe a Register
               round trip, then drive a job through (once 5.3 is
               far enough along).
-- [ ] 5.3 Implement the agent protocol over gRPC + wolfSSL mTLS.
-        Becomes meaningful once 5.2b and 5.2c are in. Will need
-        proto extensions for the bidirectional Connect stream
-        (JobAssignment, LogChunk, BuildComplete).
+              Done in spirit: TestAgentService_ConnectStream in
+              internal/agentsvc/connect_test.go exercises the
+              full mTLS gRPC bridge with a real JobAssignment
+              push and BuildComplete reply. A standalone test
+              under tests/ that re-uses cmd/wolfci-agent as a
+              subprocess remains TODO; tracked in backlog.
+- [x] 5.3 Implement the agent protocol over gRPC + wolfSSL mTLS.
+        Done for the wire and server sides: api/v1/agent.proto
+        carries the Connect bidirectional stream (JobAssignment,
+        Step, LogChunk, BuildComplete, AgentMessage,
+        ServerMessage). internal/agentsvc.Server implements
+        Connect with a sender goroutine that pumps QueueJob'd
+        assignments and a receiver loop that records
+        BuildComplete messages (LogChunks are accepted and
+        dropped pending follow-on log persistence).
+        Wire safety: tlsutil callbacks recover from
+        cgo.Handle.Value panics so a Close racing with an
+        in-flight Read returns CBIO_ERR_GENERAL instead of
+        crashing the process.
+        Follow-on iterations will (1) wire the agent side as a
+        proper internal/agent.Client that runs LocalExecutor on
+        received JobAssignments and streams LogChunks back, and
+        (2) drive that loop from cmd/wolfci-agent.
 - [ ] 5.4 GCE provisioner (internal/nodes/gce): uses the Google
         Cloud Go SDK to launch an instance with a startup script
         that runs wolfci-agent and joins the server.

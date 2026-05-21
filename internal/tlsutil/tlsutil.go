@@ -376,7 +376,19 @@ func (c *conn) SetReadDeadline(t time.Time) error  { return c.inner.SetReadDeadl
 func (c *conn) SetWriteDeadline(t time.Time) error { return c.inner.SetWriteDeadline(t) }
 
 //export wolfci_io_recv
-func wolfci_io_recv(ssl *C.WOLFSSL, buf *C.char, sz C.int, ctxPtr unsafe.Pointer) C.int {
+func wolfci_io_recv(ssl *C.WOLFSSL, buf *C.char, sz C.int, ctxPtr unsafe.Pointer) (ret C.int) {
+	// Recover from a panic inside cgo.Handle.Value, which fires if
+	// the handle was Delete'd between when wolfSSL_read started in
+	// C and when it called back into Go. This happens when a peer
+	// (e.g. the gRPC HTTP/2 reader goroutine) holds a *conn whose
+	// Close ran while a Read was already in flight. Returning a
+	// generic CBIO error lets wolfSSL propagate a clean read error
+	// to the caller instead of crashing the process.
+	defer func() {
+		if r := recover(); r != nil {
+			ret = C.WOLFSSL_CBIO_ERR_GENERAL
+		}
+	}()
 	if sz <= 0 {
 		return 0
 	}
@@ -402,7 +414,12 @@ func wolfci_io_recv(ssl *C.WOLFSSL, buf *C.char, sz C.int, ctxPtr unsafe.Pointer
 }
 
 //export wolfci_io_send
-func wolfci_io_send(ssl *C.WOLFSSL, buf *C.char, sz C.int, ctxPtr unsafe.Pointer) C.int {
+func wolfci_io_send(ssl *C.WOLFSSL, buf *C.char, sz C.int, ctxPtr unsafe.Pointer) (ret C.int) {
+	defer func() {
+		if r := recover(); r != nil {
+			ret = C.WOLFSSL_CBIO_ERR_GENERAL
+		}
+	}()
 	if sz <= 0 {
 		return 0
 	}

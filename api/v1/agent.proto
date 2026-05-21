@@ -8,40 +8,76 @@ package wolfci.v1;
 option go_package = "github.com/kaleb-himes/wolfCI/api/v1;wolfciv1";
 
 // AgentService is the surface the wolfCI server exposes to
-// agents over wolfSSL mTLS. Phase 5.2/5.3 ships the Register
-// RPC; follow-on iterations add the bidirectional Connect
-// stream for job dispatch and log streaming.
+// agents over wolfSSL mTLS.
 service AgentService {
-  // Register lets an agent announce itself to the server. The
-  // server returns its version and an accepted flag.
+  // Register lets an agent announce itself. Returns the server's
+  // version and whether the agent is currently accepted.
   rpc Register(AgentInfo) returns (RegisterResponse);
+
+  // Connect is the long-lived bidirectional stream used to
+  // dispatch jobs to the agent and to receive log chunks and
+  // build completions back. The first message in each direction
+  // is delivered by the side that has data; both sides are free
+  // to send at any time.
+  rpc Connect(stream AgentMessage) returns (stream ServerMessage);
 }
 
 // AgentInfo is what an agent tells the server about itself when
 // it first connects.
 message AgentInfo {
-  // agent_id is a stable identifier chosen by the agent
-  // (typically derived from its TLS cert CN).
   string agent_id = 1;
-
-  // labels are the strings the agent advertises for node-label
-  // matching. A Job.node_label matches an agent if this list
-  // contains that string.
   repeated string labels = 2;
-
-  // executors is the maximum number of concurrent jobs this
-  // agent is willing to run.
   int32 executors = 3;
 }
 
 // RegisterResponse is the server's reply to Register.
 message RegisterResponse {
-  // server_version is the wolfCI server's build identifier.
   string server_version = 1;
-
-  // accepted is true if the server is willing to dispatch jobs
-  // to this agent. False means the agent's identity was
-  // recognized but is currently blocked (e.g. removed from the
-  // matrix).
   bool accepted = 2;
+}
+
+// AgentMessage is anything an agent sends on the Connect stream.
+message AgentMessage {
+  oneof body {
+    LogChunk log = 1;
+    BuildComplete complete = 2;
+  }
+}
+
+// ServerMessage is anything the server sends on the Connect
+// stream.
+message ServerMessage {
+  oneof body {
+    JobAssignment assignment = 1;
+  }
+}
+
+// JobAssignment is a build the server wants the agent to run.
+message JobAssignment {
+  string job_name = 1;
+  int32 build_number = 2;
+  repeated Step steps = 3;
+}
+
+// Step is one shell command in a job's pipeline.
+message Step {
+  string name = 1;
+  string shell = 2;
+  map<string, string> env = 3;
+}
+
+// LogChunk is a piece of build output streamed from the agent
+// back to the server.
+message LogChunk {
+  int32 build_number = 1;
+  bytes data = 2;
+}
+
+// BuildComplete reports the final outcome of a build.
+message BuildComplete {
+  int32 build_number = 1;
+  // status is one of "success", "failure", "cancelled", "error".
+  string status = 2;
+  int32 exit_code = 3;
+  string error = 4;
 }

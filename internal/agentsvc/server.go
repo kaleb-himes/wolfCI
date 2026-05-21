@@ -9,6 +9,7 @@ package agentsvc
 
 import (
 	"context"
+	"io"
 	"sync"
 
 	"google.golang.org/grpc/codes"
@@ -25,15 +26,44 @@ type Server struct {
 
 	mu     sync.Mutex
 	agents map[string]*wolfciv1.AgentInfo
+
+	pendingJobs chan *wolfciv1.JobAssignment
+
+	completedMu sync.Mutex
+	completed   []*wolfciv1.BuildComplete
 }
 
 // New constructs a Server announcing serverVersion to agents
 // that successfully Register.
 func New(serverVersion string) *Server {
 	return &Server{
-		version: serverVersion,
-		agents:  make(map[string]*wolfciv1.AgentInfo),
+		version:     serverVersion,
+		agents:      make(map[string]*wolfciv1.AgentInfo),
+		pendingJobs: make(chan *wolfciv1.JobAssignment, 64),
 	}
+}
+
+// QueueJob makes job available for delivery to the next agent
+// that opens a Connect stream. Calls are non-blocking up to the
+// underlying channel capacity (64).
+func (s *Server) QueueJob(job *wolfciv1.JobAssignment) {
+	s.pendingJobs <- job
+}
+
+// Completed returns a snapshot of every BuildComplete the
+// server has received from agents. Caller owns the slice.
+func (s *Server) Completed() []*wolfciv1.BuildComplete {
+	s.completedMu.Lock()
+	defer s.completedMu.Unlock()
+	out := make([]*wolfciv1.BuildComplete, len(s.completed))
+	copy(out, s.completed)
+	return out
+}
+
+func (s *Server) recordCompletion(c *wolfciv1.BuildComplete) {
+	s.completedMu.Lock()
+	defer s.completedMu.Unlock()
+	s.completed = append(s.completed, c)
 }
 
 // Register records an agent's self-described capabilities and
@@ -66,6 +96,51 @@ func (s *Server) Register(ctx context.Context, info *wolfciv1.AgentInfo) (*wolfc
 		ServerVersion: s.version,
 		Accepted:      true,
 	}, nil
+}
+
+// Connect is the bidirectional stream the server uses to push
+// JobAssignments to an agent and to receive LogChunk and
+// BuildComplete messages back. A sender goroutine pumps queued
+// JobAssignments down the stream; the receiver loop demuxes
+// incoming AgentMessages.
+func (s *Server) Connect(stream wolfciv1.AgentService_ConnectServer) error {
+	ctx := stream.Context()
+	done := make(chan struct{})
+	defer close(done)
+
+	go func() {
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case <-done:
+				return
+			case job := <-s.pendingJobs:
+				msg := &wolfciv1.ServerMessage{
+					Body: &wolfciv1.ServerMessage_Assignment{Assignment: job},
+				}
+				if err := stream.Send(msg); err != nil {
+					return
+				}
+			}
+		}
+	}()
+
+	for {
+		msg, err := stream.Recv()
+		if err == io.EOF {
+			return nil
+		}
+		if err != nil {
+			return err
+		}
+		if c := msg.GetComplete(); c != nil {
+			s.recordCompletion(c)
+		}
+		// LogChunks are accepted but currently dropped; persistent
+		// log routing lands in a follow-on iteration alongside
+		// internal/storage builds/<job>/<n>/log streaming.
+	}
 }
 
 // Agents returns a snapshot of every currently-registered agent,
