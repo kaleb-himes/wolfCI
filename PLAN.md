@@ -141,10 +141,19 @@ before the phase started):
         pinned to v0.13.0 for Go 1.18 compatibility. ErrUnknownUser,
         ErrInvalidSignature, ErrInvalidUsername are sentinel
         errors for callers.
-- [ ] 3.3 Failing test (internal/auth/password_test.go): username +
+- [x] 3.3 Failing test (internal/auth/password_test.go): username +
         password login succeeds when enabled and is rejected when
         disabled in config-files/auth/config.yaml.
-- [ ] 3.4 Implement password auth with bcrypt. Default to disabled.
+        Done: TestPasswordStore_VerifyWhenEnabled,
+        TestPasswordStore_DisabledRejectsAll,
+        TestConfig_DefaultsAndRoundtrip,
+        TestLoadConfig_RejectsOutOfRangeCost.
+- [x] 3.4 Implement password auth with bcrypt. Default to disabled.
+        Done: internal/auth/password.go. Config struct with
+        PasswordEnabled (default false) and BcryptCost (default
+        12); LoadConfig/Save round-trip YAML; PasswordStore
+        Set/Verify against per-user bcrypt files at
+        <root>/<user>.bcrypt mode 0600.
 - [ ] 3.5 Failing test (internal/authz/matrix_test.go): the matrix
         denies an action the user lacks permission for and permits
         actions the user holds.
