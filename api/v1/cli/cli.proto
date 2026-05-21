@@ -22,6 +22,13 @@ service CLIService {
   // ctx or the configured idle timeout elapses with no new
   // output.
   rpc StreamBuildLog(BuildLogRequest) returns (stream LogLine);
+
+  // RunJob enqueues a build for the named Job using the
+  // server's scheduler. Returns the assigned build number so
+  // the caller can immediately tail StreamBuildLog. The
+  // server does not wait for the build to finish; this RPC
+  // returns once the enqueue is committed.
+  rpc RunJob(RunJobRequest) returns (RunJobResponse);
 }
 
 message Empty {}
@@ -55,4 +62,12 @@ message BuildLogRequest {
 
 message LogLine {
   bytes data = 1;
+}
+
+message RunJobRequest {
+  string job_name = 1;
+}
+
+message RunJobResponse {
+  int32 build_number = 1;
 }

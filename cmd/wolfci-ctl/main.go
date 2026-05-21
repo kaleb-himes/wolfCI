@@ -81,12 +81,14 @@ func runBuildGroup(args []string, stdout, stderr *os.File) int {
 func runJobGroup(args []string, stdout, stderr *os.File) int {
 	if len(args) == 0 {
 		fmt.Fprintln(stderr, "usage: wolfci-ctl job <verb>")
-		fmt.Fprintln(stderr, "verbs: list")
+		fmt.Fprintln(stderr, "verbs: list, run")
 		return 2
 	}
 	switch args[0] {
 	case "list":
 		return runJobList(args[1:], stdout, stderr)
+	case "run":
+		return runJobRun(args[1:], stdout, stderr)
 	default:
 		fmt.Fprintf(stderr, "wolfci-ctl: unknown job verb %q\n", args[0])
 		return 2

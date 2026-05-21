@@ -20,12 +20,28 @@ import (
 	"github.com/kaleb-himes/wolfCI/internal/storage"
 )
 
+// Enqueuer is the surface cliservice needs from the scheduler
+// to satisfy RunJob. Returns the assigned build number; the
+// completion channel from scheduler.Scheduler.Enqueue is not
+// needed here because RunJob is fire-and-forget. Use
+// EnqueuerFunc to adapt scheduler.Scheduler.Enqueue.
+type Enqueuer interface {
+	Enqueue(job *storage.Job) (buildNumber int, err error)
+}
+
+// EnqueuerFunc adapts a function into an Enqueuer.
+type EnqueuerFunc func(job *storage.Job) (int, error)
+
+// Enqueue satisfies Enqueuer.
+func (f EnqueuerFunc) Enqueue(job *storage.Job) (int, error) { return f(job) }
+
 // Server implements cliv1.CLIServiceServer.
 type Server struct {
 	cliv1.UnimplementedCLIServiceServer
 
 	storage  *storage.Storage
 	agentSvc *agentsvc.Server
+	enqueuer Enqueuer
 
 	// LogPollInterval is how often StreamBuildLog checks for new
 	// bytes when the file is currently at EOF. Defaults to
@@ -48,6 +64,13 @@ func New(st *storage.Storage, svc *agentsvc.Server) *Server {
 		LogPollInterval: 100 * time.Millisecond,
 		LogIdleTimeout:  5 * time.Minute,
 	}
+}
+
+// WithEnqueuer registers a scheduler-like Enqueuer so RunJob
+// works. Returns the server for chaining.
+func (s *Server) WithEnqueuer(e Enqueuer) *Server {
+	s.enqueuer = e
+	return s
 }
 
 // ListJobs walks storage.ListJobs and projects each Job onto
@@ -91,6 +114,26 @@ func (s *Server) ListNodes(ctx context.Context, _ *cliv1.Empty) (*cliv1.ListNode
 		})
 	}
 	return resp, nil
+}
+
+// RunJob loads the named Job and asks the configured Enqueuer
+// to schedule a build. Returns the assigned build number.
+func (s *Server) RunJob(ctx context.Context, req *cliv1.RunJobRequest) (*cliv1.RunJobResponse, error) {
+	if s.enqueuer == nil {
+		return nil, fmt.Errorf("cliservice.RunJob: no scheduler configured")
+	}
+	if err := validateJobName(req.JobName); err != nil {
+		return nil, err
+	}
+	job, err := s.storage.LoadJob(req.JobName)
+	if err != nil {
+		return nil, fmt.Errorf("cliservice.RunJob: load %q: %w", req.JobName, err)
+	}
+	num, err := s.enqueuer.Enqueue(job)
+	if err != nil {
+		return nil, fmt.Errorf("cliservice.RunJob: enqueue: %w", err)
+	}
+	return &cliv1.RunJobResponse{BuildNumber: int32(num)}, nil
 }
 
 // StreamBuildLog opens a server-streaming RPC that reads

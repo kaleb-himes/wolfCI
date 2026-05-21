@@ -26,6 +26,7 @@ const (
 	CLIService_ListJobs_FullMethodName       = "/wolfci.v1.cli.CLIService/ListJobs"
 	CLIService_ListNodes_FullMethodName      = "/wolfci.v1.cli.CLIService/ListNodes"
 	CLIService_StreamBuildLog_FullMethodName = "/wolfci.v1.cli.CLIService/StreamBuildLog"
+	CLIService_RunJob_FullMethodName         = "/wolfci.v1.cli.CLIService/RunJob"
 )
 
 // CLIServiceClient is the client API for CLIService service.
@@ -43,6 +44,12 @@ type CLIServiceClient interface {
 	// ctx or the configured idle timeout elapses with no new
 	// output.
 	StreamBuildLog(ctx context.Context, in *BuildLogRequest, opts ...grpc.CallOption) (CLIService_StreamBuildLogClient, error)
+	// RunJob enqueues a build for the named Job using the
+	// server's scheduler. Returns the assigned build number so
+	// the caller can immediately tail StreamBuildLog. The
+	// server does not wait for the build to finish; this RPC
+	// returns once the enqueue is committed.
+	RunJob(ctx context.Context, in *RunJobRequest, opts ...grpc.CallOption) (*RunJobResponse, error)
 }
 
 type cLIServiceClient struct {
@@ -103,6 +110,15 @@ func (x *cLIServiceStreamBuildLogClient) Recv() (*LogLine, error) {
 	return m, nil
 }
 
+func (c *cLIServiceClient) RunJob(ctx context.Context, in *RunJobRequest, opts ...grpc.CallOption) (*RunJobResponse, error) {
+	out := new(RunJobResponse)
+	err := c.cc.Invoke(ctx, CLIService_RunJob_FullMethodName, in, out, opts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 // CLIServiceServer is the server API for CLIService service.
 // All implementations must embed UnimplementedCLIServiceServer
 // for forward compatibility
@@ -118,6 +134,12 @@ type CLIServiceServer interface {
 	// ctx or the configured idle timeout elapses with no new
 	// output.
 	StreamBuildLog(*BuildLogRequest, CLIService_StreamBuildLogServer) error
+	// RunJob enqueues a build for the named Job using the
+	// server's scheduler. Returns the assigned build number so
+	// the caller can immediately tail StreamBuildLog. The
+	// server does not wait for the build to finish; this RPC
+	// returns once the enqueue is committed.
+	RunJob(context.Context, *RunJobRequest) (*RunJobResponse, error)
 	mustEmbedUnimplementedCLIServiceServer()
 }
 
@@ -133,6 +155,9 @@ func (UnimplementedCLIServiceServer) ListNodes(context.Context, *Empty) (*ListNo
 }
 func (UnimplementedCLIServiceServer) StreamBuildLog(*BuildLogRequest, CLIService_StreamBuildLogServer) error {
 	return status.Errorf(codes.Unimplemented, "method StreamBuildLog not implemented")
+}
+func (UnimplementedCLIServiceServer) RunJob(context.Context, *RunJobRequest) (*RunJobResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method RunJob not implemented")
 }
 func (UnimplementedCLIServiceServer) mustEmbedUnimplementedCLIServiceServer() {}
 
@@ -204,6 +229,24 @@ func (x *cLIServiceStreamBuildLogServer) Send(m *LogLine) error {
 	return x.ServerStream.SendMsg(m)
 }
 
+func _CLIService_RunJob_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(RunJobRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(CLIServiceServer).RunJob(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: CLIService_RunJob_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(CLIServiceServer).RunJob(ctx, req.(*RunJobRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 // CLIService_ServiceDesc is the grpc.ServiceDesc for CLIService service.
 // It's only intended for direct use with grpc.RegisterService,
 // and not to be introspected or modified (even as a copy)
@@ -218,6 +261,10 @@ var CLIService_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "ListNodes",
 			Handler:    _CLIService_ListNodes_Handler,
+		},
+		{
+			MethodName: "RunJob",
+			Handler:    _CLIService_RunJob_Handler,
 		},
 	},
 	Streams: []grpc.StreamDesc{
