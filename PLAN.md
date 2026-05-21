@@ -675,6 +675,31 @@ RPC.
 - [ ] 8.1 cmd/wolfci-ctl with subcommands: login, job list, job
         run, build log, node list. Failing test
         (tests/ctl_test.go) exercises each.
+        Sub-checkpoints:
+        - [x] 8.1a Subcommand router + Config + login + version.
+              cmd/wolfci-ctl ships dispatch(args, stdout,
+              stderr) that walks a map[string]*subcommand,
+              prints aligned usage on no-args, returns 2 for
+              unknown subcommand. login writes a complete
+              ctl.yaml (server_address, certificate, key,
+              ca_certificate). defaultConfigPath honors
+              WOLFCI_CTL_CONFIG > XDG_CONFIG_HOME >
+              $HOME/.config/wolfci/ctl.yaml. Gate:
+              TestDispatch_Version, TestDispatch_NoArgs,
+              TestDispatch_UnknownSubcommand,
+              TestLogin_WritesConfig, TestLogin_MissingFlags,
+              TestDefaultConfigPath.
+        - [ ] 8.1b CLIService gRPC service (job list, node list).
+              Add a new gRPC service distinct from AgentService
+              so the cert CN -> matrix permission check can
+              gate humans separately from agents. Server adds
+              a CLIService handler that wraps storage.ListJobs
+              and agentsvc.Agents. Client subcommand uses the
+              same wolfSSL mTLS bridge as the agent.
+        - [ ] 8.1c Streaming build log + job run subcommands.
+              "build log" tails /api/v1/builds/{job}/{n}/log;
+              "job run" enqueues a build through CLIService and
+              optionally streams.
 
 ## Phase 9 - Packaging, docs, polish
 
