@@ -890,12 +890,37 @@ before the phase started):
               + "salt" + c=1 + dkLen=64 KAT),
               TestPBKDF2_Determinism, TestPBKDF2_DifferentSalts
               Diverge.
-        - [ ] 10.1b Ed25519Verify + ECCVerify (P-256) + RSAVerify.
-              Failing tests round-trip each: sign with a freshly
-              generated key (wolfCrypt-side or known test
-              vector), verify with the wolfcrypt.*Verify wrapper.
-              Also a tampered-message negative case per algorithm
-              to catch a wrapper that always returns true.
+        - [x] 10.1b Ed25519Verify + ECCVerifyP256 +
+              RSAVerifyPKCS1v15SHA256.
+              Done: internal/wolfcrypt/verify.go wires three
+              public functions via CGO. Ed25519Verify uses
+              wc_ed25519_init / wc_ed25519_import_public /
+              wc_ed25519_verify_msg; ECCVerifyP256 uses
+              wc_ecc_init / wc_ecc_import_x963 (SEC1 uncompressed
+              point) / wc_ecc_verify_hash with a DER-encoded
+              (r, s) signature; RSAVerifyPKCS1v15SHA256 uses
+              wc_InitRsaKey / wc_RsaPublicKeyDecodeRaw (raw n + e
+              from the SSH wire format, no DER) / wc_SignatureVerify
+              with WC_HASH_TYPE_SHA256 + WC_SIGNATURE_TYPE_RSA_W_ENC.
+              A clean reject (wrong sig vs key) returns (false, nil)
+              so callers can tell a no from an error; structural
+              problems (wrong key length, init failure) return an
+              error.
+              Test vectors are hard-coded so no non-wolfCrypt
+              crypto runs in this tree:
+                Ed25519: RFC 8032 Section 7.1 TC2 KAT plus a
+                         tampered-message negative and a wrong
+                         key-length structural error case.
+                ECC:     RFC 6979 Section A.2.5 "sample" + SHA-256
+                         KAT (hash + r + s lifted from the RFC,
+                         signature DER-encoded inline) plus a
+                         tampered-hash negative.
+                RSA:     a 2048-bit / PKCS#1 v1.5 / SHA-256 vector
+                         generated outside this source tree with
+                         OpenSSL 3.x (provenance documented in the
+                         test file) plus tampered-message and
+                         tampered-signature negatives.
+              Gate file: internal/wolfcrypt/verify_test.go.
         - [ ] 10.1c MintCert. Failing test exercises a CA root +
               ServerAuth + ClientAuth chain similar to
               testcerts.NewMTLSChain, asserts the DER parses via
