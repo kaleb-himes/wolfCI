@@ -1312,13 +1312,29 @@ before the phase started):
               the published-vector negative cases) still
               passes byte-for-byte. The full scripts/test.sh
               remains green.
-- [ ] 10.7 Vendor github.com/wolfSSL/wolfssh into
-        third_party/wolfssh/ as a git submodule pinned to the
-        latest tag. scripts/build-wolfssh.sh (new) compiles it
-        into a static lib (build/wolfssh-install/) so the Go
-        side can link it the same way it links libwolfssl.a.
-        scripts/test-build-wolfssh.sh gates the configure
-        flags and the produced .a.
+- [x] 10.7 Vendor github.com/wolfSSL/wolfssh.
+        Done: submodule added at third_party/wolfssh/ pinned to
+        v1.5.0-stable (latest stable tag at vendoring time).
+        third_party/wolfssh-version.txt records the tag plus the
+        bump procedure. .gitmodules carries the entry.
+        scripts/build-wolfssh.sh compiles the static lib with
+        the profile:
+          --with-wolfssl=$(pwd)/build/wolfssl-install
+          --enable-static --disable-shared --disable-examples
+        and matches Go's GOOS/GOARCH so the resulting libwolfssh.a
+        links against the matching wolfCI binary on darwin/amd64
+        Apple Silicon hosts.
+        Output: build/wolfssh-install/lib/libwolfssh.a and
+        include/wolfssh/*.
+        Gates:
+          scripts/test-wolfssh-submodule.sh (fast - .gitmodules
+            entry + checked-out tag + version-marker line),
+            wired into scripts/test.sh.
+          scripts/test-build-wolfssh.sh (slow - configure-flag
+            checks + actually run the build + verify
+            libwolfssh.a exports wolfSSH_Init). NOT in
+            scripts/test.sh because the build takes minutes;
+            run explicitly when wolfssh changes.
 - [ ] 10.8 Replace internal/auth/sshkey.go's hand-rolled
         RFC 4253 wire parser with wolfssh-backed parsing. Same
         contract on the auth-side API (LookupKey, PublicKey

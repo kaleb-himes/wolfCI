@@ -1,0 +1,6 @@
+v1.5.0-stable (2026-05-21)
+
+# Latest stable release at the time of vendoring. wolfssh follows
+# the vN.M.K-stable tag convention upstream; bump this file's
+# first line and the submodule pointer in the same commit when a
+# newer release is pulled in.

@@ -5,6 +5,7 @@
 #   - scripts/check-ascii.sh             ASCII invariant on tracked files
 #   - scripts/test-check-ascii.sh        self-test for the ASCII gate
 #   - scripts/test-wolfssl-submodule.sh  wolfSSL submodule pin
+#   - scripts/test-wolfssh-submodule.sh  wolfssh submodule pin
 #   - go test ./internal/... ./cmd/... ./plugins/email-on-failure   Go unit tests
 #   - scripts/test-build.sh              host-platform release build
 #   - scripts/test-install.sh            systemd unit + launchd plist
@@ -17,6 +18,8 @@
 #   - scripts/test-build-wolfssl.sh: full wolfSSL build (minutes).
 #     Run it explicitly when scripts/build-wolfssl.sh or the
 #     wolfSSL pin changes.
+#   - scripts/test-build-wolfssh.sh: full wolfssh build (minutes).
+#     Same idea - run it explicitly when wolfssh changes.
 #
 # Why scope go test to ./internal/... rather than ./...:
 #   The wolfSSL submodule under third_party/wolfssl contains paths
@@ -31,6 +34,7 @@ cd "$(dirname "$0")/.."
 scripts/check-ascii.sh
 scripts/test-check-ascii.sh
 scripts/test-wolfssl-submodule.sh
+scripts/test-wolfssh-submodule.sh
 
 # Apply local patches to the go-wolfssl submodule worktree (no-op
 # if the patches are already applied). Patches carry the
