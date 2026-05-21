@@ -37,6 +37,36 @@ fi
 
 mkdir -p "$INSTALL_PREFIX"
 
+# Match Go's idea of GOOS/GOARCH so the resulting .a links cleanly
+# against the wolfCI Go binary. Without this, an Apple Silicon host
+# running a darwin/amd64 Go (common via Homebrew on Intel-era
+# installs) ends up with an arm64 libwolfssl.a that fails to link.
+TARGET_GOOS=${TARGET_GOOS:-$(go env GOOS)}
+TARGET_GOARCH=${TARGET_GOARCH:-$(go env GOARCH)}
+
+case "$TARGET_GOOS-$TARGET_GOARCH" in
+    darwin-amd64)
+        target_arch="x86_64"
+        configure_host="x86_64-apple-darwin"
+        ;;
+    darwin-arm64)
+        target_arch="arm64"
+        configure_host="arm64-apple-darwin"
+        ;;
+    linux-amd64)
+        target_arch=""
+        configure_host=""
+        ;;
+    linux-arm64)
+        target_arch=""
+        configure_host="aarch64-linux-gnu"
+        ;;
+    *)
+        echo "build-wolfssl.sh: unsupported target $TARGET_GOOS/$TARGET_GOARCH" >&2
+        exit 1
+        ;;
+esac
+
 cd "$WOLFSSL_DIR"
 
 # Always regenerate the autotools state. Skipping when configure
@@ -45,8 +75,25 @@ cd "$WOLFSSL_DIR"
 # configure step in a confusing way. The autogen step is cheap.
 ./autogen.sh >/dev/null
 
+# Wipe any prior build artifacts so a target-arch change does not
+# leave stray object files from the previous arch.
+make distclean >/dev/null 2>&1 || true
+./autogen.sh >/dev/null
+
+if [ "$TARGET_GOOS" = "darwin" ] && [ -n "$target_arch" ]; then
+    export CFLAGS="-arch $target_arch ${CFLAGS:-}"
+    export LDFLAGS="-arch $target_arch ${LDFLAGS:-}"
+fi
+
+configure_extra=""
+if [ -n "$configure_host" ]; then
+    configure_extra="--host=$configure_host"
+fi
+
+# shellcheck disable=SC2086
 ./configure \
     --prefix="$INSTALL_PREFIX" \
+    $configure_extra \
     --enable-static \
     --disable-shared \
     --enable-tls13 \

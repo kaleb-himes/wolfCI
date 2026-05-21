@@ -70,7 +70,14 @@ Bring up TLS using the project's chosen crypto library.
         Done: stub package + failing test exist. Test currently
         fails because NewListener returns ErrNotImplemented;
         task 1.4 makes it pass.
-- [ ] 1.4 Implement internal/tlsutil until the test passes.
+- [x] 1.4 Implement internal/tlsutil until the test passes.
+        Done: tlsutil.go wires wolfSSL via CGO. Custom I/O callbacks
+        bridge Go net.Conn to wolfSSL using runtime/cgo.Handle.
+        Side fix in scripts/build-wolfssl.sh: detect Go's
+        GOOS/GOARCH and build wolfSSL to match (an Apple Silicon
+        host running a darwin/amd64 Go would otherwise produce an
+        arm64 .a that fails to link). macOS frameworks Security
+        and CoreFoundation linked via #cgo darwin LDFLAGS.
 - [ ] 1.5 Write a hello-world server cmd/wolfci that opens an HTTPS
         listener via tlsutil and returns 200 OK on /. Test: a
         net/http client over crypto/tls receives the expected body.
@@ -202,5 +209,14 @@ phase when they become relevant.
 - Windows agent support (Linux + macOS first).
 - LDAP, SAML, OIDC SSO (after core auth lands).
 - Pipeline-as-code (declarative pipeline files), once jobs work.
+- Quiet the macOS linker warnings about wolfSSL objects targeting a
+  newer macOS than the Go stdlib link target. Likely fix: set
+  -mmacosx-version-min in scripts/build-wolfssl.sh CFLAGS so both
+  sides agree on a deployment target.
+- Per-conn read/write serialization in internal/tlsutil. wolfSSL
+  is not safe for concurrent wolfSSL_read + wolfSSL_write on the
+  same WOLFSSL*; today the package assumes the caller serializes
+  (which is fine for one reader / one writer net.Conn use, but
+  should be made explicit).
 
 End of PLAN.md.
