@@ -112,6 +112,24 @@ Persist jobs, builds, users, and config as plain files.
 
 The security model.
 
+Decisions locked in for Phase 3 (confirmed with the project owner
+before the phase started):
+
+- bcrypt cost factor: 12 by default. Configurable in
+  config-files/auth/config.yaml under the key bcrypt_cost.
+- SSH key layout: one OpenSSH-format public key per file at
+  config-files/auth/keys/<username>.pub. No authorized_keys-style
+  multi-key files.
+- Role matrix: three roles - admin (everything), developer
+  (read jobs, trigger builds, read logs), viewer (read-only on
+  jobs and builds). NO anonymous role. All access requires
+  authentication.
+- First-admin bootstrap: on first server start with no users on
+  disk, the server generates an SSH keypair, prints the public
+  key path plus a one-time-token URL to stdout, and waits. Admin
+  uses the token to create the first account. Token is
+  invalidated once consumed.
+
 - [ ] 3.1 Failing test (internal/auth/sshkey_test.go): public-key
         login accepts a known authorized key and rejects an unknown
         one.
