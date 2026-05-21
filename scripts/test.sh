@@ -7,6 +7,7 @@
 #   - scripts/test-wolfssl-submodule.sh  wolfSSL submodule pin
 #   - go test ./internal/... ./cmd/... ./plugins/email-on-failure   Go unit tests
 #   - scripts/test-build.sh              host-platform release build
+#   - scripts/test-install.sh            systemd unit + launchd plist
 #
 # Intentionally NOT included:
 #   - scripts/test-build-wolfssl.sh: full wolfSSL build (minutes).
@@ -30,5 +31,6 @@ scripts/test-wolfssl-submodule.sh
 go test ./internal/... ./cmd/... ./plugins/email-on-failure
 
 scripts/test-build.sh
+scripts/test-install.sh
 
 echo "scripts/test.sh: all fast checks passed."

@@ -1,0 +1,51 @@
+[Unit]
+Description=wolfCI server
+Documentation=https://github.com/kaleb-himes/wolfCI
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+
+# Run as a dedicated unprivileged user. Create with:
+#   useradd --system --home /var/lib/wolfci --shell /usr/sbin/nologin wolfci
+User=wolfci
+Group=wolfci
+
+# Runtime state lives here. The directory holds jobs/, builds/,
+# config-files/, plugins/, and nodes/ (per CLAUDE.md "self-contained"
+# rule). chown to the wolfci user before first start.
+WorkingDirectory=/var/lib/wolfci
+
+# Installed by scripts/build.sh into build/bin/<goos>-<goarch>/wolfci;
+# operators copy the binary to /usr/local/bin/.
+ExecStart=/usr/local/bin/wolfci
+
+# Restart on unexpected exit. RestartSec is generous so a crash loop
+# does not hammer the system; tune in a drop-in override if needed.
+Restart=on-failure
+RestartSec=5s
+
+# Graceful shutdown: send SIGTERM, give the process up to 30s to
+# drain in-flight builds, then SIGKILL.
+KillSignal=SIGTERM
+TimeoutStopSec=30s
+
+# Hardening. Leave NoNewPrivileges on; the rest are reasonable
+# defaults for a network service that does not need root.
+NoNewPrivileges=true
+ProtectSystem=full
+ProtectHome=true
+PrivateTmp=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+RestrictSUIDSGID=true
+LockPersonality=true
+
+# Allow the server to bind low ports if the operator chooses 443.
+# Remove this line if you run unprivileged ports only.
+AmbientCapabilities=CAP_NET_BIND_SERVICE
+
+[Install]
+WantedBy=multi-user.target

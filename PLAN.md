@@ -761,8 +761,25 @@ RPC.
         wolfci-ctl version reflects the injected -ldflags value,
         and confirms no stray binaries were left in the repo
         root. Now wired into scripts/test.sh.
-- [ ] 9.2 scripts/install/systemd/wolfci.service template; a
+- [x] 9.2 scripts/install/systemd/wolfci.service template; a
         macOS launchd plist for development.
+        Done: scripts/install/systemd/wolfci.service runs wolfci
+        as a dedicated wolfci user out of /var/lib/wolfci, with
+        on-failure restart, 30s graceful stop window, and the
+        usual sandboxing knobs (NoNewPrivileges, ProtectSystem,
+        ProtectHome, PrivateTmp, plus CAP_NET_BIND_SERVICE so
+        operators can bind 443 without root).
+        scripts/install/launchd/com.wolfssl.wolfci.plist ships
+        a launchd job for development boxes (RunAtLoad,
+        KeepAlive, WorkingDirectory under /usr/local/var/wolfci,
+        Background ProcessType, stdout/err to
+        /usr/local/var/log/wolfci.{log,err}). Both templates
+        name /usr/local/bin/wolfci so operators just copy
+        build/bin/<goos>-<goarch>/wolfci there after running
+        scripts/build.sh. Gate: scripts/test-install.sh
+        checks file presence, every section/key the loader
+        actually reads, and (on macOS) runs plutil -lint on
+        the plist. Wired into scripts/test.sh.
 - [ ] 9.3 docs/GETTING-STARTED.md: a 10-minute path from "git
         clone" to "first green build".
 - [ ] 9.4 docs/ARCHITECTURE.md with an ASCII component diagram.
