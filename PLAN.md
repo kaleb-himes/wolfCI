@@ -479,6 +479,32 @@ Additional priorities confirmed after Phase 5 mid-point review:
 
 Embedded HTML UI served from the single binary.
 
+Decisions locked in for Phase 6 (confirmed with the project
+owner before the phase started):
+
+- CSS: hand-written, embedded as a single asset. No framework.
+  Aligns with the project's small-footprint mantra.
+- Sessions: HTTP-only Secure SameSite=Strict cookies backed by
+  per-session files under config-files/auth/sessions/<token>.
+  CSRF defense piggybacks on SameSite=Strict.
+- Interactivity: Go html/template server-rendered pages plus
+  vanilla JS where needed (live log tailing via SSE). No HTMX,
+  no SPA framework.
+- Start order: FileLogSink + log tailing endpoint FIRST (closes
+  the 5.7 backlog item), THEN the login + page UI. Admin
+  user-management endpoints land after the basic UI shell.
+
+Additional Phase 6 task at the front of the list:
+
+- [ ] 6.0 FileLogSink + GET /api/v1/builds/{job}/{n}/log live
+        tail endpoint. FileLogSink persists each LogChunk to
+        builds/<job>/<n>/log.live with append-mode flock-safe
+        writes. The endpoint streams the file's current
+        contents then follows appends via Server-Sent Events
+        (text/event-stream). Failing test exercises a build
+        whose LogChunks are written and read back through the
+        endpoint.
+
 - [ ] 6.1 Failing test (internal/server/ui_test.go): GET / returns
         the login page; authenticated GET /jobs returns the job
         list.
