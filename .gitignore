@@ -10,6 +10,12 @@ bin/
 build/
 dist/
 
+# Stray binaries from `go build` without -o (each cmd produces
+# a binary named after its directory).
+/wolfci
+/wolfci-agent
+/wolfci-ctl
+
 # Go
 vendor/
 go.work
