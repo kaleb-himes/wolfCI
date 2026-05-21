@@ -1,7 +1,6 @@
 package server
 
 import (
-	"crypto/rand"
 	"encoding/hex"
 	"errors"
 	"fmt"
@@ -11,6 +10,8 @@ import (
 	"time"
 
 	"gopkg.in/yaml.v3"
+
+	"github.com/kaleb-himes/wolfCI/internal/wolfcrypt"
 )
 
 // Session is the on-disk shape of one logged-in user's session
@@ -118,11 +119,11 @@ func (s *SessionStore) path(token string) string {
 }
 
 func randomToken() (string, error) {
-	var buf [32]byte
-	if _, err := rand.Read(buf[:]); err != nil {
+	buf, err := wolfcrypt.RandBytes(32)
+	if err != nil {
 		return "", err
 	}
-	return hex.EncodeToString(buf[:]), nil
+	return hex.EncodeToString(buf), nil
 }
 
 // validToken guards against filesystem traversal via the token

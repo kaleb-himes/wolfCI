@@ -1052,10 +1052,22 @@ before the phase started):
         without rewriting the GCE driver against wolfSSL. Logged
         as a finding for the user; wolfCI's own source code now
         imports zero stdlib or x/crypto cryptography.
-- [ ] 10.4 Replace crypto/rand in internal/server/session.go with
-        wolfcrypt.RandBytes. Token size and hex encoding stay the
-        same; only the entropy source changes. Drop the
-        crypto/rand import.
+- [x] 10.4 Replace crypto/rand in internal/server/session.go with
+        wolfcrypt.RandBytes.
+        Done: session.go imports
+        github.com/kaleb-himes/wolfCI/internal/wolfcrypt instead
+        of crypto/rand; randomToken() reads 32 bytes from
+        wolfcrypt.RandBytes and hex-encodes them as before. The
+        token size, format (64 lowercase hex chars), and the
+        on-disk session layout are unchanged.
+        Gate: new internal/server/session_test.go ships
+        TestSessionStore_CreateLookupRoundtrip - two Create
+        calls return distinct tokens (entropy sanity), tokens
+        are 64 lowercase hex, lookup of a freshly-minted token
+        returns the same Session, lookup of a syntactically
+        invalid token errors out before touching disk. The
+        existing UI tests (which exercise the full
+        login-cookie-redirect flow) continue to pass.
 - [ ] 10.5 Vendor github.com/wolfSSL/go-wolfssl into
         third_party/go-wolfssl/ as a git submodule pinned to the
         latest tag (latest stable release per wolfSSL convention).
