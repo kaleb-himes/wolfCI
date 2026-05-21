@@ -1,9 +1,9 @@
 diff --git a/ed25519.go b/ed25519.go
 new file mode 100644
-index 0000000..a89565f
+index 0000000..eee9abc
 --- /dev/null
 +++ b/ed25519.go
-@@ -0,0 +1,114 @@
+@@ -0,0 +1,220 @@
 +/* ed25519.go
 + *
 + * Copyright (C) 2006-2025 wolfSSL Inc.
@@ -11,18 +11,19 @@ index 0000000..a89565f
 + * This file is part of wolfSSL.
 + *
 + * wolfSSL is free software; you can redistribute it and/or modify
-+ * it under the terms of the GNU General Public License as published by
-+ * the Free Software Foundation; either version 2 of the License, or
-+ * (at your option) any later version.
++ * it under the terms of the GNU General Public License as published
++ * by the Free Software Foundation; either version 2 of the License,
++ * or (at your option) any later version.
 + *
-+ * wolfSSL is distributed in the hope that it will be useful,
-+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
-+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-+ * GNU General Public License for more details.
++ * wolfSSL is distributed in the hope that it will be useful, but
++ * WITHOUT ANY WARRANTY; without even the implied warranty of
++ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
++ * General Public License for more details.
 + *
 + * You should have received a copy of the GNU General Public License
 + * along with this program; if not, write to the Free Software
-+ * Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA 02110-1335, USA
++ * Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA
++ * 02110-1335, USA
 + */
 +
 +package wolfSSL
@@ -30,19 +31,95 @@ index 0000000..a89565f
 +// #include <wolfssl/options.h>
 +// #include <wolfssl/wolfcrypt/ed25519.h>
 +// #include <wolfssl/wolfcrypt/random.h>
++//
 +// #ifndef HAVE_ED25519
 +// typedef struct ed25519_key {} ed25519_key;
-+// int wc_ed25519_init(ed25519_key* key) { (void)key; return -174; }
-+// void wc_ed25519_free(ed25519_key* key) { (void)key; }
-+// int wc_ed25519_make_key(WC_RNG* rng, int keysize, ed25519_key* key) { (void)rng; (void)keysize; (void)key; return -174; }
-+// int wc_ed25519_import_public(const byte* in, word32 inLen, ed25519_key* key) { (void)in; (void)inLen; (void)key; return -174; }
-+// int wc_ed25519_import_private_key(const byte* priv, word32 privSz, const byte* pub, word32 pubSz, ed25519_key* key) { (void)priv; (void)privSz; (void)pub; (void)pubSz; (void)key; return -174; }
-+// int wc_ed25519_export_public(const ed25519_key* key, byte* out, word32* outLen) { (void)key; (void)out; (void)outLen; return -174; }
-+// int wc_ed25519_export_private_only(const ed25519_key* key, byte* out, word32* outLen) { (void)key; (void)out; (void)outLen; return -174; }
-+// int wc_ed25519_sign_msg(const byte* in, word32 inLen, byte* out, word32* outLen, ed25519_key* key) { (void)in; (void)inLen; (void)out; (void)outLen; (void)key; return -174; }
-+// int wc_ed25519_verify_msg(const byte* sig, word32 sigLen, const byte* msg, word32 msgLen, int* res, ed25519_key* key) { (void)sig; (void)sigLen; (void)msg; (void)msgLen; (void)res; (void)key; return -174; }
++//
++// int wc_ed25519_init(ed25519_key* key)
++// {
++//     (void)key;
++//     return -174;
++// }
++//
++// void wc_ed25519_free(ed25519_key* key)
++// {
++//     (void)key;
++// }
++//
++// int wc_ed25519_make_key(WC_RNG* rng, int keysize,
++//         ed25519_key* key)
++// {
++//     (void)rng;
++//     (void)keysize;
++//     (void)key;
++//     return -174;
++// }
++//
++// int wc_ed25519_import_public(const byte* in, word32 inLen,
++//         ed25519_key* key)
++// {
++//     (void)in;
++//     (void)inLen;
++//     (void)key;
++//     return -174;
++// }
++//
++// int wc_ed25519_import_private_key(const byte* priv,
++//         word32 privSz, const byte* pub, word32 pubSz,
++//         ed25519_key* key)
++// {
++//     (void)priv;
++//     (void)privSz;
++//     (void)pub;
++//     (void)pubSz;
++//     (void)key;
++//     return -174;
++// }
++//
++// int wc_ed25519_export_public(const ed25519_key* key,
++//         byte* out, word32* outLen)
++// {
++//     (void)key;
++//     (void)out;
++//     (void)outLen;
++//     return -174;
++// }
++//
++// int wc_ed25519_export_private_only(const ed25519_key* key,
++//         byte* out, word32* outLen)
++// {
++//     (void)key;
++//     (void)out;
++//     (void)outLen;
++//     return -174;
++// }
++//
++// int wc_ed25519_sign_msg(const byte* in, word32 inLen,
++//         byte* out, word32* outLen, ed25519_key* key)
++// {
++//     (void)in;
++//     (void)inLen;
++//     (void)out;
++//     (void)outLen;
++//     (void)key;
++//     return -174;
++// }
++//
++// int wc_ed25519_verify_msg(const byte* sig, word32 sigLen,
++//         const byte* msg, word32 msgLen, int* res,
++//         ed25519_key* key)
++// {
++//     (void)sig;
++//     (void)sigLen;
++//     (void)msg;
++//     (void)msgLen;
++//     (void)res;
++//     (void)key;
++//     return -174;
++// }
 +// #endif
 +import "C"
++
 +import (
 +    "unsafe"
 +)
@@ -57,46 +134,70 @@ index 0000000..a89565f
 +    C.wc_ed25519_free(key)
 +}
 +
-+func Wc_ed25519_make_key(rng *C.struct_WC_RNG, keySize int, key *C.struct_ed25519_key) int {
++func Wc_ed25519_make_key(rng *C.struct_WC_RNG, keySize int,
++    key *C.struct_ed25519_key) int {
 +    return int(C.wc_ed25519_make_key(rng, C.int(keySize), key))
 +}
 +
-+func Wc_ed25519_import_public(in []byte, inLen int, key *C.struct_ed25519_key) int {
-+    if inLen == 0 { return BAD_FUNC_ARG }
++func Wc_ed25519_import_public(in []byte, inLen int,
++    key *C.struct_ed25519_key) int {
++    if inLen == 0 {
++        return BAD_FUNC_ARG
++    }
 +    return int(C.wc_ed25519_import_public(
-+        (*C.byte)(unsafe.Pointer(&in[0])), C.word32(inLen), key))
++        (*C.byte)(unsafe.Pointer(&in[0])),
++        C.word32(inLen),
++        key))
 +}
 +
-+func Wc_ed25519_import_private_key(priv []byte, privSz int, pub []byte, pubSz int, key *C.struct_ed25519_key) int {
-+    if privSz == 0 || pubSz == 0 { return BAD_FUNC_ARG }
++func Wc_ed25519_import_private_key(priv []byte, privSz int,
++    pub []byte, pubSz int, key *C.struct_ed25519_key) int {
++    if privSz == 0 || pubSz == 0 {
++        return BAD_FUNC_ARG
++    }
 +    return int(C.wc_ed25519_import_private_key(
 +        (*C.byte)(unsafe.Pointer(&priv[0])), C.word32(privSz),
 +        (*C.byte)(unsafe.Pointer(&pub[0])), C.word32(pubSz),
 +        key))
 +}
 +
-+func Wc_ed25519_export_public(key *C.struct_ed25519_key, out []byte, outLen *int) int {
-+    if len(out) == 0 || outLen == nil { return BAD_FUNC_ARG }
++func Wc_ed25519_export_public(key *C.struct_ed25519_key,
++    out []byte, outLen *int) int {
++    if len(out) == 0 || outLen == nil {
++        return BAD_FUNC_ARG
++    }
 +    cOutLen := C.word32(*outLen)
 +    rc := int(C.wc_ed25519_export_public(
-+        key, (*C.byte)(unsafe.Pointer(&out[0])), &cOutLen))
++        key,
++        (*C.byte)(unsafe.Pointer(&out[0])),
++        &cOutLen))
 +    *outLen = int(cOutLen)
 +    return rc
 +}
 +
-+func Wc_ed25519_export_private_only(key *C.struct_ed25519_key, out []byte, outLen *int) int {
-+    if len(out) == 0 || outLen == nil { return BAD_FUNC_ARG }
++func Wc_ed25519_export_private_only(key *C.struct_ed25519_key,
++    out []byte, outLen *int) int {
++    if len(out) == 0 || outLen == nil {
++        return BAD_FUNC_ARG
++    }
 +    cOutLen := C.word32(*outLen)
 +    rc := int(C.wc_ed25519_export_private_only(
-+        key, (*C.byte)(unsafe.Pointer(&out[0])), &cOutLen))
++        key,
++        (*C.byte)(unsafe.Pointer(&out[0])),
++        &cOutLen))
 +    *outLen = int(cOutLen)
 +    return rc
 +}
 +
-+func Wc_ed25519_sign_msg(in []byte, inLen int, out []byte, outLen *int, key *C.struct_ed25519_key) int {
-+    if len(out) == 0 || outLen == nil { return BAD_FUNC_ARG }
++func Wc_ed25519_sign_msg(in []byte, inLen int, out []byte,
++    outLen *int, key *C.struct_ed25519_key) int {
++    if len(out) == 0 || outLen == nil {
++        return BAD_FUNC_ARG
++    }
 +    var inPtr *C.byte
-+    if inLen > 0 { inPtr = (*C.byte)(unsafe.Pointer(&in[0])) }
++    if inLen > 0 {
++        inPtr = (*C.byte)(unsafe.Pointer(&in[0]))
++    }
 +    cOutLen := C.word32(*outLen)
 +    rc := int(C.wc_ed25519_sign_msg(
 +        inPtr, C.word32(inLen),
@@ -106,10 +207,15 @@ index 0000000..a89565f
 +    return rc
 +}
 +
-+func Wc_ed25519_verify_msg(sig []byte, sigLen int, msg []byte, msgLen int, res *int, key *C.struct_ed25519_key) int {
-+    if sigLen == 0 || res == nil { return BAD_FUNC_ARG }
++func Wc_ed25519_verify_msg(sig []byte, sigLen int, msg []byte,
++    msgLen int, res *int, key *C.struct_ed25519_key) int {
++    if sigLen == 0 || res == nil {
++        return BAD_FUNC_ARG
++    }
 +    var msgPtr *C.byte
-+    if msgLen > 0 { msgPtr = (*C.byte)(unsafe.Pointer(&msg[0])) }
++    if msgLen > 0 {
++        msgPtr = (*C.byte)(unsafe.Pointer(&msg[0]))
++    }
 +    cRes := C.int(0)
 +    rc := int(C.wc_ed25519_verify_msg(
 +        (*C.byte)(unsafe.Pointer(&sig[0])), C.word32(sigLen),

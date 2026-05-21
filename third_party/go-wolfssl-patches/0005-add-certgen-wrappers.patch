@@ -1,9 +1,9 @@
 diff --git a/certgen.go b/certgen.go
 new file mode 100644
-index 0000000..5225942
+index 0000000..3881d04
 --- /dev/null
 +++ b/certgen.go
-@@ -0,0 +1,125 @@
+@@ -0,0 +1,156 @@
 +/* certgen.go
 + *
 + * Copyright (C) 2006-2025 wolfSSL Inc.
@@ -11,18 +11,19 @@ index 0000000..5225942
 + * This file is part of wolfSSL.
 + *
 + * wolfSSL is free software; you can redistribute it and/or modify
-+ * it under the terms of the GNU General Public License as published by
-+ * the Free Software Foundation; either version 2 of the License, or
-+ * (at your option) any later version.
++ * it under the terms of the GNU General Public License as published
++ * by the Free Software Foundation; either version 2 of the License,
++ * or (at your option) any later version.
 + *
-+ * wolfSSL is distributed in the hope that it will be useful,
-+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
-+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-+ * GNU General Public License for more details.
++ * wolfSSL is distributed in the hope that it will be useful, but
++ * WITHOUT ANY WARRANTY; without even the implied warranty of
++ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
++ * General Public License for more details.
 + *
 + * You should have received a copy of the GNU General Public License
 + * along with this program; if not, write to the Free Software
-+ * Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA 02110-1335, USA
++ * Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA
++ * 02110-1335, USA
 + */
 +
 +package wolfSSL
@@ -35,10 +36,12 @@ index 0000000..5225942
 +// #include <wolfssl/wolfcrypt/random.h>
 +// #include <string.h>
 +//
-+// // Copy CommonName + Organization into the fixed-size char arrays
-+// // inside Cert.subject. Doing this in C avoids fiddly Go-side
-+// // length math against the CTC_NAME_SIZE constant.
-+// static void wolfci_cert_set_subject_cn_org(Cert* cert, const char* cn, const char* org) {
++// // Copy CommonName + Organization into the fixed-size char
++// // arrays inside Cert.subject. Doing this in C avoids fiddly
++// // Go-side length math against the CTC_NAME_SIZE constant.
++// static void wolfci_cert_set_subject_cn_org(Cert* cert,
++//         const char* cn, const char* org)
++// {
 +//     if (cn && cn[0]) {
 +//         strncpy(cert->subject.commonName, cn, CTC_NAME_SIZE - 1);
 +//         cert->subject.commonName[CTC_NAME_SIZE - 1] = '\0';
@@ -51,14 +54,17 @@ index 0000000..5225942
 +//     }
 +// }
 +//
-+// // Set the scalar Cert fields. Plain assignments, but going through
-+// // a C function avoids Go having to know the layout of Cert.
-+// static void wolfci_cert_set_validity(Cert* cert, int daysValid, int isCA, int sigType) {
++// // Plain scalar assignments wrapped in a function so Go does
++// // not have to know the layout of Cert.
++// static void wolfci_cert_set_validity(Cert* cert, int daysValid,
++//         int isCA, int sigType)
++// {
 +//     cert->daysValid = daysValid;
 +//     cert->isCA      = isCA;
 +//     cert->sigType   = sigType;
 +// }
 +import "C"
++
 +import (
 +    "unsafe"
 +)
@@ -74,10 +80,13 @@ index 0000000..5225942
 +    return int(C.wc_InitCert(cert))
 +}
 +
-+// Wc_SetSubjectCN_Org copies the CommonName + Organization strings
-+// into Cert.subject's fixed-size char arrays. Empty strings leave
-+// the corresponding field untouched.
-+func Wc_SetSubjectCN_Org(cert *C.struct_Cert, commonName, organization string) {
++/*
++ * Wc_SetSubjectCN_Org copies the CommonName + Organization strings
++ * into Cert.subject's fixed-size char arrays. Empty strings leave
++ * the corresponding field untouched.
++ */
++func Wc_SetSubjectCN_Org(cert *C.struct_Cert,
++    commonName, organization string) {
 +    cn := C.CString(commonName)
 +    defer C.free(unsafe.Pointer(cn))
 +    org := C.CString(organization)
@@ -85,16 +94,25 @@ index 0000000..5225942
 +    C.wolfci_cert_set_subject_cn_org(cert, cn, org)
 +}
 +
-+// Wc_SetCertValidity sets Cert.daysValid, Cert.isCA, and
-+// Cert.sigType. sigType is one of the CTC_* constants.
-+func Wc_SetCertValidity(cert *C.struct_Cert, daysValid int, isCA bool, sigType int) {
++/*
++ * Wc_SetCertValidity sets Cert.daysValid, Cert.isCA, and
++ * Cert.sigType. sigType is one of the CTC_* constants.
++ */
++func Wc_SetCertValidity(cert *C.struct_Cert, daysValid int,
++    isCA bool, sigType int) {
 +    ca := 0
-+    if isCA { ca = 1 }
-+    C.wolfci_cert_set_validity(cert, C.int(daysValid), C.int(ca), C.int(sigType))
++    if isCA {
++        ca = 1
++    }
++    C.wolfci_cert_set_validity(cert, C.int(daysValid), C.int(ca),
++        C.int(sigType))
 +}
 +
-+func Wc_SetIssuerBuffer(cert *C.struct_Cert, der []byte, derSz int) int {
-+    if derSz == 0 { return BAD_FUNC_ARG }
++func Wc_SetIssuerBuffer(cert *C.struct_Cert, der []byte,
++    derSz int) int {
++    if derSz == 0 {
++        return BAD_FUNC_ARG
++    }
 +    return int(C.wc_SetIssuerBuffer(
 +        cert,
 +        (*C.byte)(unsafe.Pointer(&der[0])), C.int(derSz)))
@@ -106,24 +124,37 @@ index 0000000..5225942
 +    return int(C.wc_SetExtKeyUsage(cert, cv))
 +}
 +
-+// Wc_MakeCert builds an unsigned X.509 cert in der using the
-+// provided subject key. Exactly one of rsaKey / eccKey must be
-+// non-nil; the other is the placeholder pointer wolfCrypt uses to
-+// determine the subject key type.
-+func Wc_MakeCert(cert *C.struct_Cert, der []byte, derSz int, rsaKey *C.struct_RsaKey, eccKey *C.struct_ecc_key, rng *C.struct_WC_RNG) int {
-+    if derSz == 0 { return BAD_FUNC_ARG }
++/*
++ * Wc_MakeCert builds an unsigned X.509 cert in der using the
++ * provided subject key. Exactly one of rsaKey / eccKey must be
++ * non-nil; the other is the placeholder pointer wolfCrypt uses
++ * to determine the subject key type.
++ */
++func Wc_MakeCert(cert *C.struct_Cert, der []byte, derSz int,
++    rsaKey *C.struct_RsaKey, eccKey *C.struct_ecc_key,
++    rng *C.struct_WC_RNG) int {
++    if derSz == 0 {
++        return BAD_FUNC_ARG
++    }
 +    return int(C.wc_MakeCert(
 +        cert,
 +        (*C.byte)(unsafe.Pointer(&der[0])), C.word32(derSz),
 +        rsaKey, eccKey, rng))
 +}
 +
-+// Wc_SignCert signs the cert body produced by Wc_MakeCert. requestSz
-+// is the body size wc_MakeCert returned. sigType is one of the
-+// CTC_* constants. Exactly one of rsaKey / eccKey must be non-nil
-+// and identifies the signing key.
-+func Wc_SignCert(requestSz int, sigType int, der []byte, derSz int, rsaKey *C.struct_RsaKey, eccKey *C.struct_ecc_key, rng *C.struct_WC_RNG) int {
-+    if derSz == 0 { return BAD_FUNC_ARG }
++/*
++ * Wc_SignCert signs the cert body produced by Wc_MakeCert.
++ * requestSz is the body size wc_MakeCert returned. sigType is
++ * one of the CTC_* constants. Exactly one of rsaKey / eccKey
++ * must be non-nil and identifies the signing key.
++ */
++func Wc_SignCert(requestSz int, sigType int,
++    der []byte, derSz int,
++    rsaKey *C.struct_RsaKey, eccKey *C.struct_ecc_key,
++    rng *C.struct_WC_RNG) int {
++    if derSz == 0 {
++        return BAD_FUNC_ARG
++    }
 +    return int(C.wc_SignCert(
 +        C.int(requestSz), C.int(sigType),
 +        (*C.byte)(unsafe.Pointer(&der[0])), C.word32(derSz),
