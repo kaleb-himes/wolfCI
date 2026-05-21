@@ -111,6 +111,7 @@ fi
     --enable-supportedcurves \
     --enable-keygen \
     --enable-certgen \
+    --enable-certext \
     --enable-certreq \
     --disable-examples \
     --disable-crypttests >/dev/null

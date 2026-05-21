@@ -868,11 +868,16 @@ before the phase started):
   instead of being rewritten when the auth stack is overhauled
   next.
 
-- [ ] 10.1 internal/wolfcrypt package: the wolfCrypt bridge that
+- [x] 10.1 internal/wolfcrypt package: the wolfCrypt bridge that
         every other auth/test/session file in this tree will use.
         Subdivided into three sub-checkpoints because it is all
         new CGO surface and each primitive deserves its own KATs
-        and red/green iteration.
+        and red/green iteration. All three landed; the package now
+        exposes RandBytes / HMACSHA256 / PBKDF2HMACSHA256 / SHA256
+        / Ed25519Verify / ECCVerifyP256 /
+        RSAVerifyPKCS1v15SHA256 / MintCert + the Cert/CertConfig
+        types. Every consumer in 10.2 through 10.6 imports this
+        package and nothing else from a crypto namespace.
         - [x] 10.1a RandBytes + HMACSHA256 + PBKDF2HMACSHA256.
               Done: internal/wolfcrypt/wolfcrypt.go ships the
               three primitives via CGO against wolfSSL
@@ -921,13 +926,42 @@ before the phase started):
                          test file) plus tampered-message and
                          tampered-signature negatives.
               Gate file: internal/wolfcrypt/verify_test.go.
-        - [ ] 10.1c MintCert. Failing test exercises a CA root +
-              ServerAuth + ClientAuth chain similar to
-              testcerts.NewMTLSChain, asserts the DER parses via
-              x509.ParseCertificate (parsing is wire format, not
-              crypto), and asserts a signature wolfCrypt produced
-              over a known payload verifies through
-              wolfcrypt.ECCVerify with the cert's public key.
+        - [x] 10.1c MintCert + SHA256.
+              Done: internal/wolfcrypt/cert.go ships
+              MintCert(cfg, signer) (returns Cert{CertDER, KeyDER,
+              PubSEC1}) and the standalone SHA256(data). MintCert
+              generates a fresh ECC P-256 keypair (wc_ecc_make_key),
+              exports the public part as SEC1 uncompressed
+              (wc_ecc_export_x963), exports the private key as DER
+              (wc_EccKeyToDer), builds the Cert struct
+              (wc_InitCert + a small C helper that copies subject
+              CommonName + Organization into the fixed-size char
+              arrays), optionally calls wc_SetExtKeyUsage for
+              ServerAuth / ClientAuth, sets the issuer from
+              signer.CertDER via wc_SetIssuerBuffer (or self-signs
+              when signer == nil), then wc_MakeCert + wc_SignCert
+              with CTC_SHA256wECDSA. SAN is deferred to 10.5
+              because wolfCrypt's wc_SetAltNames* APIs take DER, not
+              a string; building that DER lives next to the
+              testcerts rewrite that consumes it.
+              Build-profile change: scripts/build-wolfssl.sh now
+              enables --enable-certext so wc_SetExtKeyUsage is
+              available; scripts/test-build-wolfssl.sh gates the
+              three cert flags (keygen, certgen, certext) so a
+              profile regression cannot quietly break MintCert.
+              Gate file: internal/wolfcrypt/cert_test.go. Tests:
+              TestSHA256_NIST ("abc" KAT), TestSHA256_Empty
+              (empty-string KAT), TestMintCert_SelfSignedCA,
+              TestMintCert_LeafSignedByCA,
+              TestMintCert_LeafSignatureVerifiesAgainstCA
+              (end-to-end: wolfCrypt-side sign produces a
+              signature that wolfCrypt-side ECCVerifyP256 accepts
+              over SHA256 of the tbsCertificate, plus the
+              corresponding tamper-negative). The end-to-end test
+              uses a tiny inline DER walker (extractTBSAndSig) to
+              extract tbsCertificate and the signature BIT STRING
+              contents from a leaf cert without parsing it with
+              stdlib crypto.
 - [ ] 10.2 Replace x/crypto/bcrypt in internal/auth/password.go
         with PBKDF2-HMAC-SHA-256 via internal/wolfcrypt.
         Iteration count and salt length live in

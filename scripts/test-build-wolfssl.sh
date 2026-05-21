@@ -40,7 +40,10 @@ for flag in \
     --enable-curve25519 \
     --enable-ed25519 \
     --enable-sni \
-    --enable-alpn
+    --enable-alpn \
+    --enable-keygen \
+    --enable-certgen \
+    --enable-certext
 do
     if ! grep -qF -- "$flag" "$SCRIPT"; then
         fail "$SCRIPT is missing required configure flag $flag"
