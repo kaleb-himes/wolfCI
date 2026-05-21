@@ -262,7 +262,27 @@ before the phase started):
 - [ ] 5.2 Failing test (tests/agent_e2e_test.go): an agent
         registers, receives a job, executes it, and returns the
         result.
+        Sub-checkpoints:
+        - [x] 5.2a Protocol scaffold: api/v1/agent.proto with
+              the AgentService.Register RPC, scripts/gen-proto.sh
+              regen helper, generated agent.pb.go and
+              agent_grpc.pb.go, google.golang.org/grpc v1.56.3
+              and google.golang.org/protobuf v1.31.0 pinned in
+              go.mod for Go 1.18 compatibility.
+        - [ ] 5.2b gRPC server: register the AgentService and
+              return a RegisterResponse for an incoming AgentInfo.
+        - [ ] 5.2c gRPC client + wolfSSL mTLS bridge: agent
+              dials the server, completes the mTLS handshake,
+              issues Register. Requires client-side wolfSSL in
+              internal/tlsutil.
+        - [ ] 5.2d End-to-end test (tests/agent_e2e_test.go):
+              spin up server, spin up agent, observe a Register
+              round trip, then drive a job through (once 5.3 is
+              far enough along).
 - [ ] 5.3 Implement the agent protocol over gRPC + wolfSSL mTLS.
+        Becomes meaningful once 5.2b and 5.2c are in. Will need
+        proto extensions for the bidirectional Connect stream
+        (JobAssignment, LogChunk, BuildComplete).
 - [ ] 5.4 GCE provisioner (internal/nodes/gce): uses the Google
         Cloud Go SDK to launch an instance with a startup script
         that runs wolfci-agent and joins the server.
