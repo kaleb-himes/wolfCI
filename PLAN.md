@@ -868,16 +868,41 @@ before the phase started):
   instead of being rewritten when the auth stack is overhauled
   next.
 
-- [ ] 10.1 internal/wolfcrypt package. Failing test
-        (internal/wolfcrypt/wolfcrypt_test.go) exercises every
-        primitive: RandBytes (no all-zero output across 1000
-        iterations), HMACSHA256 (RFC 4231 test vector 1),
-        PBKDF2HMACSHA256 (RFC 6070 test vector 2 if applicable;
-        otherwise a self-consistent round-trip), Ed25519Verify
-        (signed message round-trip), ECCVerify (P-256 round
-        trip), RSAVerify (round trip), MintCert (DER output
-        parses via x509.ParseCertificate and validates a
-        signature wolfCrypt produced).
+- [ ] 10.1 internal/wolfcrypt package: the wolfCrypt bridge that
+        every other auth/test/session file in this tree will use.
+        Subdivided into three sub-checkpoints because it is all
+        new CGO surface and each primitive deserves its own KATs
+        and red/green iteration.
+        - [x] 10.1a RandBytes + HMACSHA256 + PBKDF2HMACSHA256.
+              Done: internal/wolfcrypt/wolfcrypt.go ships the
+              three primitives via CGO against wolfSSL
+              (wc_InitRng + wc_RNG_GenerateBlock; wc_HmacInit +
+              wc_HmacSetKey + wc_HmacUpdate + wc_HmacFinal with
+              WC_SHA256; wc_PBKDF2 with WC_SHA256). Same
+              CGO directives as internal/tlsutil so both packages
+              link the same libwolfssl.a. Empty-slice handling
+              is explicit (nil pointer instead of &slice[0]).
+              Gates: TestRandBytes_NonZero (1000-iter no-zero +
+              no-collision), TestRandBytes_SizeZero,
+              TestHMACSHA256_RFC4231_TC1 (canonical 0x0b-key
+              "Hi There" KAT), TestHMACSHA256_RFC4231_TC2 ("Jefe"
+              short-key KAT), TestPBKDF2_RFC7914_Param ("passwd"
+              + "salt" + c=1 + dkLen=64 KAT),
+              TestPBKDF2_Determinism, TestPBKDF2_DifferentSalts
+              Diverge.
+        - [ ] 10.1b Ed25519Verify + ECCVerify (P-256) + RSAVerify.
+              Failing tests round-trip each: sign with a freshly
+              generated key (wolfCrypt-side or known test
+              vector), verify with the wolfcrypt.*Verify wrapper.
+              Also a tampered-message negative case per algorithm
+              to catch a wrapper that always returns true.
+        - [ ] 10.1c MintCert. Failing test exercises a CA root +
+              ServerAuth + ClientAuth chain similar to
+              testcerts.NewMTLSChain, asserts the DER parses via
+              x509.ParseCertificate (parsing is wire format, not
+              crypto), and asserts a signature wolfCrypt produced
+              over a known payload verifies through
+              wolfcrypt.ECCVerify with the cert's public key.
 - [ ] 10.2 Replace x/crypto/bcrypt in internal/auth/password.go
         with PBKDF2-HMAC-SHA-256 via internal/wolfcrypt.
         Iteration count and salt length live in
