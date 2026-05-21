@@ -21,13 +21,14 @@ Format conventions:
 
 ## Current Phase
 
-Phase 8 - CLI client
+Phase 9 - Packaging, docs, polish
 
 (Update this line when a phase completes. Phase 0 was completed in
 the initial planning turn. Phase 1 completed in iteration 4,
 Phase 2 in iteration 5, Phase 3 in iteration 8, Phase 4 in
 iteration 10, Phase 5 in iteration 21, Phase 6 in iteration 25,
-Phase 7 in iteration 28 of the slash-loop run.)
+Phase 7 in iteration 28, Phase 8 in iteration 32 of the
+slash-loop run.)
 
 ## Phase 0 - Bootstrap
 
@@ -672,7 +673,7 @@ The "login" subcommand is a config-only operation that writes
 ctl.yaml; mTLS handles the actual authentication on every
 RPC.
 
-- [ ] 8.1 cmd/wolfci-ctl with subcommands: login, job list, job
+- [x] 8.1 cmd/wolfci-ctl with subcommands: login, job list, job
         run, build log, node list. Failing test
         (tests/ctl_test.go) exercises each.
         Sub-checkpoints:
@@ -718,11 +719,28 @@ RPC.
               Convention: subcommand flags must precede
               positional args (Go stdlib flag stops at first
               non-flag).
-        - [ ] 8.1d `wolfci-ctl job run <name>` subcommand.
-              Blocked on wiring scheduler.Scheduler into the
-              wolfCI server bootstrap so CLIService.RunJob can
-              enqueue builds. The CLI subcommand itself is
-              ~30 lines on top of a new RunJob RPC.
+        - [x] 8.1d `wolfci-ctl job run <name>` subcommand.
+              Done: api/v1/cli/cli.proto adds
+              RunJob(RunJobRequest{JobName}) ->
+              RunJobResponse{BuildNumber}. internal/cliservice
+              defines an Enqueuer interface (with EnqueuerFunc
+              adapter) so scheduler.Scheduler and cliservice
+              stay decoupled; bootstrap code plumbs them
+              together. Server.WithEnqueuer wires it;
+              RunJob returns Unavailable when none is set
+              (allowing CLIService to ship without job-run
+              capability). cmd/wolfci-ctl/jobrun.go drives
+              `job run [--json] <name>`. Human output:
+              "<name> queued as build N" plus a tail hint
+              pointing at `wolfci-ctl build log <name> N`.
+              JSON: {"job": "<name>", "build_number": N}.
+              Gates: TestCLIService_RunJob (full gRPC
+              roundtrip with a fake Enqueuer),
+              TestCLIService_RunJob_NoScheduler,
+              TestCLIService_RunJob_UnknownJob.
+              Wiring scheduler.Scheduler into cmd/wolfci so
+              operators do not need to write Go to get
+              `job run` is a Phase 9 packaging concern.
 
 ## Phase 9 - Packaging, docs, polish
 
