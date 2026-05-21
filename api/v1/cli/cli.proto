@@ -15,6 +15,13 @@ service CLIService {
   // ListNodes returns every agent the server knows about,
   // both Register'd (visible) and currently connected.
   rpc ListNodes(Empty) returns (ListNodesResponse);
+
+  // StreamBuildLog opens a server-streaming RPC that emits
+  // each chunk of builds/<job>/<n>/log.live as it is written.
+  // The server polls for new bytes until the client cancels
+  // ctx or the configured idle timeout elapses with no new
+  // output.
+  rpc StreamBuildLog(BuildLogRequest) returns (stream LogLine);
 }
 
 message Empty {}
@@ -39,4 +46,13 @@ message Node {
   repeated string labels = 2;
   int32 executors = 3;
   bool connected = 4;
+}
+
+message BuildLogRequest {
+  string job_name = 1;
+  int32 build_number = 2;
+}
+
+message LogLine {
+  bytes data = 1;
 }

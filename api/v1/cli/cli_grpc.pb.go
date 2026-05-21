@@ -23,8 +23,9 @@ import (
 const _ = grpc.SupportPackageIsVersion7
 
 const (
-	CLIService_ListJobs_FullMethodName  = "/wolfci.v1.cli.CLIService/ListJobs"
-	CLIService_ListNodes_FullMethodName = "/wolfci.v1.cli.CLIService/ListNodes"
+	CLIService_ListJobs_FullMethodName       = "/wolfci.v1.cli.CLIService/ListJobs"
+	CLIService_ListNodes_FullMethodName      = "/wolfci.v1.cli.CLIService/ListNodes"
+	CLIService_StreamBuildLog_FullMethodName = "/wolfci.v1.cli.CLIService/StreamBuildLog"
 )
 
 // CLIServiceClient is the client API for CLIService service.
@@ -36,6 +37,12 @@ type CLIServiceClient interface {
 	// ListNodes returns every agent the server knows about,
 	// both Register'd (visible) and currently connected.
 	ListNodes(ctx context.Context, in *Empty, opts ...grpc.CallOption) (*ListNodesResponse, error)
+	// StreamBuildLog opens a server-streaming RPC that emits
+	// each chunk of builds/<job>/<n>/log.live as it is written.
+	// The server polls for new bytes until the client cancels
+	// ctx or the configured idle timeout elapses with no new
+	// output.
+	StreamBuildLog(ctx context.Context, in *BuildLogRequest, opts ...grpc.CallOption) (CLIService_StreamBuildLogClient, error)
 }
 
 type cLIServiceClient struct {
@@ -64,6 +71,38 @@ func (c *cLIServiceClient) ListNodes(ctx context.Context, in *Empty, opts ...grp
 	return out, nil
 }
 
+func (c *cLIServiceClient) StreamBuildLog(ctx context.Context, in *BuildLogRequest, opts ...grpc.CallOption) (CLIService_StreamBuildLogClient, error) {
+	stream, err := c.cc.NewStream(ctx, &CLIService_ServiceDesc.Streams[0], CLIService_StreamBuildLog_FullMethodName, opts...)
+	if err != nil {
+		return nil, err
+	}
+	x := &cLIServiceStreamBuildLogClient{stream}
+	if err := x.ClientStream.SendMsg(in); err != nil {
+		return nil, err
+	}
+	if err := x.ClientStream.CloseSend(); err != nil {
+		return nil, err
+	}
+	return x, nil
+}
+
+type CLIService_StreamBuildLogClient interface {
+	Recv() (*LogLine, error)
+	grpc.ClientStream
+}
+
+type cLIServiceStreamBuildLogClient struct {
+	grpc.ClientStream
+}
+
+func (x *cLIServiceStreamBuildLogClient) Recv() (*LogLine, error) {
+	m := new(LogLine)
+	if err := x.ClientStream.RecvMsg(m); err != nil {
+		return nil, err
+	}
+	return m, nil
+}
+
 // CLIServiceServer is the server API for CLIService service.
 // All implementations must embed UnimplementedCLIServiceServer
 // for forward compatibility
@@ -73,6 +112,12 @@ type CLIServiceServer interface {
 	// ListNodes returns every agent the server knows about,
 	// both Register'd (visible) and currently connected.
 	ListNodes(context.Context, *Empty) (*ListNodesResponse, error)
+	// StreamBuildLog opens a server-streaming RPC that emits
+	// each chunk of builds/<job>/<n>/log.live as it is written.
+	// The server polls for new bytes until the client cancels
+	// ctx or the configured idle timeout elapses with no new
+	// output.
+	StreamBuildLog(*BuildLogRequest, CLIService_StreamBuildLogServer) error
 	mustEmbedUnimplementedCLIServiceServer()
 }
 
@@ -85,6 +130,9 @@ func (UnimplementedCLIServiceServer) ListJobs(context.Context, *Empty) (*ListJob
 }
 func (UnimplementedCLIServiceServer) ListNodes(context.Context, *Empty) (*ListNodesResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method ListNodes not implemented")
+}
+func (UnimplementedCLIServiceServer) StreamBuildLog(*BuildLogRequest, CLIService_StreamBuildLogServer) error {
+	return status.Errorf(codes.Unimplemented, "method StreamBuildLog not implemented")
 }
 func (UnimplementedCLIServiceServer) mustEmbedUnimplementedCLIServiceServer() {}
 
@@ -135,6 +183,27 @@ func _CLIService_ListNodes_Handler(srv interface{}, ctx context.Context, dec fun
 	return interceptor(ctx, in, info, handler)
 }
 
+func _CLIService_StreamBuildLog_Handler(srv interface{}, stream grpc.ServerStream) error {
+	m := new(BuildLogRequest)
+	if err := stream.RecvMsg(m); err != nil {
+		return err
+	}
+	return srv.(CLIServiceServer).StreamBuildLog(m, &cLIServiceStreamBuildLogServer{stream})
+}
+
+type CLIService_StreamBuildLogServer interface {
+	Send(*LogLine) error
+	grpc.ServerStream
+}
+
+type cLIServiceStreamBuildLogServer struct {
+	grpc.ServerStream
+}
+
+func (x *cLIServiceStreamBuildLogServer) Send(m *LogLine) error {
+	return x.ServerStream.SendMsg(m)
+}
+
 // CLIService_ServiceDesc is the grpc.ServiceDesc for CLIService service.
 // It's only intended for direct use with grpc.RegisterService,
 // and not to be introspected or modified (even as a copy)
@@ -151,6 +220,12 @@ var CLIService_ServiceDesc = grpc.ServiceDesc{
 			Handler:    _CLIService_ListNodes_Handler,
 		},
 	},
-	Streams:  []grpc.StreamDesc{},
+	Streams: []grpc.StreamDesc{
+		{
+			StreamName:    "StreamBuildLog",
+			Handler:       _CLIService_StreamBuildLog_Handler,
+			ServerStreams: true,
+		},
+	},
 	Metadata: "api/v1/cli/cli.proto",
 }

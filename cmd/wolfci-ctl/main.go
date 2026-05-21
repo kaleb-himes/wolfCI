@@ -54,6 +54,27 @@ var subcommands = map[string]*subcommand{
 		synopsis: "node operations (list)",
 		run:      runNodeGroup,
 	},
+	"build": {
+		name:     "build",
+		synopsis: "build operations (log)",
+		run:      runBuildGroup,
+	},
+}
+
+// runBuildGroup dispatches `wolfci-ctl build <verb>`.
+func runBuildGroup(args []string, stdout, stderr *os.File) int {
+	if len(args) == 0 {
+		fmt.Fprintln(stderr, "usage: wolfci-ctl build <verb>")
+		fmt.Fprintln(stderr, "verbs: log")
+		return 2
+	}
+	switch args[0] {
+	case "log":
+		return runBuildLog(args[1:], stdout, stderr)
+	default:
+		fmt.Fprintf(stderr, "wolfci-ctl: unknown build verb %q\n", args[0])
+		return 2
+	}
 }
 
 // runJobGroup dispatches `wolfci-ctl job <verb>`.
