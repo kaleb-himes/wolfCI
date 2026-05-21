@@ -269,8 +269,14 @@ before the phase started):
               agent_grpc.pb.go, google.golang.org/grpc v1.56.3
               and google.golang.org/protobuf v1.31.0 pinned in
               go.mod for Go 1.18 compatibility.
-        - [ ] 5.2b gRPC server: register the AgentService and
+        - [x] 5.2b gRPC server: register the AgentService and
               return a RegisterResponse for an incoming AgentInfo.
+              Done: internal/agentsvc.Server implements
+              wolfciv1.AgentServiceServer with an in-memory
+              registry and gRPC-status validation. Gate:
+              TestAgentService_RegisterRoundtrip (real gRPC over
+              plain TCP, ephemeral port) and
+              TestAgentService_Register_Validation.
         - [ ] 5.2c gRPC client + wolfSSL mTLS bridge: agent
               dials the server, completes the mTLS handshake,
               issues Register. Requires client-side wolfSSL in
