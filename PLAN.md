@@ -21,10 +21,11 @@ Format conventions:
 
 ## Current Phase
 
-Phase 1 - wolfSSL TLS layer
+Phase 2 - Storage layer
 
 (Update this line when a phase completes. Phase 0 was completed in
-the initial planning turn.)
+the initial planning turn. Phase 1 completed in iteration 4 of the
+slash-loop run.)
 
 ## Phase 0 - Bootstrap
 
@@ -78,9 +79,12 @@ Bring up TLS using the project's chosen crypto library.
         host running a darwin/amd64 Go would otherwise produce an
         arm64 .a that fails to link). macOS frameworks Security
         and CoreFoundation linked via #cgo darwin LDFLAGS.
-- [ ] 1.5 Write a hello-world server cmd/wolfci that opens an HTTPS
+- [x] 1.5 Write a hello-world server cmd/wolfci that opens an HTTPS
         listener via tlsutil and returns 200 OK on /. Test: a
         net/http client over crypto/tls receives the expected body.
+        Done: cmd/wolfci/main.go exposes Listen/Serve and a
+        helloHandler. Shared cert helper extracted into
+        internal/testcerts. Gate: cmd/wolfci/main_test.go.
 
 ## Phase 2 - Storage layer
 

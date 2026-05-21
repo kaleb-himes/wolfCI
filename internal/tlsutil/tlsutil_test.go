@@ -1,18 +1,11 @@
 package tlsutil_test
 
 import (
-	"crypto/ecdsa"
-	"crypto/elliptic"
-	"crypto/rand"
 	"crypto/tls"
-	"crypto/x509"
-	"crypto/x509/pkix"
-	"encoding/pem"
-	"math/big"
 	"net"
 	"testing"
-	"time"
 
+	"github.com/kaleb-himes/wolfCI/internal/testcerts"
 	"github.com/kaleb-himes/wolfCI/internal/tlsutil"
 )
 
@@ -25,7 +18,7 @@ import (
 // ErrNotImplemented; task 1.4 replaces that stub with the real CGO
 // wrapper.
 func TestListener_TLS13Handshake(t *testing.T) {
-	certPEM, keyPEM := selfSignedCert(t)
+	certPEM, keyPEM := testcerts.SelfSignedECDSA(t)
 
 	inner, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
@@ -94,33 +87,3 @@ func TestListener_TLS13Handshake(t *testing.T) {
 	}
 }
 
-// selfSignedCert produces a fresh ECDSA P-256 self-signed certificate
-// valid for 127.0.0.1, returned as PEM blocks. Test-only.
-func selfSignedCert(t *testing.T) ([]byte, []byte) {
-	t.Helper()
-	priv, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
-	if err != nil {
-		t.Fatalf("ecdsa.GenerateKey: %v", err)
-	}
-	template := &x509.Certificate{
-		SerialNumber:          big.NewInt(1),
-		Subject:               pkix.Name{CommonName: "wolfci-test"},
-		NotBefore:             time.Now().Add(-time.Hour),
-		NotAfter:              time.Now().Add(time.Hour),
-		KeyUsage:              x509.KeyUsageDigitalSignature,
-		ExtKeyUsage:           []x509.ExtKeyUsage{x509.ExtKeyUsageServerAuth},
-		IPAddresses:           []net.IP{net.ParseIP("127.0.0.1")},
-		BasicConstraintsValid: true,
-	}
-	certDER, err := x509.CreateCertificate(rand.Reader, template, template, &priv.PublicKey, priv)
-	if err != nil {
-		t.Fatalf("x509.CreateCertificate: %v", err)
-	}
-	keyDER, err := x509.MarshalECPrivateKey(priv)
-	if err != nil {
-		t.Fatalf("x509.MarshalECPrivateKey: %v", err)
-	}
-	certPEM := pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: certDER})
-	keyPEM := pem.EncodeToMemory(&pem.Block{Type: "EC PRIVATE KEY", Bytes: keyDER})
-	return certPEM, keyPEM
-}
