@@ -361,11 +361,30 @@ Additional priorities confirmed after Phase 5 mid-point review:
               with code that launches an instance via the API
               and tears it down on Terminate. Startup script
               installs and runs wolfci-agent.
-- [ ] 5.5 Failing test (internal/nodes/gce/gce_test.go): with a
-        faked GCE backend, the scheduler requests a node, the node
-        "joins", runs a job, terminates.
-- [ ] 5.6 Implement the GCE driver against the real API behind an
-        interface the fake satisfies.
+- [ ] 5.5 Scheduler + Provisioner integration: when a Job's
+        node_label has no matching idle on-prem agent, the
+        scheduler asks the Provisioner for one. ON-PREM FIRST:
+        any matching on-prem agent (registered via Register +
+        Connect) is used before a Provisioner is consulted.
+        Failing test (tests/scheduler_provisioner_test.go) uses
+        the fake provisioner: scheduler enqueues a job with a
+        label no on-prem agent advertises, observes
+        Provision(ctx, label), the "new node" joins via the
+        existing AgentService, runs the job, and the
+        Provisioner is told to Terminate after the build.
+- [ ] 5.6 Implement the GCE driver against the real API behind
+        the nodes.Provisioner interface the fake satisfies.
+        Live test (internal/nodes/gce/live_test.go) is a
+        placeholder gated on WOLFCI_GCE_LIVE_TEST=1 so it
+        compiles and skips by default until credentials are
+        provided. Driver itself is built against
+        google.golang.org/api/compute/v1 and verified offline
+        via httptest where possible.
+- [ ] 5.7 LogChunk streaming: the agent emits LogChunk messages
+        during step execution (not just BuildComplete at the
+        end). Server-side persists them under
+        builds/<job>/<n>/log.live so the Phase 6 UI can tail
+        them. Currently the agent only sends the final result.
 
 ## Phase 6 - Web UI
 
