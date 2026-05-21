@@ -646,6 +646,32 @@ owner before the phase started):
 
 ## Phase 8 - CLI client
 
+Decisions locked in for Phase 8 (confirmed with the project
+owner before the phase started):
+
+- CLI library: standard library "flag" + a hand-rolled
+  subcommand router. No external CLI framework. Aligns with
+  the project's small-footprint mantra.
+- Authentication: SSH-key / wolfSSL mTLS over the same gRPC
+  transport agents use. The CLI presents a client cert; the
+  server takes the cert CN as the username and looks it up in
+  config-files/auth/matrix.yaml to gate permissions. No
+  separate API-token system.
+- Config path: ~/.config/wolfci/ctl.yaml (XDG-friendly,
+  overridable via $XDG_CONFIG_HOME). Holds server address +
+  paths to the client cert/key and the server CA bundle.
+- Output: human-readable text by default (aligned columns,
+  short status); pass --json on any subcommand to get
+  machine-parseable JSON.
+
+Implementation note: the existing AgentService is
+agent-specific (Register expects Executors >= 1). The CLI
+will likely need its own CLIService gRPC service with
+list/stream methods (ListJobs, ListNodes, StreamBuildLog).
+The "login" subcommand is a config-only operation that writes
+ctl.yaml; mTLS handles the actual authentication on every
+RPC.
+
 - [ ] 8.1 cmd/wolfci-ctl with subcommands: login, job list, job
         run, build log, node list. Failing test
         (tests/ctl_test.go) exercises each.
