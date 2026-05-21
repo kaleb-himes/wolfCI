@@ -496,14 +496,27 @@ owner before the phase started):
 
 Additional Phase 6 task at the front of the list:
 
-- [ ] 6.0 FileLogSink + GET /api/v1/builds/{job}/{n}/log live
+- [x] 6.0 FileLogSink + GET /api/v1/builds/{job}/{n}/log live
         tail endpoint. FileLogSink persists each LogChunk to
         builds/<job>/<n>/log.live with append-mode flock-safe
         writes. The endpoint streams the file's current
         contents then follows appends via Server-Sent Events
-        (text/event-stream). Failing test exercises a build
-        whose LogChunks are written and read back through the
-        endpoint.
+        (text/event-stream).
+        Done: agentsvc.FileLogSink implements LogSink with
+        syscall.Flock LOCK_EX around each append.
+        server.LogTailHandler parses
+        /api/v1/builds/{job}/{n}/log, opens the live file,
+        emits "event: log\ndata: <base64>\n\n" frames, polls
+        for new bytes until the client disconnects or
+        IdleTimeout fires. Gate:
+        TestLogTail_LivePersistAndStream writes one chunk
+        before the request opens, opens the SSE stream, then
+        writes a second chunk and reads both back as decoded
+        events. TestLogTail_BadPath rejects malformed routes.
+        Sub-fix: replaced runtime/cgo.Handle in internal/tlsutil
+        with a sync.Map-based registry because the cgo handle's
+        unrecoverable panic on a Delete'd id was racing the
+        gRPC HTTP/2 reader. 15/15 stable after the switch.
 
 - [ ] 6.1 Failing test (internal/server/ui_test.go): GET / returns
         the login page; authenticated GET /jobs returns the job

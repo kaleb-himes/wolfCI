@@ -57,11 +57,48 @@ import (
 	"fmt"
 	"io"
 	"net"
-	"runtime/cgo"
 	"sync"
+	"sync/atomic"
 	"time"
 	"unsafe"
 )
+
+// connRegistry maps an opaque uintptr "handle" we pass to
+// wolfSSL as I/O context back to the underlying net.Conn. We
+// roll our own (rather than runtime/cgo.Handle) so that a
+// lookup after Close returns (nil, false) instead of panicking;
+// the panicky version was demonstrably racy with the gRPC
+// HTTP/2 reader goroutine, where Close can land while a
+// wolfSSL_read is mid-C-call.
+var (
+	connRegistry        sync.Map // uintptr -> net.Conn
+	connRegistryCounter uint64
+)
+
+func registerConn(c net.Conn) uintptr {
+	id := atomic.AddUint64(&connRegistryCounter, 1)
+	connRegistry.Store(id, c)
+	return uintptr(id)
+}
+
+func unregisterConn(id uintptr) {
+	if id == 0 {
+		return
+	}
+	connRegistry.Delete(uint64(id))
+}
+
+func lookupConn(id uintptr) (net.Conn, bool) {
+	if id == 0 {
+		return nil, false
+	}
+	v, ok := connRegistry.Load(uint64(id))
+	if !ok {
+		return nil, false
+	}
+	c, ok := v.(net.Conn)
+	return c, ok
+}
 
 // Config controls how a wolfSSL TLS endpoint completes its
 // handshake. Some fields apply only to one side:
@@ -216,15 +253,15 @@ func Dial(network, address string, cfg *Config) (net.Conn, error) {
 		C.wolfSSL_CTX_free(ctx)
 		return nil, errors.New("tlsutil.Dial: wolfSSL_new returned nil")
 	}
-	h := cgo.NewHandle(raw)
-	hPtr := unsafe.Pointer(uintptr(h))
+	h := registerConn(raw)
+	hPtr := unsafe.Pointer(h)
 	C.wolfSSL_SetIOReadCtx(ssl, hPtr)
 	C.wolfSSL_SetIOWriteCtx(ssl, hPtr)
 
 	if rc := C.wolfSSL_connect(ssl); rc != C.WOLFSSL_SUCCESS {
 		ec := int(C.wolfSSL_get_error(ssl, rc))
 		C.wolfSSL_free(ssl)
-		h.Delete()
+		unregisterConn(h)
 		raw.Close()
 		C.wolfSSL_CTX_free(ctx)
 		return nil, fmt.Errorf("tlsutil.Dial: wolfSSL_connect rc=%d ec=%d", int(rc), ec)
@@ -280,14 +317,14 @@ func (l *listener) Accept() (net.Conn, error) {
 		raw.Close()
 		return nil, errors.New("tlsutil: wolfSSL_new returned nil")
 	}
-	h := cgo.NewHandle(raw)
-	hPtr := unsafe.Pointer(uintptr(h))
+	h := registerConn(raw)
+	hPtr := unsafe.Pointer(h)
 	C.wolfSSL_SetIOReadCtx(ssl, hPtr)
 	C.wolfSSL_SetIOWriteCtx(ssl, hPtr)
 	if rc := C.wolfSSL_accept(ssl); rc != C.WOLFSSL_SUCCESS {
 		ec := int(C.wolfSSL_get_error(ssl, rc))
 		C.wolfSSL_free(ssl)
-		h.Delete()
+		unregisterConn(h)
 		raw.Close()
 		return nil, fmt.Errorf("tlsutil: wolfSSL_accept failed rc=%d ec=%d", int(rc), ec)
 	}
@@ -313,7 +350,7 @@ func (l *listener) Addr() net.Addr { return l.inner.Addr() }
 type conn struct {
 	inner  net.Conn
 	ssl    *C.WOLFSSL
-	handle cgo.Handle
+	handle uintptr // key into connRegistry; 0 once unregistered
 	ownCtx *C.WOLFSSL_CTX // non-nil for client-dialed conns; freed in Close
 	mu     sync.Mutex
 	closed bool
@@ -363,7 +400,7 @@ func (c *conn) Close() error {
 		c.ownCtx = nil
 	}
 	if c.handle != 0 {
-		c.handle.Delete()
+		unregisterConn(c.handle)
 		c.handle = 0
 	}
 	return c.inner.Close()
@@ -376,25 +413,15 @@ func (c *conn) SetReadDeadline(t time.Time) error  { return c.inner.SetReadDeadl
 func (c *conn) SetWriteDeadline(t time.Time) error { return c.inner.SetWriteDeadline(t) }
 
 //export wolfci_io_recv
-func wolfci_io_recv(ssl *C.WOLFSSL, buf *C.char, sz C.int, ctxPtr unsafe.Pointer) (ret C.int) {
-	// Recover from a panic inside cgo.Handle.Value, which fires if
-	// the handle was Delete'd between when wolfSSL_read started in
-	// C and when it called back into Go. This happens when a peer
-	// (e.g. the gRPC HTTP/2 reader goroutine) holds a *conn whose
-	// Close ran while a Read was already in flight. Returning a
-	// generic CBIO error lets wolfSSL propagate a clean read error
-	// to the caller instead of crashing the process.
-	defer func() {
-		if r := recover(); r != nil {
-			ret = C.WOLFSSL_CBIO_ERR_GENERAL
-		}
-	}()
+func wolfci_io_recv(ssl *C.WOLFSSL, buf *C.char, sz C.int, ctxPtr unsafe.Pointer) C.int {
 	if sz <= 0 {
 		return 0
 	}
-	h := cgo.Handle(uintptr(ctxPtr))
-	nc, ok := h.Value().(net.Conn)
+	nc, ok := lookupConn(uintptr(ctxPtr))
 	if !ok {
+		// Handle was unregistered (peer closed the conn while a
+		// wolfSSL_read was mid-flight). Tell wolfSSL the read
+		// failed; the calling Read returns a clean error.
 		return C.WOLFSSL_CBIO_ERR_GENERAL
 	}
 	dst := unsafe.Slice((*byte)(unsafe.Pointer(buf)), int(sz))
@@ -414,17 +441,11 @@ func wolfci_io_recv(ssl *C.WOLFSSL, buf *C.char, sz C.int, ctxPtr unsafe.Pointer
 }
 
 //export wolfci_io_send
-func wolfci_io_send(ssl *C.WOLFSSL, buf *C.char, sz C.int, ctxPtr unsafe.Pointer) (ret C.int) {
-	defer func() {
-		if r := recover(); r != nil {
-			ret = C.WOLFSSL_CBIO_ERR_GENERAL
-		}
-	}()
+func wolfci_io_send(ssl *C.WOLFSSL, buf *C.char, sz C.int, ctxPtr unsafe.Pointer) C.int {
 	if sz <= 0 {
 		return 0
 	}
-	h := cgo.Handle(uintptr(ctxPtr))
-	nc, ok := h.Value().(net.Conn)
+	nc, ok := lookupConn(uintptr(ctxPtr))
 	if !ok {
 		return C.WOLFSSL_CBIO_ERR_GENERAL
 	}
