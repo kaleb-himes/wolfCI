@@ -21,9 +21,7 @@ Format conventions:
 
 ## Current Phase
 
-All numbered phases (0-9) are complete. The active queue is the
-Backlog section at the bottom of this file. Promote an item into a
-new "## Phase N" heading when work on it starts.
+Phase 10 - wolfCrypt-only crypto pass
 
 (Phase completion log. Phase 0 was completed in the initial
 planning turn. Phase 1 completed in iteration 4, Phase 2 in
@@ -814,6 +812,7 @@ RPC.
         of an ASCII component diagram. Wired into
         scripts/test.sh.
 - [x] 9.5 README.md final pass.
+        See Phase 10 below for the next active work.
         Done: README.md replaces the Phase 0 stub with a real
         feature list (one binary per role, wolfSSL mTLS gRPC,
         SSH-key + bcrypt auth, role matrix, on-prem + GCE
@@ -830,6 +829,118 @@ RPC.
         doc is linked, the build recipe is present, and the
         GPL-3.0 + author footer is intact. Wired into
         scripts/test.sh.
+
+## Phase 10 - wolfCrypt-only crypto pass
+
+End-to-end review surfaced that several pieces of the auth stack
+still pull crypto from Go's stdlib / x/crypto. CLAUDE.md mission #5
+says "all TLS and crypto via wolfSSL", and the project owner made
+that literal on 2026-05-21: "ZERO cryptography ... zero, none,
+nadda cryptography unless it's from wolfCrypt in this solution".
+This phase reroutes every cryptographic operation in the source
+tree through wolfCrypt (wolfSSL's crypto component).
+
+Decisions locked in for Phase 10 (confirmed with the project owner
+before the phase started):
+
+- ZERO non-wolfCrypt cryptography anywhere in the source tree. No
+  exceptions for test code, no exceptions for "just a hash
+  compare". The audit boundary collapses to one library.
+- New internal/wolfcrypt package, sibling of internal/tlsutil,
+  exposes the primitives: RandBytes, HMAC-SHA-256, PBKDF2-HMAC-
+  SHA-256, Ed25519Verify, ECCVerify, RSAVerify, MintCert.
+  Both packages link the same wolfSSL static lib via CGO.
+- SSH public-key wire-format parsing is hand-rolled. ~150 lines of
+  base64 + length-prefixed-field decode in internal/auth/sshkey.go.
+  x/crypto/ssh drops out of go.mod entirely.
+- crypto/tls constant references (tls.VersionTLS13 etc.) move to
+  local constants in internal/tlsutil. crypto/tls imports drop
+  from tlsutil / agent / wolfci-ctl.
+- Hash comparisons use the HMAC-both-sides pattern: fresh 32-byte
+  RNG key, HMAC stored and candidate, byte-compare HMAC outputs.
+  Defense in depth - even if the byte compare leaks timing, what
+  leaks is the HMAC, not the password hash.
+- Migration of existing bcrypt hashes is moot. cmd/wolfci is still
+  the Phase 1.5 stub; no production deployment has bcrypt files
+  on disk. Test fixtures get rewritten as part of each task.
+- Phase 10 ships BEFORE the cmd/wolfci wiring (Phase 11) so the
+  wiring code talks to the new wolfCrypt-backed APIs exactly once
+  instead of being rewritten when the auth stack is overhauled
+  next.
+
+- [ ] 10.1 internal/wolfcrypt package. Failing test
+        (internal/wolfcrypt/wolfcrypt_test.go) exercises every
+        primitive: RandBytes (no all-zero output across 1000
+        iterations), HMACSHA256 (RFC 4231 test vector 1),
+        PBKDF2HMACSHA256 (RFC 6070 test vector 2 if applicable;
+        otherwise a self-consistent round-trip), Ed25519Verify
+        (signed message round-trip), ECCVerify (P-256 round
+        trip), RSAVerify (round trip), MintCert (DER output
+        parses via x509.ParseCertificate and validates a
+        signature wolfCrypt produced).
+- [ ] 10.2 Replace x/crypto/bcrypt in internal/auth/password.go
+        with PBKDF2-HMAC-SHA-256 via internal/wolfcrypt.
+        Iteration count and salt length live in
+        config-files/auth/config.yaml under pbkdf2_iterations
+        (default 600000 per OWASP 2023) and pbkdf2_salt_bytes
+        (default 16). On-disk file renames from <user>.bcrypt to
+        <user>.pbkdf2 with a versioned header so the loader can
+        reject the wrong KDF instead of silently misverifying.
+        Verify uses the HMAC-both-sides constant-time compare.
+        Drop golang.org/x/crypto/bcrypt from go.mod.
+- [ ] 10.3 Replace x/crypto/ssh in internal/auth/sshkey.go. Hand-
+        roll the public-key parser per RFC 4253 Section 6.6 for
+        ssh-ed25519, ecdsa-sha2-nistp256, and ssh-rsa. Route
+        signature verify through internal/wolfcrypt. Drop
+        golang.org/x/crypto/ssh from go.mod.
+- [ ] 10.4 Replace crypto/rand in internal/server/session.go with
+        wolfcrypt.RandBytes. Token size and hex encoding stay the
+        same; only the entropy source changes. Drop the
+        crypto/rand import.
+- [ ] 10.5 Replace crypto/ecdsa, crypto/elliptic, crypto/rand,
+        crypto/x509, and crypto/x509/pkix in
+        internal/testcerts/testcerts.go with wolfcrypt.MintCert.
+        Tests that consume the certs may still parse via
+        crypto/x509 (parsing is wire format, not crypto) but the
+        keys and signatures must be wolfCrypt. NewSelfSigned and
+        NewMTLSChain signatures stay the same.
+- [ ] 10.6 Copy TLS version + relevant cipher constants into
+        internal/tlsutil as local consts (VersionTLS13, etc.).
+        Drop crypto/tls imports from internal/tlsutil,
+        internal/agent/client.go, and cmd/wolfci-ctl/client.go.
+- [ ] 10.7 docs/SECURITY.md update: document the
+        wolfCrypt-only rule and which wolfSSL configure flags
+        each primitive depends on (--enable-pwdbased for PBKDF2
+        and HMAC, both default-on; --enable-keygen and
+        --enable-certgen for MintCert, both already in the
+        profile). Confirm in scripts/test-build-wolfssl.sh that
+        the configure command keeps those flags so a profile
+        regression cannot silently break the auth stack.
+
+## Phase 11 - cmd/wolfci wiring (placeholder)
+
+Backlog promotion of the "wire scheduler.Scheduler into cmd/wolfci
+bootstrap" item. cmd/wolfci is currently the Phase 1.5 hello-world
+stub; docs/GETTING-STARTED.md describes a flow it does not yet
+implement. Phase 11 assembles storage + scheduler + agentsvc +
+cliservice + plugin host + server (web UI) + first-admin
+bootstrap-token flow into one main, against the wolfCrypt-backed
+auth stack Phase 10 just landed.
+
+Decisions still open (will lock in before the phase starts):
+
+- Config file format for server bootstrap
+  (config-files/server.yaml: listen addr, cert paths, working
+  dir, optional GCE config path, optional plugin dir override).
+- Whether to serve the web UI and the gRPC services on the same
+  port via cmunixmu/cmux-style multiplexing, or on two distinct
+  ports.
+- Signal handling: SIGINT/SIGTERM -> graceful drain of in-flight
+  builds, then close listeners.
+- First-admin bootstrap: token format, expiry, persistence,
+  invalidation on consumption.
+
+Task list lands when Phase 11 starts.
 
 ## Backlog (not in main flow)
 
