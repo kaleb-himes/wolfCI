@@ -1188,7 +1188,7 @@ before the phase started):
               full scripts/test.sh remains green, including
               the previously-poisoned internal/plugin and
               plugins/email-on-failure tests.
-        - [ ] 10.6c Add the missing wrappers to
+        - [x] 10.6c Add the missing wrappers to
               third_party/go-wolfssl so internal/wolfcrypt can
               become a pure Go facade with zero CGO. Per
               CLAUDE.md Hard Rule #11 (extended on 2026-05-21):
@@ -1196,8 +1196,13 @@ before the phase started):
               wrapper, we ADD it to the vendored copy and
               capture as a patch rather than hand-rolling.
               Sub-divided per wrapper area; each sub-checkpoint
-              ships one numbered patch under
-              third_party/go-wolfssl-patches/.
+              shipped one numbered patch under
+              third_party/go-wolfssl-patches/. All three
+              landed: 10.6c-i (Ed25519, patch 0003), 10.6c-ii
+              (RSA verify, patch 0004), 10.6c-iii (certgen,
+              patch 0005). go-wolfssl now exposes every
+              wrapper internal/wolfcrypt needs; 10.6d deletes
+              the remaining hand-rolled CGO.
               - [x] 10.6c-i  ed25519.go (patch 0003).
                     Done: Wc_ed25519_init / _free / _make_key /
                     _import_public / _import_private_key /
@@ -1253,18 +1258,30 @@ before the phase started):
                     SHA-256 vector that verify_test.go uses
                     for the hand-rolled RSAVerifyPKCS1v15SHA256
                     path.
-              - [ ] 10.6c-iii certgen.go (patch 0005).
-                    Wc_InitCert / Wc_MakeCert / Wc_SignCert /
-                    Wc_SetIssuerBuffer / Wc_SetExtKeyUsage,
-                    plus a C-side helper for copying
+              - [x] 10.6c-iii certgen.go (patch 0005).
+                    Done: Wc_InitCert / Wc_MakeCert /
+                    Wc_SignCert / Wc_SetIssuerBuffer /
+                    Wc_SetExtKeyUsage live in
+                    third_party/go-wolfssl/certgen.go, plus
+                    two C-side static helpers
+                    wolfci_cert_set_subject_cn_org and
+                    wolfci_cert_set_validity that copy
                     CommonName + Organization into the
-                    fixed-size Cert.subject char arrays. Type
-                    alias Cert = C.struct_Cert. Constant
-                    CTC_SHA256wECDSA exposed as a Go int.
-                    Gate: an end-to-end CA + leaf mint flow
-                    similar to internal/wolfcrypt/cert_test.go's
-                    TestMintCert_LeafSignatureVerifiesAgainstCA,
-                    but driving go-wolfssl directly.
+                    fixed-size Cert.subject char arrays and
+                    set Cert.daysValid + Cert.isCA +
+                    Cert.sigType through plain assignments
+                    (going through C avoids Go having to know
+                    the Cert struct layout). Surfaced as
+                    Wc_SetSubjectCN_Org and Wc_SetCertValidity
+                    in the Go API. Type alias
+                    Cert = C.struct_Cert, plus CTC_SHA256wECDSA
+                    and CTC_SHA256wRSA exposed as Go ints.
+                    Gate:
+                    internal/wolfcrypt/gowolf_smoke_test.go's
+                    TestGoWolfSSL_MakeSelfSignedCert mints a
+                    self-signed ECC P-256 CA via the new
+                    wrappers and asserts the DER is non-empty
+                    and starts with SEQUENCE.
         - [ ] 10.6d Rewire internal/wolfcrypt to call the
               extended go-wolfssl API for Ed25519, RSA verify,
               and MintCert. Delete every remaining

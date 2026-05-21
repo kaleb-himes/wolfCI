@@ -145,3 +145,46 @@ RSAVerifyPKCS1v15SHA256 path.
 
 **What would let us drop this patch:** same as 0003 - upstream
 PR merges and tags.
+
+## 0005-add-certgen-wrappers.patch
+
+Adds `certgen.go` with the X.509 cert-generation wrappers:
+
+  Wc_InitCert              wc_InitCert
+  Wc_SetSubjectCN_Org      sets Cert.subject.commonName +
+                           Cert.subject.org through a C-side
+                           helper (the fields are fixed-size
+                           char arrays inside the Cert struct,
+                           which is fiddly to assign to from
+                           Go directly).
+  Wc_SetCertValidity       sets Cert.daysValid + Cert.isCA +
+                           Cert.sigType through a C-side
+                           helper for the same reason.
+  Wc_SetIssuerBuffer       wc_SetIssuerBuffer
+  Wc_SetExtKeyUsage        wc_SetExtKeyUsage
+  Wc_MakeCert              wc_MakeCert
+  Wc_SignCert              wc_SignCert
+
+Plus the type alias `Cert = C.struct_Cert` and two signing
+constants exposed as Go ints: `CTC_SHA256wECDSA` and
+`CTC_SHA256wRSA`.
+
+The two C-side static helpers
+(`wolfci_cert_set_subject_cn_org`, `wolfci_cert_set_validity`)
+live in the CGO preamble of this file - they exist so the
+public Go API does not have to know the layout of `Cert.subject`
+or do its own strncpy + zero-termination dance against
+`CTC_NAME_SIZE`. Upstream would presumably name these
+`wc_SetCertSubjectCN`, etc. We can rename in the PR.
+
+**Why:** internal/wolfcrypt's MintCert is the last bit of
+hand-rolled CGO in our tree. 10.6d uses these wrappers to
+delete the `import "C"` block in internal/wolfcrypt/cert.go.
+
+**Gate:** `internal/wolfcrypt/gowolf_smoke_test.go`'s
+`TestGoWolfSSL_MakeSelfSignedCert` mints a self-signed ECC
+P-256 CA via the new wrappers and asserts the resulting DER
+is non-empty and starts with the SEQUENCE tag.
+
+**What would let us drop this patch:** same as 0003 / 0004 -
+upstream PR merges + a release tag lands.

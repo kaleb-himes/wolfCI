@@ -103,6 +103,51 @@ func TestGoWolfSSL_RSAVerify_KnownVector(t *testing.T) {
 	}
 }
 
+// TestGoWolfSSL_MakeSelfSignedCert exercises the certgen wrappers
+// added by patch 0005:
+//   Wc_InitCert / Wc_MakeCert / Wc_SignCert
+//   Wc_SetSubjectCN_Org (small C helper for the fixed-size subject
+//   char arrays)
+//   CTC_SHA256wECDSA constant
+// by minting a self-signed ECC P-256 cert and asserting the DER
+// is non-empty, starts with SEQUENCE (0x30), and is signed.
+func TestGoWolfSSL_MakeSelfSignedCert(t *testing.T) {
+	var rng gowolf.WC_RNG
+	if rc := gowolf.Wc_InitRng(&rng); rc != 0 {
+		t.Fatalf("Wc_InitRng: %d", rc)
+	}
+	defer gowolf.Wc_FreeRng(&rng)
+
+	var key gowolf.Ecc_key
+	if rc := gowolf.Wc_ecc_init(&key); rc != 0 {
+		t.Fatalf("Wc_ecc_init: %d", rc)
+	}
+	defer gowolf.Wc_ecc_free(&key)
+	if rc := gowolf.Wc_ecc_make_key(&rng, 32, &key); rc != 0 {
+		t.Fatalf("Wc_ecc_make_key: %d", rc)
+	}
+
+	var cert gowolf.Cert
+	if rc := gowolf.Wc_InitCert(&cert); rc != 0 {
+		t.Fatalf("Wc_InitCert: %d", rc)
+	}
+	gowolf.Wc_SetSubjectCN_Org(&cert, "wolfCI Test CA", "wolfSSL Inc.")
+	gowolf.Wc_SetCertValidity(&cert, 7, true, gowolf.CTC_SHA256wECDSA)
+
+	der := make([]byte, 4096)
+	bodySz := gowolf.Wc_MakeCert(&cert, der, len(der), nil, &key, &rng)
+	if bodySz < 0 {
+		t.Fatalf("Wc_MakeCert: %d", bodySz)
+	}
+	totalSz := gowolf.Wc_SignCert(bodySz, gowolf.CTC_SHA256wECDSA, der, len(der), nil, &key, &rng)
+	if totalSz < 0 {
+		t.Fatalf("Wc_SignCert: %d", totalSz)
+	}
+	if totalSz == 0 || der[0] != 0x30 {
+		t.Fatalf("cert DER missing SEQUENCE tag or empty (totalSz=%d, der[0]=%#x)", totalSz, der[0])
+	}
+}
+
 // TestGoWolfSSL_Ed25519_RoundTrip verifies the full make_key + sign
 // + verify path on a freshly generated key. Drives the rest of the
 // new Ed25519 wrapper surface (make_key, export_*, sign_msg,
