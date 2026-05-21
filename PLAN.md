@@ -179,6 +179,22 @@ before the phase started):
 
 Run shell-script jobs against executors.
 
+Decisions locked in for Phase 4 (confirmed with the project owner
+before the phase started):
+
+- Queue order: FIFO for v1. A priority queue is backlogged; do
+  not preempt this with a "priority" field today.
+- Build numbering: per-job monotonic counter persisted at
+  builds/<job>/.next-build-number, incremented under
+  syscall.Flock LOCK_EX. Matches Jenkins's mental model and
+  scales without rescanning the builds directory.
+- Executor model: scheduler dispatches to an Executor interface.
+  Phase 4 ships exactly one implementation - an in-process
+  executor that runs shell on the server host. Phase 5 adds the
+  agent-driven executors that route by node label; the
+  Executor interface MUST be future-friendly enough for that
+  swap without changes to the scheduler.
+
 - [ ] 4.1 Failing test (internal/scheduler/scheduler_test.go): the
         scheduler enqueues a Job, dispatches it to a fake executor,
         and records the result.
