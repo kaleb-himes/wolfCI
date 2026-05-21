@@ -21,11 +21,11 @@ Format conventions:
 
 ## Current Phase
 
-Phase 2 - Storage layer
+Phase 3 - AuthN and AuthZ
 
 (Update this line when a phase completes. Phase 0 was completed in
-the initial planning turn. Phase 1 completed in iteration 4 of the
-slash-loop run.)
+the initial planning turn. Phase 1 completed in iteration 4 and
+Phase 2 in iteration 5 of the slash-loop run.)
 
 ## Phase 0 - Bootstrap
 
@@ -90,15 +90,23 @@ Bring up TLS using the project's chosen crypto library.
 
 Persist jobs, builds, users, and config as plain files.
 
-- [ ] 2.1 Failing test (internal/storage/storage_test.go): the
+- [x] 2.1 Failing test (internal/storage/storage_test.go): the
         storage layer round-trips a Job spec to and from disk
         without loss.
-- [ ] 2.2 Define the on-disk format:
+        Done: TestStorage_RoundtripJob plus two error-path tests
+        (LoadJob_NotFound, SaveJob_RequiresName).
+- [x] 2.2 Define the on-disk format:
         - jobs/<name>/job.yaml
-        - builds/<job>/<n>/result.json
-        - builds/<job>/<n>/log
-- [ ] 2.3 Implement internal/storage with file locking for
+        - builds/<job>/<n>/result.json (deferred to Phase 4)
+        - builds/<job>/<n>/log (deferred to Phase 4)
+        Done: Job spec lives at jobs/<name>/job.yaml as YAML 1.2;
+        fields are name, description, node_label, timeout
+        (time.ParseDuration string), retries, triggers,
+        parameters, steps, axis.
+- [x] 2.3 Implement internal/storage with file locking for
         concurrent writes (flock via syscall).
+        Done: SaveJob takes LOCK_EX, LoadJob takes LOCK_SH. YAML
+        via gopkg.in/yaml.v3.
 
 ## Phase 3 - AuthN and AuthZ
 
