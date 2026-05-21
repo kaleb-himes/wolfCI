@@ -1008,11 +1008,50 @@ before the phase started):
         TestPasswordStore_OnDiskFormat (asserts .pbkdf2
         extension + wolfci-pbkdf2-v1 sentinel + no .bcrypt
         residue), TestPasswordStore_RejectsWrongKDFHeader.
-- [ ] 10.3 Replace x/crypto/ssh in internal/auth/sshkey.go. Hand-
-        roll the public-key parser per RFC 4253 Section 6.6 for
-        ssh-ed25519, ecdsa-sha2-nistp256, and ssh-rsa. Route
-        signature verify through internal/wolfcrypt. Drop
-        golang.org/x/crypto/ssh from go.mod.
+- [x] 10.3 Replace x/crypto/ssh in internal/auth/sshkey.go.
+        Done: internal/auth/sshkey.go now imports only stdlib +
+        internal/wolfcrypt. Hand-rolled wire parser per RFC 4253
+        Section 6.6 covers the three SSH public-key algorithms
+        (ssh-ed25519, ecdsa-sha2-nistp256, ssh-rsa) plus the
+        rsa-sha2-256 signature algo from RFC 8332. The legacy
+        ssh-rsa signature (SHA-1) is intentionally refused with
+        ErrUnsupportedKeyType, matching OpenSSH 8.8+ behavior.
+        New PublicKey struct exposes the algo-specific fields
+        (Ed25519, ECDSAPoint, RSAModulus, RSAExponent) so the
+        verify dispatch can pick the right wolfcrypt primitive
+        without re-parsing.
+        VerifySignature now takes an SSH wire-format signature
+        envelope (string algo || string blob) rather than an
+        x/crypto/ssh.Signature struct. For ECDSA the SSH
+        sub-blob "string r || string s" is read via mpint
+        helpers, recombined into ASN.1 DER (a small inline
+        encoder, byte assembly only), and handed to
+        wolfcrypt.ECCVerifyP256 over a wolfcrypt.SHA256 of the
+        data. For RSA the raw PKCS#1 v1.5 sig blob flows
+        straight through wolfcrypt.RSAVerifyPKCS1v15SHA256.
+        New wolfcrypt primitives needed to drive the test
+        without stdlib ed25519: wolfcrypt.Ed25519GenKey (returns
+        32-byte public + 64-byte seed||pub private) and
+        wolfcrypt.Ed25519Sign (in internal/wolfcrypt/sign.go).
+        Gate: TestEd25519GenAndSign asserts sign + verify
+        round-trip plus a tamper-negative.
+        Exported wire helpers for test fixtures and the
+        eventual Phase 11 first-admin bootstrap:
+        EncodeSSHAuthorizedKey, EncodeSSHEd25519AuthorizedKey,
+        EncodeSSHEd25519Signature.
+        Gates (internal/auth/sshkey_test.go):
+        TestKeyStore_VerifySignature (now wolfCrypt-only sign +
+        verify), TestKeyStore_RejectsPathTraversal,
+        TestKeyStore_RejectsUnknownAlgo (a bogus algo string in
+        the signature envelope is rejected).
+        go.mod: golang.org/x/crypto/ssh no longer imported.
+        x/crypto stays in go.mod as an INDIRECT dep because the
+        Google Cloud SDK pulled in by internal/nodes/gce uses
+        x/crypto/cryptobyte (a byte-builder utility, not actual
+        cryptography). This is a transitive dep we cannot drop
+        without rewriting the GCE driver against wolfSSL. Logged
+        as a finding for the user; wolfCI's own source code now
+        imports zero stdlib or x/crypto cryptography.
 - [ ] 10.4 Replace crypto/rand in internal/server/session.go with
         wolfcrypt.RandBytes. Token size and hex encoding stay the
         same; only the entropy source changes. Drop the
