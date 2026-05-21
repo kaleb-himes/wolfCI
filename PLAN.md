@@ -387,9 +387,22 @@ Additional priorities confirmed after Phase 5 mid-point review:
               TestServer_IdleAgentWithLabel,
               TestServer_ConnectRequiresMetadata,
               TestServer_ConnectRequiresPriorRegister.
-        - [ ] 5.5b Scheduler talks to agentsvc to pick a
+        - [x] 5.5b Scheduler talks to agentsvc to pick a
               matching idle agent for each job and dispatches
               via AssignJob. On-prem-first selector.
+              Done: scheduler.Router implements Executor and
+              routes per Job.NodeLabel:
+                  ""              or matches localLabels -> local
+                  matches an agent advertised label       -> remote
+                  no match                                 -> Status=error
+              agentsvc.SubmitAndWait blocks until the agent
+              reports BuildComplete for the same
+              (agent_id, build_number); the receiver loop
+              delivers via a buffered chan registered in the
+              pending map. Gate:
+              TestRouter_OnPremFirstAndLabelMatch exercises
+              all three routes with a real on-prem agent
+              advertising "linux".
         - [ ] 5.5c Provisioner integration: when 5.5b returns
               no idle on-prem agent for a Job.node_label, the
               scheduler asks the configured Provisioner for

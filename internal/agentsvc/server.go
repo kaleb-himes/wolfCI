@@ -41,8 +41,18 @@ type Server struct {
 	streamsMu sync.Mutex
 	streams   map[string]*agentStream
 
+	pendingMu sync.Mutex
+	pending   map[pendingKey]chan *wolfciv1.BuildComplete
+
 	completedMu sync.Mutex
 	completed   []*wolfciv1.BuildComplete
+}
+
+// pendingKey identifies an outstanding SubmitAndWait that wants
+// the BuildComplete for (agent, build_number) when it arrives.
+type pendingKey struct {
+	agentID     string
+	buildNumber int32
 }
 
 // agentStream is the server-side handle on one connected agent.
@@ -60,6 +70,7 @@ func New(serverVersion string) *Server {
 		agents:      make(map[string]*wolfciv1.AgentInfo),
 		pendingJobs: make(chan *wolfciv1.JobAssignment, 64),
 		streams:     make(map[string]*agentStream),
+		pending:     make(map[pendingKey]chan *wolfciv1.BuildComplete),
 	}
 }
 
@@ -88,6 +99,45 @@ func (s *Server) AssignJob(agentID string, job *wolfciv1.JobAssignment) error {
 		return nil
 	case <-st.ctx.Done():
 		return fmt.Errorf("agentsvc.AssignJob: agent %q stream closed: %w", agentID, st.ctx.Err())
+	}
+}
+
+// SubmitAndWait sends job to agentID and blocks until the agent
+// reports a matching BuildComplete or ctx is cancelled. The
+// caller is responsible for ensuring job.BuildNumber is unique
+// per (agent, in-flight build) so the pending map can route the
+// response back.
+func (s *Server) SubmitAndWait(ctx context.Context, agentID string, job *wolfciv1.JobAssignment) (*wolfciv1.BuildComplete, error) {
+	if job == nil {
+		return nil, errors.New("agentsvc.SubmitAndWait: nil JobAssignment")
+	}
+	key := pendingKey{agentID: agentID, buildNumber: job.BuildNumber}
+	ch := make(chan *wolfciv1.BuildComplete, 1)
+
+	s.pendingMu.Lock()
+	if _, exists := s.pending[key]; exists {
+		s.pendingMu.Unlock()
+		return nil, fmt.Errorf("agentsvc.SubmitAndWait: already waiting on (%s, %d)",
+			agentID, job.BuildNumber)
+	}
+	s.pending[key] = ch
+	s.pendingMu.Unlock()
+
+	defer func() {
+		s.pendingMu.Lock()
+		delete(s.pending, key)
+		s.pendingMu.Unlock()
+	}()
+
+	if err := s.AssignJob(agentID, job); err != nil {
+		return nil, err
+	}
+
+	select {
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	case bc := <-ch:
+		return bc, nil
 	}
 }
 
@@ -137,6 +187,23 @@ func (s *Server) recordCompletion(c *wolfciv1.BuildComplete) {
 	s.completedMu.Lock()
 	defer s.completedMu.Unlock()
 	s.completed = append(s.completed, c)
+}
+
+// deliverCompletion routes a BuildComplete to any waiting
+// SubmitAndWait call. If no caller is waiting, the message is
+// dropped silently (recordCompletion already stored it for the
+// audit-style Completed() snapshot).
+func (s *Server) deliverCompletion(agentID string, c *wolfciv1.BuildComplete) {
+	key := pendingKey{agentID: agentID, buildNumber: c.BuildNumber}
+	s.pendingMu.Lock()
+	ch, ok := s.pending[key]
+	if ok {
+		delete(s.pending, key)
+	}
+	s.pendingMu.Unlock()
+	if ok {
+		ch <- c
+	}
 }
 
 // Register records an agent's self-described capabilities and
@@ -246,6 +313,7 @@ func (s *Server) Connect(stream wolfciv1.AgentService_ConnectServer) error {
 		}
 		if c := msg.GetComplete(); c != nil {
 			s.recordCompletion(c)
+			s.deliverCompletion(agentID, c)
 		}
 		// LogChunks are accepted but currently dropped; live log
 		// streaming lands in Phase 5.7.
