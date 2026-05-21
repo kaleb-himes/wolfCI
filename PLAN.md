@@ -195,11 +195,18 @@ before the phase started):
   Executor interface MUST be future-friendly enough for that
   swap without changes to the scheduler.
 
-- [ ] 4.1 Failing test (internal/scheduler/scheduler_test.go): the
+- [x] 4.1 Failing test (internal/scheduler/scheduler_test.go): the
         scheduler enqueues a Job, dispatches it to a fake executor,
         and records the result.
-- [ ] 4.2 Implement internal/scheduler with a priority queue and
-        per-node executor pool.
+        Done: TestScheduler_RoundtripJob, TestScheduler_FIFOOrder,
+        TestScheduler_BuildNumberPersistsAcrossSchedulers.
+- [x] 4.2 Implement internal/scheduler with a FIFO queue (locked
+        decision; priority queue is in the backlog) and the
+        Executor interface. Per-node executor pools land in
+        Phase 5 against the same interface.
+        Done: internal/scheduler/scheduler.go. Build numbers
+        persisted at builds/<job>/.next-build-number under
+        syscall.Flock LOCK_EX.
 - [ ] 4.3 Build runner: spawns a shell, streams stdout and stderr to
         builds/<job>/<n>/log, records exit code in result.json.
 - [ ] 4.4 Build matrix support: a job can declare an axis (for
