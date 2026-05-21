@@ -21,13 +21,13 @@ Format conventions:
 
 ## Current Phase
 
-Phase 7 - Plugins
+Phase 8 - CLI client
 
 (Update this line when a phase completes. Phase 0 was completed in
 the initial planning turn. Phase 1 completed in iteration 4,
 Phase 2 in iteration 5, Phase 3 in iteration 8, Phase 4 in
-iteration 10, Phase 5 in iteration 21, Phase 6 in iteration 25
-of the slash-loop run.)
+iteration 10, Phase 5 in iteration 21, Phase 6 in iteration 25,
+Phase 7 in iteration 28 of the slash-loop run.)
 
 ## Phase 0 - Bootstrap
 
@@ -627,7 +627,22 @@ owner before the phase started):
         PluginMap + WolfCIPlugin live in plugin.go so plugin
         authors import the same constants the host uses. 5/5
         stable.
-- [ ] 7.4 Ship a real plugin: email-on-failure.
+- [x] 7.4 Ship a real plugin: email-on-failure.
+        Done: plugins/email-on-failure binary that watches for
+        non-success build statuses (failure, error, cancelled)
+        and SMTPs an RFC 822 message to a configured recipient
+        list. Config lives at
+        plugins/installed/email-on-failure/config.yaml; SMTP
+        credentials read from WOLFCI_EMAIL_PLUGIN_USER /
+        WOLFCI_EMAIL_PLUGIN_PASS so they are not on disk
+        next to the YAML. Sender interface decouples
+        net/smtp from formatMessage so tests use a recorder.
+        Gates: TestFormatMessage_Failure,
+        TestFormatMessage_IncludesErrorField,
+        TestOnBuildComplete_SkipsSuccess,
+        TestOnBuildComplete_SendsOnFailure,
+        TestLoadConfig_RoundTrip,
+        TestLoadConfig_RejectsMissingFields.
 
 ## Phase 8 - CLI client
 

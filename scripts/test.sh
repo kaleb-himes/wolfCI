@@ -5,7 +5,7 @@
 #   - scripts/check-ascii.sh             ASCII invariant on tracked files
 #   - scripts/test-check-ascii.sh        self-test for the ASCII gate
 #   - scripts/test-wolfssl-submodule.sh  wolfSSL submodule pin
-#   - go test ./internal/... ./cmd/...   Go unit tests
+#   - go test ./internal/... ./cmd/... ./plugins/email-on-failure   Go unit tests
 #
 # Intentionally NOT included:
 #   - scripts/test-build-wolfssl.sh: full wolfSSL build (minutes).
@@ -26,6 +26,6 @@ scripts/check-ascii.sh
 scripts/test-check-ascii.sh
 scripts/test-wolfssl-submodule.sh
 
-go test ./internal/... ./cmd/...
+go test ./internal/... ./cmd/... ./plugins/email-on-failure
 
 echo "scripts/test.sh: all fast checks passed."
