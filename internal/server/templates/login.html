@@ -1,0 +1,14 @@
+{{ define "content" }}
+<section class="panel">
+<h2>Sign in</h2>
+{{ if .Error }}<p class="error">{{ .Error }}</p>{{ end }}
+<form method="POST" action="/login">
+<label for="username">Username</label>
+<input id="username" type="text" name="username" autocomplete="username" autofocus required>
+<label for="password">Password</label>
+<input id="password" type="password" name="password" autocomplete="current-password" required>
+<button type="submit">Sign in</button>
+</form>
+<p class="muted">SSH-key login is used by agents and CLI clients, not the web UI.</p>
+</section>
+{{ end }}

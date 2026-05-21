@@ -350,15 +350,29 @@ func (l *listener) Addr() net.Addr { return l.inner.Addr() }
 type conn struct {
 	inner  net.Conn
 	ssl    *C.WOLFSSL
-	handle uintptr // key into connRegistry; 0 once unregistered
+	handle uintptr        // key into connRegistry; 0 once unregistered
 	ownCtx *C.WOLFSSL_CTX // non-nil for client-dialed conns; freed in Close
-	mu     sync.Mutex
-	closed bool
+
+	// lifecycleMu protects the SSL pointer's lifetime. Read and
+	// Write take RLock (so concurrent reader+writer goroutines, as
+	// used by gRPC HTTP/2, can run together). Close takes Lock,
+	// which waits for any in-flight Read/Write to drain before
+	// wolfSSL_free runs. Close additionally closes the inner
+	// net.Conn BEFORE acquiring Lock so any blocked
+	// wolfSSL_read returns and releases its RLock.
+	lifecycleMu sync.RWMutex
+	closed      int32 // atomic; 1 after Close
+	closeOnce   sync.Once
 }
 
 func (c *conn) Read(p []byte) (int, error) {
 	if len(p) == 0 {
 		return 0, nil
+	}
+	c.lifecycleMu.RLock()
+	defer c.lifecycleMu.RUnlock()
+	if atomic.LoadInt32(&c.closed) != 0 || c.ssl == nil {
+		return 0, io.EOF
 	}
 	n := C.wolfSSL_read(c.ssl, unsafe.Pointer(&p[0]), C.int(len(p)))
 	if n > 0 {
@@ -375,6 +389,11 @@ func (c *conn) Write(p []byte) (int, error) {
 	if len(p) == 0 {
 		return 0, nil
 	}
+	c.lifecycleMu.RLock()
+	defer c.lifecycleMu.RUnlock()
+	if atomic.LoadInt32(&c.closed) != 0 || c.ssl == nil {
+		return 0, io.ErrClosedPipe
+	}
 	n := C.wolfSSL_write(c.ssl, unsafe.Pointer(&p[0]), C.int(len(p)))
 	if n > 0 {
 		return int(n), nil
@@ -384,26 +403,31 @@ func (c *conn) Write(p []byte) (int, error) {
 }
 
 func (c *conn) Close() error {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-	if c.closed {
-		return nil
-	}
-	c.closed = true
-	if c.ssl != nil {
-		C.wolfSSL_shutdown(c.ssl)
-		C.wolfSSL_free(c.ssl)
-		c.ssl = nil
-	}
-	if c.ownCtx != nil {
-		C.wolfSSL_CTX_free(c.ownCtx)
-		c.ownCtx = nil
-	}
-	if c.handle != 0 {
-		unregisterConn(c.handle)
-		c.handle = 0
-	}
-	return c.inner.Close()
+	c.closeOnce.Do(func() {
+		atomic.StoreInt32(&c.closed, 1)
+		// Close inner first so any blocked wolfSSL_read /
+		// wolfSSL_write (parked in our IO callback's
+		// net.Conn.Read / Write) returns and releases the RLock.
+		_ = c.inner.Close()
+		// Now wait for in-flight Read/Write to drain, then free
+		// the SSL.
+		c.lifecycleMu.Lock()
+		defer c.lifecycleMu.Unlock()
+		if c.ssl != nil {
+			C.wolfSSL_shutdown(c.ssl)
+			C.wolfSSL_free(c.ssl)
+			c.ssl = nil
+		}
+		if c.ownCtx != nil {
+			C.wolfSSL_CTX_free(c.ownCtx)
+			c.ownCtx = nil
+		}
+		if c.handle != 0 {
+			unregisterConn(c.handle)
+			c.handle = 0
+		}
+	})
+	return nil
 }
 
 func (c *conn) LocalAddr() net.Addr                { return c.inner.LocalAddr() }

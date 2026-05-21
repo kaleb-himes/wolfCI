@@ -166,6 +166,33 @@ func (s *Storage) SaveJob(job *Job) error {
 	return nil
 }
 
+// ListJobs returns every Job whose spec is currently on disk
+// under <root>/jobs/. Malformed entries are skipped. The
+// returned slice is in directory-listing order (typically
+// alphabetical).
+func (s *Storage) ListJobs() ([]*Job, error) {
+	jobsDir := filepath.Join(s.root, "jobs")
+	entries, err := os.ReadDir(jobsDir)
+	if err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return nil, nil
+		}
+		return nil, fmt.Errorf("storage.ListJobs: read %s: %w", jobsDir, err)
+	}
+	var out []*Job
+	for _, e := range entries {
+		if !e.IsDir() {
+			continue
+		}
+		job, err := s.LoadJob(e.Name())
+		if err != nil {
+			continue
+		}
+		out = append(out, job)
+	}
+	return out, nil
+}
+
 // LoadJob reads and decodes the named job from disk, taking a
 // shared lock for the duration of the read.
 func (s *Storage) LoadJob(name string) (*Job, error) {

@@ -518,11 +518,32 @@ Additional Phase 6 task at the front of the list:
         unrecoverable panic on a Delete'd id was racing the
         gRPC HTTP/2 reader. 15/15 stable after the switch.
 
-- [ ] 6.1 Failing test (internal/server/ui_test.go): GET / returns
+- [x] 6.1 Failing test (internal/server/ui_test.go): GET / returns
         the login page; authenticated GET /jobs returns the job
         list.
-- [ ] 6.2 Implement minimal UI with Go html/template, embedded via
+        Done: TestUI_LoginPageAndJobsList walks the
+        unauthenticated-GET-/ -> POST /login (good and bad creds)
+        -> authenticated GET /jobs flow and asserts the session
+        cookie + listed job name. storage.ListJobs added.
+- [x] 6.2 Implement minimal UI with Go html/template, embedded via
         //go:embed.
+        Done: internal/server.Server registers /, /login,
+        /logout, /jobs, and /static/*. Templates
+        (templates/base.html, login.html, jobs.html) and CSS
+        (static/app.css) are embedded via //go:embed.
+        SessionStore mints 64-hex-char tokens, persists each
+        session as YAML under config-files/auth/sessions/, and
+        enforces TTL on lookup. Session cookie is
+        HttpOnly+SameSite=Strict, with Secure controlled by
+        Options.CookieSecure so HTTP-only dev/test runs work.
+        Side fix in internal/tlsutil: conn lifecycle is now
+        an sync.RWMutex (Read/Write hold RLock, Close holds
+        Lock) plus a sync.Once Close path that shuts the inner
+        net.Conn BEFORE acquiring Lock so blocked
+        wolfSSL_read calls return and release their RLock.
+        Previously wolfSSL_free could run while a gRPC HTTP/2
+        reader was mid-wolfSSL_read and SIGSEGV the process
+        (intermittent in test re-runs). 15/15 stable after.
 - [ ] 6.3 Job create/edit form posts to internal/storage.
 - [ ] 6.4 Build log live stream via Server-Sent Events.
 - [ ] 6.5 Node management page lists registered on-prem and GCE

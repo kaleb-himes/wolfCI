@@ -1,0 +1,22 @@
+{{ define "content" }}
+<section class="panel">
+<h2>Jobs</h2>
+{{ if .Jobs }}
+<table>
+<thead><tr><th>Name</th><th>Description</th><th>Node label</th><th>Steps</th></tr></thead>
+<tbody>
+{{ range .Jobs }}
+<tr>
+<td><strong>{{ .Name }}</strong></td>
+<td>{{ .Description }}</td>
+<td>{{ if .NodeLabel }}<code>{{ .NodeLabel }}</code>{{ else }}<span class="muted">any</span>{{ end }}</td>
+<td>{{ len .Steps }}</td>
+</tr>
+{{ end }}
+</tbody>
+</table>
+{{ else }}
+<p class="muted">No jobs yet. Create one with the wolfci-ctl CLI (coming in Phase 8) or place a job.yaml under jobs/&lt;name&gt;/.</p>
+{{ end }}
+</section>
+{{ end }}
