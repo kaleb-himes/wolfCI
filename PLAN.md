@@ -1093,15 +1093,24 @@ before the phase started):
               golang.org/x/term but does not declare it in its
               go.mod. Not our problem to fix; just don't
               compile the examples tree.
-          (b) go-wolfssl/x509.go ships static fallback stubs
-              for wolfSSL_X509_NAME_oneline and
-              wolfSSL_X509_get_subjectCN that conflict with the
-              real symbols in our wolfSSL build (we have
-              OPENSSL_EXTRA-equivalent features on). 10.6 will
-              need to either skip x509.go from the imports it
-              uses, or wrap go-wolfssl per-file in
-              internal/wolfcrypt rather than pulling the root
-              package wholesale.
+          (b) go-wolfssl/x509.go ships static fallback stubs for
+              wolfSSL_X509_NAME_oneline and
+              wolfSSL_X509_get_subjectCN. Our wolfSSL build does
+              NOT enable OPENSSL_EXTRA (verified: no
+              OPENSSL_EXTRA / OPENSSL_ALL / WOLFSSL_OPENSSL_*
+              defines in options.h - per CLAUDE.md Hard Rule #12
+              we will never enable those), but wolfSSL's ssl.h
+              declares these OpenSSL-compat function prototypes
+              unconditionally even when the implementations are
+              gated out, so go-wolfssl's static stubs collide at
+              compile time with the public declarations. This is
+              a bug in go-wolfssl's x509.go - its fallback stubs
+              should be inside `#ifndef OPENSSL_EXTRA` or simply
+              not exist. 10.6 should wrap go-wolfssl per-file
+              (random.go, hmac.go, hash.go, ecc.go, sha.go) and
+              avoid x509.go and ssl.go entirely; the X.509 + TLS
+              surface we need is already covered by
+              internal/wolfcrypt's MintCert and internal/tlsutil.
         The smoke test deliberately does NOT attempt a full
         `go build` of the vendored package yet; that gate
         grows in 10.6 once we pick which files we actually

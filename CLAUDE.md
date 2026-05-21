@@ -66,6 +66,23 @@ owner and override defaults.
     in third_party/<name>-version.txt. Do not pull a non-wolfSSL
     alternative unless the owner explicitly waives this rule for
     that specific dependency.
+12. NEVER enable OpenSSL-compatibility features in the wolfSSL
+    build profile or call OpenSSL-compatibility APIs from wolfCI
+    code. Forbidden configure flags:
+        --enable-opensslextra      WOLFSSL_OPENSSL_EXTRA
+        --enable-opensslall        OPENSSL_ALL
+        --enable-opensslcoexist    coexistence shims
+    Forbidden API surface (any OpenSSL-mimicking name):
+        EVP_*, X509_*, SSL_CTX_*, BIO_*, PEM_read_*, HMAC_Init,
+        RAND_bytes, AES_encrypt, etc.
+    Use the wolfSSL-native (wc_* / wolfSSL_*) APIs only. The
+    OpenSSL-compat surface exists for legacy projects migrating
+    away from OpenSSL without rewriting their code; wolfCI is a
+    greenfield project with no OpenSSL legacy, so we have no
+    excuse to use it. If a transitive dependency surfaces an
+    OpenSSL-compat collision (e.g. a wrapper library expects the
+    compat symbols to be absent), the answer is to fix the
+    wrapper, not to enable the compat layer.
 
 ## Operating Procedure (every session)
 
