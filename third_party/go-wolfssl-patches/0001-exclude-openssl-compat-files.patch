@@ -1,0 +1,22 @@
+diff --git a/ssl.go b/ssl.go
+index bc7959e..c136546 100644
+--- a/ssl.go
++++ b/ssl.go
+@@ -1,3 +1,6 @@
++//go:build wolfci_use_openssl_compat
++// +build wolfci_use_openssl_compat
++
+ /* ssl.go
+  *
+  * Copyright (C) 2006-2025 wolfSSL Inc.
+diff --git a/x509.go b/x509.go
+index c535b15..0648e95 100644
+--- a/x509.go
++++ b/x509.go
+@@ -1,3 +1,6 @@
++//go:build wolfci_use_openssl_compat
++// +build wolfci_use_openssl_compat
++
+ /* x509.go
+  *
+  * Copyright (C) 2006-2025 wolfSSL Inc.

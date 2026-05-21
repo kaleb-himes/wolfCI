@@ -1,16 +1,17 @@
 #!/bin/sh
-# scripts/test-go-wolfssl.sh - TDD gate for PLAN.md task 10.5.
+# scripts/test-go-wolfssl.sh - TDD gate for PLAN.md tasks 10.5 +
+# 10.6 (patch infrastructure).
 #
 # Verifies the vendored go-wolfssl submodule:
 #   - third_party/go-wolfssl exists
 #   - the submodule is checked out at the SHA recorded in
 #     third_party/go-wolfssl-version.txt
-#   - the expected Go source files are present (random.go,
-#     hmac.go, hash.go, ecc.go, ssl.go) so wrapping it in 10.6
-#     is not pulling from thin air
-#   - the package compiles standalone via `go build ./third_party/
-#     go-wolfssl/...` so wolfCI's own build is not the only
-#     thing exercising it.
+#   - the expected top-level Go source files are present
+#   - the local patches under third_party/go-wolfssl-patches/ are
+#     applied to the submodule worktree (re-applied if missing)
+#   - the patched root package compiles against our vendored
+#     wolfSSL install at build/wolfssl-install/. This is the
+#     real-build smoke check that 10.5 deliberately deferred.
 
 set -eu
 
@@ -18,6 +19,7 @@ cd "$(dirname "$0")/.."
 
 DIR="third_party/go-wolfssl"
 VERFILE="third_party/go-wolfssl-version.txt"
+PATCH_DIR="third_party/go-wolfssl-patches"
 
 fail() {
     printf 'FAIL: %s\n' "$1" >&2
@@ -43,33 +45,49 @@ if [ "$pinned" != "$actual" ]; then
     fail "$DIR checked out at $actual; $VERFILE pins $pinned"
 fi
 
-for f in random.go hmac.go hash.go ecc.go ssl.go; do
+for f in random.go hmac.go hash.go ecc.go ssl.go x509.go; do
     if [ ! -f "$DIR/$f" ]; then
         fail "$DIR/$f missing; vendored layout has changed unexpectedly"
     fi
 done
 
-# Compile the vendored package in its own module context so a
-# broken upstream is caught here, not inside whatever wolfCI file
-# first imports it. go-wolfssl carries its own go.mod
-# (github.com/wolfssl/go-wolfssl) so we cd in before building;
-# 10.6 wires it into wolfCI's module with a replace directive.
-# A full `go build` of go-wolfssl against wolfCI's wolfSSL profile
-# is intentionally NOT run here. Two compat issues surfaced during
-# 10.5 vendoring:
-#
-#   1. go-wolfssl/examples/aes-encrypt/ depends on golang.org/x/term
-#      which is not declared in go-wolfssl's go.mod.
-#   2. go-wolfssl/x509.go ships static fallback stubs for
-#      wolfSSL_X509_NAME_oneline and wolfSSL_X509_get_subjectCN
-#      that conflict with the real symbols in our wolfSSL build
-#      (we have OPENSSL_EXTRA-equivalent features on).
-#
-# 10.6 will decide per-primitive which go-wolfssl files to wire in
-# (and may move them under internal/wolfcrypt with a replace
-# directive that skips the conflicting files). At that point this
-# gate can grow into a real "build the parts we use" check. For
-# now it just verifies the submodule is checked out at the right
-# SHA and the file layout matches what 10.6 expects to see.
+# Apply any local patches. Each patch is a `git diff` against the
+# pinned SHA; if the submodule worktree is clean (no diff against
+# HEAD), the patches need to be re-applied. If a diff is already
+# present we trust it matches the patch set and skip re-apply.
+if [ -d "$PATCH_DIR" ]; then
+    have_diff=$(git -C "$DIR" diff --name-only)
+    if [ -z "$have_diff" ]; then
+        for patch in "$PATCH_DIR"/*.patch; do
+            [ -e "$patch" ] || continue
+            if ! git -C "$DIR" apply "../../$patch" 2>/tmp/wolfci-gw-patch.log; then
+                cat /tmp/wolfci-gw-patch.log >&2
+                fail "applying $patch failed"
+            fi
+        done
+    fi
+fi
+
+# Real build of the root package against our vendored wolfSSL.
+# go-wolfssl does not declare the darwin frameworks (Security,
+# CoreFoundation) that libwolfssl.a needs on macOS, so we add them
+# via CGO_LDFLAGS here. On Linux those flags are a no-op.
+WOLFSSL_INSTALL="$(pwd)/build/wolfssl-install"
+if [ ! -f "$WOLFSSL_INSTALL/lib/libwolfssl.a" ]; then
+    echo "test-go-wolfssl.sh: SKIP smoke build (wolfSSL not built; run scripts/build-wolfssl.sh)"
+    echo "test-go-wolfssl.sh: PASS (source + patch checks only)"
+    exit 0
+fi
+darwin_frameworks=""
+case "$(uname -s)" in
+    Darwin) darwin_frameworks="-framework Security -framework CoreFoundation" ;;
+esac
+export CGO_CFLAGS="-I$WOLFSSL_INSTALL/include ${CGO_CFLAGS:-}"
+# shellcheck disable=SC2089
+export CGO_LDFLAGS="-L$WOLFSSL_INSTALL/lib -lwolfssl $darwin_frameworks ${CGO_LDFLAGS:-}"
+if ! ( cd "$DIR" && go build . ) 2>/tmp/wolfci-go-wolfssl.log; then
+    cat /tmp/wolfci-go-wolfssl.log >&2
+    fail "go build inside $DIR (root package) failed"
+fi
 
 echo "test-go-wolfssl.sh: PASS"

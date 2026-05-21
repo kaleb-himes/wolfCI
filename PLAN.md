@@ -1116,23 +1116,49 @@ before the phase started):
         grows in 10.6 once we pick which files we actually
         wire in.
 - [ ] 10.6 Replace internal/wolfcrypt's hand-rolled CGO with
-        adapters over go-wolfssl. Per CLAUDE.md rule #11
-        (2026-05-21 owner directive), wolfSSL's own bindings are
-        the canonical Go interface to wolfCrypt; Phase 10.1's
-        hand-rolled wrappers were a stop-gap. Where go-wolfssl's
-        API already covers a primitive, expose it through
-        internal/wolfcrypt unchanged so existing call sites
-        (password.go, sshkey.go, future testcerts) keep
-        compiling. Where go-wolfssl is missing something we
-        need (e.g. MintCert + Cert struct, HMAC-both-sides
-        compare), keep the wolfCI-side helper but route its
-        primitive calls through go-wolfssl. Goal: zero
-        hand-rolled CGO in internal/wolfcrypt at the end of
-        this task.
-        Acceptance: every existing internal/wolfcrypt test
-        (RandBytes, HMAC, PBKDF2, SHA256, Ed25519/ECC/RSA
-        verify, MintCert) still passes, and `grep -r "import \"C\""
-        internal/wolfcrypt/` returns nothing.
+        adapters over go-wolfssl. Sub-divided because go-wolfssl
+        is incomplete and partly tied to OpenSSL-compat APIs we
+        forbid (CLAUDE.md Hard Rule #12).
+        - [x] 10.6a Patch infrastructure to exclude go-wolfssl's
+              OpenSSL-compat files from our build.
+              Done: third_party/go-wolfssl-patches/0001-exclude-
+              openssl-compat-files.patch adds a
+              `//go:build wolfci_use_openssl_compat` header to
+              go-wolfssl/x509.go and go-wolfssl/ssl.go so those
+              two files are excluded from default compilations.
+              x509.go is a pure OpenSSL-compat binding
+              (`<wolfssl/openssl/x509.h>` includes and the
+              X509_STORE_* / WolfSSL_X509_* function family);
+              ssl.go uses types defined in x509.go and exposes
+              an OpenSSL-shaped TLS API we do not need
+              (internal/tlsutil owns our TLS path).
+              scripts/test-go-wolfssl.sh now: (1) re-applies
+              the patches when the submodule worktree is clean;
+              (2) compiles the patched root package against our
+              vendored wolfSSL at build/wolfssl-install/,
+              passing the darwin Security + CoreFoundation
+              frameworks via CGO_LDFLAGS since go-wolfssl does
+              not declare them itself.
+              third_party/go-wolfssl-patches/README.md documents
+              the why and the "what would let us drop this
+              patch" condition (upstream fix or build tag).
+        - [ ] 10.6b Wire the primitives that go-wolfssl actually
+              covers into internal/wolfcrypt: RandBytes,
+              HMACSHA256, PBKDF2HMACSHA256, SHA256,
+              ECCVerifyP256. Adds a `replace
+              github.com/wolfssl/go-wolfssl =>
+              ./third_party/go-wolfssl` directive to wolfCI's
+              go.mod so the vendored copy is used; existing
+              tests must still pass byte-for-byte (RFC KATs
+              already gate the behavior). Hand-rolled CGO in
+              these primitives gets deleted.
+        - [ ] 10.6c Document why Ed25519 (gen + sign + verify),
+              RSA verify, and MintCert stay hand-rolled:
+              go-wolfssl does not expose them today. Surface as
+              a finding for the project owner so they can
+              decide whether to file upstream feature requests
+              or accept the partial swap. Update CLAUDE.md and
+              docs/SECURITY.md to make the boundary explicit.
 - [ ] 10.7 Vendor github.com/wolfSSL/wolfssh into
         third_party/wolfssh/ as a git submodule pinned to the
         latest tag. scripts/build-wolfssh.sh (new) compiles it
