@@ -47,3 +47,6 @@ third_party/wolfssl/aclocal.m4
 # Local environment
 .env
 .env.local
+
+# Claude Code session-local state
+.claude/

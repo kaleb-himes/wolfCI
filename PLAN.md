@@ -56,10 +56,12 @@ Bring up TLS using the project's chosen crypto library.
         pinned to tag v5.9.1-stable. Record the tag in
         third_party/wolfssl-version.txt.
         Gate: scripts/test-wolfssl-submodule.sh.
-- [ ] 1.2 Write scripts/build-wolfssl.sh to compile wolfSSL with
+- [x] 1.2 Write scripts/build-wolfssl.sh to compile wolfSSL with
         options suitable for a CI server (TLS 1.2 and 1.3, modern
         cipher suites, no SSLv3 or insecure protocols, FIPS off by
         default; FIPS profile toggleable later).
+        Gate: scripts/test-build-wolfssl.sh. Installs to
+        build/wolfssl-install/ (gitignored).
 - [ ] 1.3 Create internal/tlsutil with a CGO wrapper that exposes a
         Go net.Listener backed by wolfSSL. Failing test
         (internal/tlsutil/tlsutil_test.go): a TLS 1.3 handshake to
