@@ -423,14 +423,30 @@ Additional priorities confirmed after Phase 5 mid-point review:
               test's own agentsvc; verifies Provision count,
               Terminate count, post-Terminate idle state, and
               the spawned agent's own build log content.
-- [ ] 5.6 Implement the GCE driver against the real API behind
+- [x] 5.6 Implement the GCE driver against the real API behind
         the nodes.Provisioner interface the fake satisfies.
         Live test (internal/nodes/gce/live_test.go) is a
         placeholder gated on WOLFCI_GCE_LIVE_TEST=1 so it
         compiles and skips by default until credentials are
         provided. Driver itself is built against
-        google.golang.org/api/compute/v1 and verified offline
-        via httptest where possible.
+        google.golang.org/api/compute/v1.
+        Done: gce.Provisioner.Provision builds a compute.Instance
+        (machine type from cfg, source image from cfg, default
+        network unless overridden, ONE_TO_ONE_NAT external IP,
+        startup-script in metadata), calls Instances.Insert,
+        polls ZoneOperations until DONE. Terminate is the
+        symmetric Delete. compute.Service is built lazily via
+        option.WithCredentialsFile(cfg.ServiceAccountKey) so
+        offline unit tests don't need real creds. Gate:
+        TestStartupScript_MentionsAgentIDAndLabel,
+        TestNewProvisioner_LazyService, plus the SKIP'd
+        TestLive_GCEProvisionTerminate.
+        Backlog (logged in commit and in PLAN.md backlog):
+        the startup script is a placeholder; a follow-on task
+        fills it in to install wolfci-agent, deliver cert
+        material via GCE Secret Manager (or equivalent), and
+        start the agent under systemd with the right agent_id
+        and label.
 - [ ] 5.7 LogChunk streaming: the agent emits LogChunk messages
         during step execution (not just BuildComplete at the
         end). Server-side persists them under
@@ -500,5 +516,11 @@ phase when they become relevant.
   same WOLFSSL*; today the package assumes the caller serializes
   (which is fine for one reader / one writer net.Conn use, but
   should be made explicit).
+- GCE startup-script fill-in: install wolfci-agent on the booted
+  VM, distribute cert material (GCE Secret Manager preferred),
+  drop config-files/agent.yaml with the spawn-time agent_id and
+  label, start the agent under systemd. Until this lands the
+  GCE Provisioner CREATES VMs but the VMs do not actually join
+  the wolfCI cluster.
 
 End of PLAN.md.
