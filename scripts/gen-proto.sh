@@ -33,6 +33,7 @@ protoc \
     --go_out=. --go_opt=paths=source_relative \
     --go-grpc_out=. --go-grpc_opt=paths=source_relative \
     api/v1/agent.proto \
-    api/v1/plugin/plugin.proto
+    api/v1/plugin/plugin.proto \
+    api/v1/cli/cli.proto
 
-echo "gen-proto.sh: regenerated api/v1/*.pb.go and api/v1/plugin/*.pb.go"
+echo "gen-proto.sh: regenerated api/v1/*.pb.go, api/v1/plugin/*.pb.go, api/v1/cli/*.pb.go"

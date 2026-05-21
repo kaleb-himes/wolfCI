@@ -1,0 +1,42 @@
+// wolfCI command-line client protocol. Distinct from
+// AgentService so the cert-CN -> matrix permission check can
+// gate human callers separately from build agents.
+syntax = "proto3";
+
+package wolfci.v1.cli;
+
+option go_package = "github.com/kaleb-himes/wolfCI/api/v1/cli;cliv1";
+
+// CLIService is what wolfci-ctl talks to.
+service CLIService {
+  // ListJobs returns every job defined on disk.
+  rpc ListJobs(Empty) returns (ListJobsResponse);
+
+  // ListNodes returns every agent the server knows about,
+  // both Register'd (visible) and currently connected.
+  rpc ListNodes(Empty) returns (ListNodesResponse);
+}
+
+message Empty {}
+
+message ListJobsResponse {
+  repeated Job jobs = 1;
+}
+
+message Job {
+  string name = 1;
+  string description = 2;
+  string node_label = 3;
+  int32 step_count = 4;
+}
+
+message ListNodesResponse {
+  repeated Node nodes = 1;
+}
+
+message Node {
+  string agent_id = 1;
+  repeated string labels = 2;
+  int32 executors = 3;
+  bool connected = 4;
+}

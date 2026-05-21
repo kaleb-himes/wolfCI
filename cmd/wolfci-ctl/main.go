@@ -44,6 +44,48 @@ var subcommands = map[string]*subcommand{
 		synopsis: "print the wolfci-ctl version",
 		run:      runVersion,
 	},
+	"job": {
+		name:     "job",
+		synopsis: "job operations (list)",
+		run:      runJobGroup,
+	},
+	"node": {
+		name:     "node",
+		synopsis: "node operations (list)",
+		run:      runNodeGroup,
+	},
+}
+
+// runJobGroup dispatches `wolfci-ctl job <verb>`.
+func runJobGroup(args []string, stdout, stderr *os.File) int {
+	if len(args) == 0 {
+		fmt.Fprintln(stderr, "usage: wolfci-ctl job <verb>")
+		fmt.Fprintln(stderr, "verbs: list")
+		return 2
+	}
+	switch args[0] {
+	case "list":
+		return runJobList(args[1:], stdout, stderr)
+	default:
+		fmt.Fprintf(stderr, "wolfci-ctl: unknown job verb %q\n", args[0])
+		return 2
+	}
+}
+
+// runNodeGroup dispatches `wolfci-ctl node <verb>`.
+func runNodeGroup(args []string, stdout, stderr *os.File) int {
+	if len(args) == 0 {
+		fmt.Fprintln(stderr, "usage: wolfci-ctl node <verb>")
+		fmt.Fprintln(stderr, "verbs: list")
+		return 2
+	}
+	switch args[0] {
+	case "list":
+		return runNodeList(args[1:], stdout, stderr)
+	default:
+		fmt.Fprintf(stderr, "wolfci-ctl: unknown node verb %q\n", args[0])
+		return 2
+	}
 }
 
 func main() {

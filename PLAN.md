@@ -689,13 +689,21 @@ RPC.
               TestDispatch_UnknownSubcommand,
               TestLogin_WritesConfig, TestLogin_MissingFlags,
               TestDefaultConfigPath.
-        - [ ] 8.1b CLIService gRPC service (job list, node list).
-              Add a new gRPC service distinct from AgentService
-              so the cert CN -> matrix permission check can
-              gate humans separately from agents. Server adds
-              a CLIService handler that wraps storage.ListJobs
-              and agentsvc.Agents. Client subcommand uses the
-              same wolfSSL mTLS bridge as the agent.
+        - [x] 8.1b CLIService gRPC service (job list, node list).
+              Done: api/v1/cli/cli.proto declares the
+              CLIService with ListJobs + ListNodes;
+              internal/cliservice wraps storage.ListJobs and
+              agentsvc.Agents/ConnectedAgents. wolfci-ctl
+              dispatches `job list` and `node list` through
+              the wolfSSL mTLS bridge (same Dial path as
+              agent.Client) with text-table output by default
+              and --json for scripting. Gates:
+              TestCLIService_ListJobs / ListNodes /
+              ListNodes_NoAgentSvc cover the server side over
+              real gRPC; TestFormatJobs_Text / _Empty / _JSON
+              and TestFormatNodes_Text gate the formatters;
+              TestJobList_EndToEnd exercises the full mTLS
+              gRPC round trip through dispatch().
         - [ ] 8.1c Streaming build log + job run subcommands.
               "build log" tails /api/v1/builds/{job}/{n}/log;
               "job run" enqueues a build through CLIService and
