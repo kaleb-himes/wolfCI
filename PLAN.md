@@ -582,6 +582,22 @@ Additional Phase 6 task at the front of the list:
 
 Out-of-process gRPC plugins.
 
+Decisions locked in for Phase 7 (confirmed with the project
+owner before the phase started):
+
+- Plugin host: hashicorp/go-plugin. It handles subprocess
+  lifecycle, gRPC-over-Unix-socket handshake, version
+  negotiation, and graceful shutdown so we do not hand-roll
+  those.
+- First hook: on-build-complete. Server invokes registered
+  plugins after every BuildComplete with (job, build_number,
+  status, exit_code, error). The on-build-start hook lands
+  later if there is demand.
+- Install layout: plugins/installed/<name>/<name> for the
+  binary, plus an optional plugins/installed/<name>/config.yaml
+  next to it. Easy install ("drop a directory"), easy uninstall
+  ("rm -r").
+
 - [ ] 7.1 Design the plugin protocol (gRPC; plugins announce the
         hooks they implement). Document in docs/PLUGINS.md.
 - [ ] 7.2 Failing test (internal/plugin/plugin_test.go): a sample
