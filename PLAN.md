@@ -277,10 +277,20 @@ before the phase started):
               TestAgentService_RegisterRoundtrip (real gRPC over
               plain TCP, ephemeral port) and
               TestAgentService_Register_Validation.
-        - [ ] 5.2c gRPC client + wolfSSL mTLS bridge: agent
+        - [x] 5.2c gRPC client + wolfSSL mTLS bridge: agent
               dials the server, completes the mTLS handshake,
               issues Register. Requires client-side wolfSSL in
               internal/tlsutil.
+              Done: internal/tlsutil grew Dial (client side) and
+              ClientCAs/RootCAs/ServerName Config fields; the
+              server-side NewListener turns on
+              VERIFY_PEER | VERIFY_FAIL_IF_NO_PEER_CERT when
+              ClientCAs is non-empty. gRPC bridges via
+              grpc.WithContextDialer over insecure credentials
+              (encryption is below the gRPC transport).
+              testcerts.NewMTLSChain mints a CA + ServerAuth +
+              ClientAuth chain for tests. Gate:
+              TestAgentService_RegisterOverMTLS.
         - [ ] 5.2d End-to-end test (tests/agent_e2e_test.go):
               spin up server, spin up agent, observe a Register
               round trip, then drive a job through (once 5.3 is
