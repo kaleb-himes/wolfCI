@@ -154,12 +154,20 @@ before the phase started):
         12); LoadConfig/Save round-trip YAML; PasswordStore
         Set/Verify against per-user bcrypt files at
         <root>/<user>.bcrypt mode 0600.
-- [ ] 3.5 Failing test (internal/authz/matrix_test.go): the matrix
+- [x] 3.5 Failing test (internal/authz/matrix_test.go): the matrix
         denies an action the user lacks permission for and permits
         actions the user holds.
-- [ ] 3.6 Implement a Jenkins-style role-based matrix in
+        Done: TestMatrix_DefaultRoles pins every permission across
+        admin/developer/viewer and verifies unknown users are
+        denied. Plus TestMatrix_Roundtrip and
+        TestMatrix_UnknownRoleDenies.
+- [x] 3.6 Implement a Jenkins-style role-based matrix in
         internal/authz. Roles defined in
         config-files/auth/matrix.yaml.
+        Done: internal/authz/matrix.go. Permissions are dotted
+        namespaced strings (jobs.read, jobs.build, jobs.configure,
+        builds.read, builds.cancel, nodes.read, nodes.configure),
+        plus a "*" wildcard for admin.
 - [ ] 3.7 docs/SECURITY.md: write the full security model, including
         threat model and how to enable/disable each auth path.
 
