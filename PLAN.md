@@ -1336,20 +1336,56 @@ before the phase started):
             scripts/test.sh because the build takes minutes;
             run explicitly when wolfssh changes.
 - [ ] 10.8 Replace internal/auth/sshkey.go's hand-rolled
-        RFC 4253 wire parser with wolfssh-backed parsing. Same
-        contract on the auth-side API (LookupKey, PublicKey
-        struct, VerifySignature(user, data, sigSSHWire)) so
-        callers do not change. The hand-rolled DER assembler for
-        ECDSA signatures (encodeECDSASignatureDER) and the
-        EncodeSSHEd25519AuthorizedKey helper can be retired in
-        favor of wolfssh equivalents; if wolfssh does not expose
-        them through its Go interface (if any), keep the
-        helpers but document them as "wire-format only, not
-        crypto".
-        Acceptance: existing TestKeyStore_VerifySignature,
-        TestKeyStore_RejectsPathTraversal,
-        TestKeyStore_RejectsUnknownAlgo stay green; the parser
-        + verify dispatch is now provided by wolfssh.
+        RFC 4253 wire parser with wolfssh-backed parsing.
+        REOPENED 2026-05-21: project owner decided to extend
+        go-wolfssl with a wolfssh sub-package rather than
+        invent kaleb-himes/go-wolfssh from scratch. Per
+        CLAUDE.md Hard Rule #11 (extended): every wolfSSL
+        ecosystem Go binding (wolfssh, future wolfMQTT,
+        wolfBoot, wolfTPM, ...) lives under
+        github.com/wolfssl/go-wolfssl/<product>/ as a sibling
+        sub-package; importing the sub-package is what causes
+        its C library to be linked in, so users opt in per
+        feature.
+        Sub-divided:
+        - [x] 10.8a Add the wolfssh sub-package at
+              third_party/go-wolfssl/wolfssh/wolfssh.go via
+              patch 0006. Exposes
+              WolfSSH_ReadPublicKey_buffer, the FORMAT_*
+              enum, and an Err(rc) helper. CGO directives
+              point at build/wolfssh-install/ (one extra
+              `..` because the sub-package is one directory
+              deeper than the root). Smoke test
+              (internal/authssh/gowolfssh_smoke_test.go):
+              TestGoWolfSSH_ReadPublicKey_Callable proves
+              the wrapper compiles, links against libwolfssh.a,
+              and runs without crashing.
+              TestGoWolfSSH_FormatConstants pins distinct
+              nonzero values on the FORMAT_* enum. The deeper
+              "parse a real key and hand the blob to
+              wolfcrypt for verify" round-trip is 10.8b.
+        - [ ] 10.8b Wire internal/auth/sshkey.go onto the new
+              gowolfssh wrappers. The hand-rolled
+              parseAuthorizedKey + parseSSHWirePublicKey gets
+              replaced by a thin call into
+              gowolfssh.WolfSSH_ReadPublicKey_buffer (with
+              FORMAT_SSH for authorized_keys lines). The
+              signature verify dispatch already goes through
+              wolfcrypt; that stays unchanged. Existing
+              tests (TestKeyStore_VerifySignature,
+              TestKeyStore_RejectsPathTraversal,
+              TestKeyStore_RejectsUnknownAlgo) are the gate.
+              Note: 10.8a smoke testing surfaced that
+              wolfssh's IdentifyOpenSshKey is selective
+              about the inner key format; 10.8b will need to
+              feed it exactly what it expects (likely SSH
+              wire-encoded blob with the right preamble),
+              not just the base64-decoded authorized_keys
+              contents.
+        (Earlier-DECLINED draft kept for history: declined
+        because no upstream go-wolfssh existed and we did not
+        want to spin up a brand-new project. The sub-package
+        path above replaces that reasoning.)
 - [ ] 10.9 Replace crypto/ecdsa, crypto/elliptic, crypto/rand,
         crypto/x509, and crypto/x509/pkix in
         internal/testcerts/testcerts.go with wolfcrypt.MintCert

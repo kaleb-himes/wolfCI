@@ -188,3 +188,60 @@ is non-empty and starts with the SEQUENCE tag.
 
 **What would let us drop this patch:** same as 0003 / 0004 -
 upstream PR merges + a release tag lands.
+
+## 0006-add-wolfssh-subpackage.patch
+
+Adds the wolfssh sub-package at
+`third_party/go-wolfssl/wolfssh/wolfssh.go`. This is the first
+sibling sub-package under the root `github.com/wolfssl/go-wolfssl`
+module; future wolfMQTT / wolfBoot / wolfTPM / wolfHSM bindings
+follow the same layout per CLAUDE.md Hard Rule #11.
+
+Contents:
+
+  Package wolfssh
+    FORMAT_ASN1 / FORMAT_PEM / FORMAT_RAW / FORMAT_SSH /
+      FORMAT_OPENSSH         Go ints mirroring the
+                             WOLFSSH_FORMAT_* enum.
+    WolfSSH_ReadPublicKey_buffer(in, format) ->
+      (keyBlob, algo, rc)    Calls wc_SSH_ReadPublicKey_buffer
+                             with a NULL heap, copies the wolfssh-
+                             allocated payload into a Go []byte,
+                             returns the wire-format key blob and
+                             the algorithm name. cOutType is
+                             intentionally NOT freed (it points
+                             into wolfssh's static IdToName table).
+    Err(rc) -> error         Convenience converter.
+
+CGO setup:
+
+  #cgo CFLAGS:  -I${SRCDIR}/../../../build/wolfssh-install/include
+                -I${SRCDIR}/../../../build/wolfssl-install/include
+  #cgo LDFLAGS: -L${SRCDIR}/../../../build/wolfssh-install/lib -lwolfssh
+                -L${SRCDIR}/../../../build/wolfssl-install/lib -lwolfssl
+  #cgo darwin LDFLAGS: -framework Security -framework CoreFoundation
+
+The triple `../../../` is one more `..` than the root package's
+CGO directives (patch 0002): the sub-package is one directory
+deeper.
+
+**Why:** wolfCI's authorized_keys parser in
+`internal/auth/sshkey.go` is wire-format only, but per CLAUDE.md
+Hard Rule #11 we prefer wolfSSL ecosystem code over hand-rolled
+parsing. Putting wolfssh under `go-wolfssl/wolfssh/` rather than
+inside the root package means users who do not need SSH parsing
+do not get libwolfssh.a pulled into their build; cgo applies
+LDFLAGS only for compiled files. Sub-packages also keep wolfSSL
+ecosystem Go bindings consolidated in one repository for the
+upstream PR.
+
+**Gate:** `internal/authssh/gowolfssh_smoke_test.go` ships
+`TestGoWolfSSH_ReadPublicKey_Callable` (proves the wrapper
+compiles, links against libwolfssh.a, and returns without
+crashing) and `TestGoWolfSSH_FormatConstants` (pins the
+FORMAT_* enum values).
+
+**What would let us drop this patch:** when the
+kaleb-himes/go-wolfssl PR carrying patches 0003-0006 merges
+upstream and a release tag lands, the submodule pointer advances
+and this patch drops from `third_party/go-wolfssl-patches/`.

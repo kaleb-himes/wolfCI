@@ -80,6 +80,20 @@ owner and override defaults.
     when Phase 10 is finished; when the PR merges and upstream
     tags a release, the wolfCI submodule pointer advances and the
     relevant patches drop out of third_party/<name>-patches/.
+
+    Sub-package layout for wolfSSL ecosystem libraries other than
+    wolfCrypt + wolfSSL TLS: every additional wolfSSL Go binding
+    lives under github.com/wolfssl/go-wolfssl/<product>/ as a
+    sibling sub-package. wolfssh goes in go-wolfssl/wolfssh/,
+    wolfMQTT will go in go-wolfssl/wolfmqtt/, wolfBoot in
+    go-wolfssl/wolfboot/, and so on. Each sub-package carries its
+    own `#cgo CFLAGS` / `#cgo LDFLAGS` directives, so importing
+    the sub-package is what causes its C library to be linked.
+    Users who do not import the sub-package do not pull in its
+    dependencies (cgo only applies LDFLAGS for compiled files).
+    The root go-wolfssl package stays wolfCrypt + wolfSSL TLS
+    only; broader ecosystem coverage means new sub-packages, not
+    bloating the root.
 12. NEVER enable OpenSSL-compatibility features in the wolfSSL
     build profile or call OpenSSL-compatibility APIs from wolfCI
     code. Forbidden configure flags:

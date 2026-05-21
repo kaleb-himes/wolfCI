@@ -1,0 +1,165 @@
+diff --git a/wolfssh/wolfssh.go b/wolfssh/wolfssh.go
+new file mode 100644
+index 0000000..83e2a05
+--- /dev/null
++++ b/wolfssh/wolfssh.go
+@@ -0,0 +1,159 @@
++/* wolfssh.go
++ *
++ * Copyright (C) 2006-2025 wolfSSL Inc.
++ *
++ * This file is part of wolfSSL.
++ *
++ * wolfSSL is free software; you can redistribute it and/or modify
++ * it under the terms of the GNU General Public License as published
++ * by the Free Software Foundation; either version 2 of the License,
++ * or (at your option) any later version.
++ *
++ * wolfSSL is distributed in the hope that it will be useful, but
++ * WITHOUT ANY WARRANTY; without even the implied warranty of
++ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
++ * General Public License for more details.
++ *
++ * You should have received a copy of the GNU General Public License
++ * along with this program; if not, write to the Free Software
++ * Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA
++ * 02110-1335, USA
++ */
++
++/*
++ * Package wolfssh exposes the wolfssh C library to Go programs.
++ *
++ * It is a sibling sub-package of github.com/wolfssl/go-wolfssl:
++ * importing it is what causes libwolfssh.a (and the wolfssh
++ * headers) to be linked into the host build, so projects that do
++ * not need SSH pay no cost for it. Future wolfSSL Go bindings for
++ * wolfMQTT, wolfBoot, wolfTPM, wolfHSM, etc. follow the same
++ * pattern: a sibling sub-package under go-wolfssl/<product>/ with
++ * its own `#cgo CFLAGS` / `#cgo LDFLAGS` directives.
++ */
++package wolfssh
++
++// #cgo CFLAGS: -I${SRCDIR}/../../../build/wolfssh-install/include
++// #cgo CFLAGS: -I${SRCDIR}/../../../build/wolfssl-install/include
++// #cgo LDFLAGS: -L${SRCDIR}/../../../build/wolfssh-install/lib -lwolfssh
++// #cgo LDFLAGS: -L${SRCDIR}/../../../build/wolfssl-install/lib -lwolfssl
++// #cgo darwin LDFLAGS: -framework Security -framework CoreFoundation
++//
++// #include <wolfssh/ssh.h>
++// #include <stdlib.h>
++import "C"
++
++import (
++    "errors"
++    "unsafe"
++)
++
++/*
++ * Format enum values that wolfssh's *_buffer parsers accept.
++ * FORMAT_OPENSSH is the OpenSSH text form used in
++ * authorized_keys files:
++ *
++ *     ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAI... user@host
++ */
++const (
++    FORMAT_ASN1    = int(C.WOLFSSH_FORMAT_ASN1)
++    FORMAT_PEM     = int(C.WOLFSSH_FORMAT_PEM)
++    FORMAT_RAW     = int(C.WOLFSSH_FORMAT_RAW)
++    FORMAT_SSH     = int(C.WOLFSSH_FORMAT_SSH)
++    FORMAT_OPENSSH = int(C.WOLFSSH_FORMAT_OPENSSH)
++)
++
++/*
++ * WolfSSH_ReadPublicKey_buffer parses an SSH public key from a
++ * caller-provided buffer. The buffer is typically one line of an
++ * authorized_keys file (FORMAT_OPENSSH) or a raw SSH wire-format
++ * public key blob.
++ *
++ * Returns:
++ *   keyBlob - the parsed wire-format key payload (length-prefixed
++ *             inner content, ready for downstream verifiers).
++ *   algo    - the algorithm name as reported by wolfssh, e.g.
++ *             "ssh-ed25519" or "ecdsa-sha2-nistp256".
++ *   rc      - the wolfssh return code; 0 on success.
++ *
++ * The Go return values are copied out of the wolfssh-allocated
++ * buffers before this function returns, so callers do not need
++ * to worry about lifetime management.
++ */
++func WolfSSH_ReadPublicKey_buffer(in []byte,
++    format int) (keyBlob []byte, algo string, rc int) {
++    if len(in) == 0 {
++        return nil, "", -1
++    }
++    var cOut *C.byte
++    var cOutSz C.word32
++    var cOutType *C.byte
++    var cOutTypeSz C.word32
++
++    rcCInt := C.wolfSSH_ReadPublicKey_buffer(
++        (*C.byte)(unsafe.Pointer(&in[0])),
++        C.word32(len(in)),
++        C.int(format),
++        &cOut, &cOutSz,
++        (**C.byte)(unsafe.Pointer(&cOutType)),
++        &cOutTypeSz,
++        nil)
++    if rcCInt != 0 {
++        if cOut != nil {
++            C.free(unsafe.Pointer(cOut))
++        }
++        /*
++         * cOutType points into wolfssh's static IdToName table -
++         * never free it.
++         */
++        return nil, "", int(rcCInt)
++    }
++    /*
++     * Same reason: cOutType is a pointer into wolfssh's static
++     * IdToName string table, not a heap allocation. Only the
++     * cOut payload is WMALLOC'd and needs releasing.
++     */
++    defer C.free(unsafe.Pointer(cOut))
++
++    keyBlob = C.GoBytes(unsafe.Pointer(cOut), C.int(cOutSz))
++    algo = string(C.GoBytes(unsafe.Pointer(cOutType),
++        C.int(cOutTypeSz)))
++    return keyBlob, algo, 0
++}
++
++/*
++ * Err converts a wolfssh return code into a Go error, or nil on
++ * success. The error includes the integer code so callers can
++ * grep wolfssh's error.h if they need the symbolic name.
++ */
++func Err(rc int) error {
++    if rc == 0 {
++        return nil
++    }
++    return errors.New(errString(rc))
++}
++
++func errString(rc int) string {
++    digits := "0123456789"
++    n := rc
++    neg := false
++    if n < 0 {
++        neg = true
++        n = -n
++    }
++    if n == 0 {
++        return "wolfssh: rc 0"
++    }
++    var buf [16]byte
++    i := len(buf)
++    for n > 0 {
++        i--
++        buf[i] = digits[n%10]
++        n /= 10
++    }
++    out := "wolfssh: rc "
++    if neg {
++        out += "-"
++    }
++    return out + string(buf[i:])
++}
