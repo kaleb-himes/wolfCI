@@ -1218,16 +1218,41 @@ before the phase started):
                     third_party/go-wolfssl-patches/README.md
                     documents the patch and the upstream-PR
                     drop condition.
-              - [ ] 10.6c-ii rsa_verify.go (patch 0004).
-                    Wc_InitRsaKey / Wc_FreeRsaKey /
+              - [x] 10.6c-ii rsa_verify.go (patch 0004).
+                    Done: Wc_InitRsaKey / Wc_FreeRsaKey /
                     Wc_RsaPublicKeyDecodeRaw /
-                    Wc_SignatureVerify with
-                    WC_HASH_TYPE_SHA256 and
-                    WC_SIGNATURE_TYPE_RSA_W_ENC; type alias
-                    RsaKey = C.struct_RsaKey. Gate: the
-                    existing RSA PKCS#1 v1.5 vector test in
-                    internal/wolfcrypt/verify_test.go re-runs
-                    against a go-wolfssl-side smoke test.
+                    Wc_SignatureVerify (generic, handles RSA +
+                    ECC) live in third_party/go-wolfssl/
+                    rsa_verify.go. Type alias
+                    RsaKey = C.struct_RsaKey, plus the four
+                    constants WC_HASH_TYPE_SHA256,
+                    WC_SIGNATURE_TYPE_RSA_W_ENC,
+                    WC_SIGNATURE_TYPE_RSA, and
+                    WC_SIGNATURE_TYPE_ECC exposed as Go ints.
+                    The wrapper accepts the key as
+                    interface{} and switches on
+                    *RsaKey vs *Ecc_key, using
+                    unsafe.Sizeof(*k) for the trailing
+                    keyLen argument wc_SignatureVerify
+                    expects.
+                    Detail worth keeping: the rsa_verify.go
+                    CGO preamble has to #include
+                    <wolfssl/wolfcrypt/ecc.h> in addition to
+                    rsa.h + signature.h + hash.h; otherwise
+                    cgo treats C.struct_ecc_key as
+                    incomplete in this compilation unit and
+                    the switch arm refuses to compile, which
+                    in turn makes the same type look
+                    incomplete to wolfCI's verify.go even
+                    though that file is unchanged.
+                    Gate:
+                    internal/wolfcrypt/gowolf_smoke_test.go's
+                    TestGoWolfSSL_RSAVerify_KnownVector drives
+                    the four wrappers against the same
+                    OpenSSL-generated RSA-2048 PKCS#1 v1.5
+                    SHA-256 vector that verify_test.go uses
+                    for the hand-rolled RSAVerifyPKCS1v15SHA256
+                    path.
               - [ ] 10.6c-iii certgen.go (patch 0005).
                     Wc_InitCert / Wc_MakeCert / Wc_SignCert /
                     Wc_SetIssuerBuffer / Wc_SetExtKeyUsage,

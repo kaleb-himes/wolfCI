@@ -1,0 +1,98 @@
+diff --git a/rsa_verify.go b/rsa_verify.go
+new file mode 100644
+index 0000000..152b3fd
+--- /dev/null
++++ b/rsa_verify.go
+@@ -0,0 +1,92 @@
++/* rsa_verify.go
++ *
++ * Copyright (C) 2006-2025 wolfSSL Inc.
++ *
++ * This file is part of wolfSSL.
++ *
++ * wolfSSL is free software; you can redistribute it and/or modify
++ * it under the terms of the GNU General Public License as published by
++ * the Free Software Foundation; either version 2 of the License, or
++ * (at your option) any later version.
++ *
++ * wolfSSL is distributed in the hope that it will be useful,
++ * but WITHOUT ANY WARRANTY; without even the implied warranty of
++ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
++ * GNU General Public License for more details.
++ *
++ * You should have received a copy of the GNU General Public License
++ * along with this program; if not, write to the Free Software
++ * Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA 02110-1335, USA
++ */
++
++package wolfSSL
++
++// #include <wolfssl/options.h>
++// #include <wolfssl/wolfcrypt/rsa.h>
++// #include <wolfssl/wolfcrypt/ecc.h>
++// #include <wolfssl/wolfcrypt/signature.h>
++// #include <wolfssl/wolfcrypt/hash.h>
++// #ifdef NO_RSA
++// typedef struct RsaKey {} RsaKey;
++// int wc_InitRsaKey(RsaKey* key, void* heap) { (void)key; (void)heap; return -174; }
++// int wc_FreeRsaKey(RsaKey* key) { (void)key; return -174; }
++// int wc_RsaPublicKeyDecodeRaw(const byte* n, word32 nSz, const byte* e, word32 eSz, RsaKey* key) { (void)n; (void)nSz; (void)e; (void)eSz; (void)key; return -174; }
++// #endif
++import "C"
++import (
++    "unsafe"
++)
++
++type RsaKey = C.struct_RsaKey
++
++const (
++    WC_HASH_TYPE_SHA256          = int(C.WC_HASH_TYPE_SHA256)
++    WC_SIGNATURE_TYPE_RSA_W_ENC  = int(C.WC_SIGNATURE_TYPE_RSA_W_ENC)
++    WC_SIGNATURE_TYPE_RSA        = int(C.WC_SIGNATURE_TYPE_RSA)
++    WC_SIGNATURE_TYPE_ECC        = int(C.WC_SIGNATURE_TYPE_ECC)
++)
++
++func Wc_InitRsaKey(key *C.struct_RsaKey, heap unsafe.Pointer) int {
++    return int(C.wc_InitRsaKey(key, heap))
++}
++
++func Wc_FreeRsaKey(key *C.struct_RsaKey) int {
++    return int(C.wc_FreeRsaKey(key))
++}
++
++func Wc_RsaPublicKeyDecodeRaw(n []byte, nSz int, e []byte, eSz int, key *C.struct_RsaKey) int {
++    if nSz == 0 || eSz == 0 { return BAD_FUNC_ARG }
++    return int(C.wc_RsaPublicKeyDecodeRaw(
++        (*C.byte)(unsafe.Pointer(&n[0])), C.word32(nSz),
++        (*C.byte)(unsafe.Pointer(&e[0])), C.word32(eSz),
++        key))
++}
++
++// Wc_SignatureVerify is the generic wolfCrypt signature verifier.
++// key must be a *RsaKey for sigType in {WC_SIGNATURE_TYPE_RSA,
++// WC_SIGNATURE_TYPE_RSA_W_ENC}, or a *Ecc_key for
++// WC_SIGNATURE_TYPE_ECC. The wrapper passes sizeof of the
++// underlying struct to wolfCrypt; callers do not pass keyLen.
++func Wc_SignatureVerify(hashType int, sigType int, data []byte, dataLen int, sig []byte, sigLen int, key interface{}) int {
++    var keyPtr unsafe.Pointer
++    var keyLen C.word32
++    switch k := key.(type) {
++    case *C.struct_RsaKey:
++        keyPtr = unsafe.Pointer(k)
++        keyLen = C.word32(unsafe.Sizeof(*k))
++    case *C.struct_ecc_key:
++        keyPtr = unsafe.Pointer(k)
++        keyLen = C.word32(unsafe.Sizeof(*k))
++    default:
++        return BAD_FUNC_ARG
++    }
++    var dataPtr *C.byte
++    if dataLen > 0 { dataPtr = (*C.byte)(unsafe.Pointer(&data[0])) }
++    var sigPtr *C.byte
++    if sigLen > 0 { sigPtr = (*C.byte)(unsafe.Pointer(&sig[0])) }
++    return int(C.wc_SignatureVerify(
++        uint32(hashType), uint32(sigType),
++        dataPtr, C.word32(dataLen),
++        sigPtr, C.word32(sigLen),
++        keyPtr, keyLen))
++}

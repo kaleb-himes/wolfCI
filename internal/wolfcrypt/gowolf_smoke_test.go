@@ -51,6 +51,58 @@ func TestGoWolfSSL_Ed25519_RFC8032_TC2_Verify(t *testing.T) {
 	}
 }
 
+// TestGoWolfSSL_RSAVerify_KnownVector exercises the RSA wrappers
+// added by patch 0004:
+//   Wc_InitRsaKey / Wc_FreeRsaKey
+//   Wc_RsaPublicKeyDecodeRaw (raw n + e, no DER)
+//   Wc_SignatureVerify with WC_HASH_TYPE_SHA256 +
+//   WC_SIGNATURE_TYPE_RSA_W_ENC
+// against the RSA-2048 / PKCS#1 v1.5 / SHA-256 vector generated
+// outside this tree with OpenSSL 3.x (provenance in verify_test.go).
+func TestGoWolfSSL_RSAVerify_KnownVector(t *testing.T) {
+	modulusHex := "C51AEB505274062067DE547C179CA29A925B3D2F74C241DC23572FAB8A5BE2B5" +
+		"461E51214A11003A3C1FABF3E224C0463EE8D35CB44A00899209C9CDD22640BB" +
+		"FC0B645270C9A0D989F23DC2C5A5E6D39D8FD664307E388A9C1DD17F01C71468" +
+		"2A71E70381049535F7CCDC6A37576E02C634CB53E219AA0182608F670EF1B540" +
+		"CADAE541684BD272D6A57289E2D24EB8EFEF81959D9ED9077A1FD6BAC96C2C67" +
+		"42D7D33914756D1D37995BD14812954CD3AB0B75C659D0A882176C0280927652" +
+		"45CEBC5C01F0086331FAD16C28D96AA8285E1D4BD6B312F5AA7DBAAC1B6451AB" +
+		"120869A832235F582C7F5C13336FDC1DBCDE3331C568B02948370B821FB17DD3"
+	exponent := []byte{0x01, 0x00, 0x01}
+	message := []byte("wolfCI test message for RSA signature verification")
+	signatureHex := "bf0adce6abe4fb23909a087c37ae4f254a0390dfea2e0141153f7622d0b12e1d" +
+		"bdace7cb2219a687b9ebd6a877ea31a014e12ab85168647274a2b1d2091ad1ee" +
+		"d3834cdd80b427bcb33507f2d259da4ea33e8d8d5fe75f2d6360e3bf5cfa6c0b" +
+		"d9ec19a22399e4dc26ab1cdf631f9a63d2634cf264f3959d6d66b2fa66197e1e" +
+		"1b43f4062a65ca907aacab1224f3753a6a8291e0779498ce1abf07c7121f3b88" +
+		"5f44e093c12ab0d5c34661d61895b7910b07779fba8c767d3c55794ea19ce802" +
+		"cfc02ecfd1c8aa332018714185e31b0a5471ba056d16f80c962124a4fbba4688" +
+		"e64e939d19b268e5b67f35dbaac01987fba377a0dacfd074704807cd3f0a9106"
+	modulus, _ := hex.DecodeString(modulusHex)
+	signature, _ := hex.DecodeString(signatureHex)
+
+	var key gowolf.RsaKey
+	if rc := gowolf.Wc_InitRsaKey(&key, nil); rc != 0 {
+		t.Fatalf("Wc_InitRsaKey: %d", rc)
+	}
+	defer gowolf.Wc_FreeRsaKey(&key)
+
+	if rc := gowolf.Wc_RsaPublicKeyDecodeRaw(modulus, len(modulus), exponent, len(exponent), &key); rc != 0 {
+		t.Fatalf("Wc_RsaPublicKeyDecodeRaw: %d", rc)
+	}
+
+	rc := gowolf.Wc_SignatureVerify(
+		gowolf.WC_HASH_TYPE_SHA256,
+		gowolf.WC_SIGNATURE_TYPE_RSA_W_ENC,
+		message, len(message),
+		signature, len(signature),
+		&key,
+	)
+	if rc != 0 {
+		t.Fatalf("Wc_SignatureVerify returned %d for the embedded RSA KAT", rc)
+	}
+}
+
 // TestGoWolfSSL_Ed25519_RoundTrip verifies the full make_key + sign
 // + verify path on a freshly generated key. Drives the rest of the
 // new Ed25519 wrapper surface (make_key, export_*, sign_msg,

@@ -106,3 +106,42 @@ the upstream PR (carrying this file as-is) at
 https://github.com/wolfSSL/go-wolfssl and it merges + a release
 tag lands. The submodule pointer advances to that tag and this
 patch falls out of the directory.
+
+## 0004-add-rsa-verify-wrappers.patch
+
+Adds `rsa_verify.go` with the RSA + signature-verify wrappers
+needed for SSH ssh-rsa / rsa-sha2-256 signature checks:
+
+  Wc_InitRsaKey             wc_InitRsaKey
+  Wc_FreeRsaKey             wc_FreeRsaKey
+  Wc_RsaPublicKeyDecodeRaw  wc_RsaPublicKeyDecodeRaw  (raw n + e
+                            from the SSH wire format, no DER)
+  Wc_SignatureVerify        wc_SignatureVerify        (generic
+                            verifier, handles RSA + ECC)
+
+Plus the type alias `RsaKey = C.struct_RsaKey` and four
+constants exposed as Go ints: `WC_HASH_TYPE_SHA256`,
+`WC_SIGNATURE_TYPE_RSA_W_ENC`, `WC_SIGNATURE_TYPE_RSA`,
+`WC_SIGNATURE_TYPE_ECC`.
+
+`Wc_SignatureVerify` takes the key as an `interface{}` (rather
+than a raw `unsafe.Pointer`) and switches on the concrete type:
+`*RsaKey` for the RSA sig types, `*Ecc_key` for ECC. Cgo's
+`unsafe.Sizeof(*k)` produces the byte length wc_SignatureVerify
+expects in its trailing keyLen parameter. Calling with any
+other key type returns `BAD_FUNC_ARG`.
+
+CGO preamble includes `<wolfssl/wolfcrypt/ecc.h>` even though
+this file is the RSA file; otherwise cgo treats
+`C.struct_ecc_key` as incomplete in this compilation unit and
+the switch case above refuses to compile.
+
+**Gate:**
+`internal/wolfcrypt/gowolf_smoke_test.go`'s
+`TestGoWolfSSL_RSAVerify_KnownVector` drives the four wrappers
+against the same OpenSSL-generated RSA-2048 / PKCS#1 v1.5 /
+SHA-256 vector verify_test.go uses for the hand-rolled
+RSAVerifyPKCS1v15SHA256 path.
+
+**What would let us drop this patch:** same as 0003 - upstream
+PR merges and tags.
