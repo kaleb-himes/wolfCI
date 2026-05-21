@@ -1056,25 +1056,83 @@ before the phase started):
         wolfcrypt.RandBytes. Token size and hex encoding stay the
         same; only the entropy source changes. Drop the
         crypto/rand import.
-- [ ] 10.5 Replace crypto/ecdsa, crypto/elliptic, crypto/rand,
+- [ ] 10.5 Vendor github.com/wolfSSL/go-wolfssl into
+        third_party/go-wolfssl/ as a git submodule pinned to the
+        latest tag (latest stable release per wolfSSL convention).
+        Add a CGO trampoline file (or go.mod replace directive)
+        so the wolfCI module can import the vendored copy without
+        a network fetch at build time. Smoke test: a tiny
+        check program (or a new gate in scripts/) imports
+        go-wolfssl and exercises one primitive (e.g. RandBytes
+        equivalent) to confirm the vendored build links cleanly
+        against build/wolfssl-install/lib/libwolfssl.a.
+- [ ] 10.6 Replace internal/wolfcrypt's hand-rolled CGO with
+        adapters over go-wolfssl. Per CLAUDE.md rule #11
+        (2026-05-21 owner directive), wolfSSL's own bindings are
+        the canonical Go interface to wolfCrypt; Phase 10.1's
+        hand-rolled wrappers were a stop-gap. Where go-wolfssl's
+        API already covers a primitive, expose it through
+        internal/wolfcrypt unchanged so existing call sites
+        (password.go, sshkey.go, future testcerts) keep
+        compiling. Where go-wolfssl is missing something we
+        need (e.g. MintCert + Cert struct, HMAC-both-sides
+        compare), keep the wolfCI-side helper but route its
+        primitive calls through go-wolfssl. Goal: zero
+        hand-rolled CGO in internal/wolfcrypt at the end of
+        this task.
+        Acceptance: every existing internal/wolfcrypt test
+        (RandBytes, HMAC, PBKDF2, SHA256, Ed25519/ECC/RSA
+        verify, MintCert) still passes, and `grep -r "import \"C\""
+        internal/wolfcrypt/` returns nothing.
+- [ ] 10.7 Vendor github.com/wolfSSL/wolfssh into
+        third_party/wolfssh/ as a git submodule pinned to the
+        latest tag. scripts/build-wolfssh.sh (new) compiles it
+        into a static lib (build/wolfssh-install/) so the Go
+        side can link it the same way it links libwolfssl.a.
+        scripts/test-build-wolfssh.sh gates the configure
+        flags and the produced .a.
+- [ ] 10.8 Replace internal/auth/sshkey.go's hand-rolled
+        RFC 4253 wire parser with wolfssh-backed parsing. Same
+        contract on the auth-side API (LookupKey, PublicKey
+        struct, VerifySignature(user, data, sigSSHWire)) so
+        callers do not change. The hand-rolled DER assembler for
+        ECDSA signatures (encodeECDSASignatureDER) and the
+        EncodeSSHEd25519AuthorizedKey helper can be retired in
+        favor of wolfssh equivalents; if wolfssh does not expose
+        them through its Go interface (if any), keep the
+        helpers but document them as "wire-format only, not
+        crypto".
+        Acceptance: existing TestKeyStore_VerifySignature,
+        TestKeyStore_RejectsPathTraversal,
+        TestKeyStore_RejectsUnknownAlgo stay green; the parser
+        + verify dispatch is now provided by wolfssh.
+- [ ] 10.9 Replace crypto/ecdsa, crypto/elliptic, crypto/rand,
         crypto/x509, and crypto/x509/pkix in
-        internal/testcerts/testcerts.go with wolfcrypt.MintCert.
-        Tests that consume the certs may still parse via
-        crypto/x509 (parsing is wire format, not crypto) but the
-        keys and signatures must be wolfCrypt. NewSelfSigned and
-        NewMTLSChain signatures stay the same.
-- [ ] 10.6 Copy TLS version + relevant cipher constants into
-        internal/tlsutil as local consts (VersionTLS13, etc.).
-        Drop crypto/tls imports from internal/tlsutil,
-        internal/agent/client.go, and cmd/wolfci-ctl/client.go.
-- [ ] 10.7 docs/SECURITY.md update: document the
-        wolfCrypt-only rule and which wolfSSL configure flags
-        each primitive depends on (--enable-pwdbased for PBKDF2
-        and HMAC, both default-on; --enable-keygen and
-        --enable-certgen for MintCert, both already in the
-        profile). Confirm in scripts/test-build-wolfssl.sh that
-        the configure command keeps those flags so a profile
-        regression cannot silently break the auth stack.
+        internal/testcerts/testcerts.go with wolfcrypt.MintCert
+        (or whatever the go-wolfssl-backed wolfcrypt exposes
+        after 10.6). Tests that consume the certs may still
+        parse via crypto/x509 (parsing is wire format, not
+        crypto) but the keys and signatures must be wolfCrypt.
+        NewSelfSigned and NewMTLSChain signatures stay the
+        same. Also lands the SAN encoder that 10.1c deferred
+        (build the SubjectAltName extension DER from
+        CertConfig.DNSNames + IPAddresses and thread it through
+        wc_SetAltNamesBuffer).
+- [ ] 10.10 Copy TLS version + relevant cipher constants into
+         internal/tlsutil as local consts (VersionTLS13, etc.).
+         Drop crypto/tls imports from internal/tlsutil,
+         internal/agent/client.go, and cmd/wolfci-ctl/client.go.
+- [ ] 10.11 docs/SECURITY.md update: document the
+         wolfCrypt-only rule (CLAUDE.md Hard Rule #10's
+         realization in the source tree), the ask-first rule
+         (CLAUDE.md Hard Rule #11), which wolfSSL configure
+         flags each primitive depends on, and the transitive
+         x/crypto/cryptobyte dep that comes in through the
+         Google Cloud SDK (logged as a known boundary; not a
+         vulnerability). Confirm in
+         scripts/test-build-wolfssl.sh that the configure
+         command keeps the required flags so a profile
+         regression cannot silently break the auth stack.
 
 ## Phase 11 - cmd/wolfci wiring (placeholder)
 
