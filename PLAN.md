@@ -598,11 +598,19 @@ owner before the phase started):
   next to it. Easy install ("drop a directory"), easy uninstall
   ("rm -r").
 
-- [ ] 7.1 Design the plugin protocol (gRPC; plugins announce the
+- [x] 7.1 Design the plugin protocol (gRPC; plugins announce the
         hooks they implement). Document in docs/PLUGINS.md.
+        Done: api/v1/plugin/plugin.proto defines the
+        WolfCIPlugin service with the OnBuildComplete RPC and
+        the BuildCompleteEvent payload (job_name, build_number,
+        status, exit_code, error). Generated Go bindings under
+        api/v1/plugin/. hashicorp/go-plugin v1.5.2 pinned in
+        go.mod. docs/PLUGINS.md documents the install layout
+        (plugins/installed/<name>/<name>), handshake
+        constants, threat model, and a stub Go authoring guide.
 - [ ] 7.2 Failing test (internal/plugin/plugin_test.go): a sample
         "hello" plugin under plugins/examples/hello is loaded and
-        its on-build-start hook fires.
+        its on-build-complete hook fires.
 - [ ] 7.3 Implement the plugin host in internal/plugin (subprocess
         management, gRPC client, cleanup on shutdown).
 - [ ] 7.4 Ship a real plugin: email-on-failure.
