@@ -403,11 +403,26 @@ Additional priorities confirmed after Phase 5 mid-point review:
               TestRouter_OnPremFirstAndLabelMatch exercises
               all three routes with a real on-prem agent
               advertising "linux".
-        - [ ] 5.5c Provisioner integration: when 5.5b returns
+        - [x] 5.5c Provisioner integration: when 5.5b returns
               no idle on-prem agent for a Job.node_label, the
               scheduler asks the configured Provisioner for
               one, waits for it to register, then dispatches.
               Terminate after the build.
+              Done: scheduler.Router gains WithProvisioner and
+              WithProvisionTimeout. On no-on-prem-match the
+              Router calls provisioner.Provision(ctx, label),
+              polls agentsvc.IdleAgentWithLabel up to the
+              timeout for the spawned node to connect,
+              SubmitAndWait's the job, then Terminate's the
+              node via defer. Convention: Provisioner.Node.ID
+              equals the agent_id the spawned agent passes to
+              Register. Gate:
+              TestRouter_ProvisionsWhenNoOnPremMatch uses an
+              inline spawningProvisioner that runs a real
+              agent.Client in-process pointing back at the
+              test's own agentsvc; verifies Provision count,
+              Terminate count, post-Terminate idle state, and
+              the spawned agent's own build log content.
 - [ ] 5.6 Implement the GCE driver against the real API behind
         the nodes.Provisioner interface the fake satisfies.
         Live test (internal/nodes/gce/live_test.go) is a
