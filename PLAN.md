@@ -744,8 +744,23 @@ RPC.
 
 ## Phase 9 - Packaging, docs, polish
 
-- [ ] 9.1 scripts/build.sh produces a single static binary for
+- [x] 9.1 scripts/build.sh produces a single static binary for
         linux/amd64 plus a darwin/arm64 development binary.
+        Done: scripts/build.sh links cmd/wolfci, cmd/wolfci-agent,
+        cmd/wolfci-ctl against build/wolfssl-install/lib/libwolfssl.a
+        via CGO_LDFLAGS, outputs to build/bin/<goos>-<goarch>/,
+        and stamps WOLFCI_BUILD_VERSION into main.version via
+        -ldflags -X. GOOS/GOARCH env vars target other platforms;
+        the cross-build requires a matching wolfSSL .a (via
+        TARGET_GOOS / TARGET_GOARCH on build-wolfssl.sh) and a
+        CGO-capable CC. The script's recipe block documents the
+        two Phase-9.1 targets explicitly. Gate:
+        scripts/test-build.sh asserts the source-level tokens,
+        runs the host-platform build, checks the three binaries
+        landed under build/bin/<goos>-<goarch>/, verifies
+        wolfci-ctl version reflects the injected -ldflags value,
+        and confirms no stray binaries were left in the repo
+        root. Now wired into scripts/test.sh.
 - [ ] 9.2 scripts/install/systemd/wolfci.service template; a
         macOS launchd plist for development.
 - [ ] 9.3 docs/GETTING-STARTED.md: a 10-minute path from "git

@@ -6,6 +6,7 @@
 #   - scripts/test-check-ascii.sh        self-test for the ASCII gate
 #   - scripts/test-wolfssl-submodule.sh  wolfSSL submodule pin
 #   - go test ./internal/... ./cmd/... ./plugins/email-on-failure   Go unit tests
+#   - scripts/test-build.sh              host-platform release build
 #
 # Intentionally NOT included:
 #   - scripts/test-build-wolfssl.sh: full wolfSSL build (minutes).
@@ -27,5 +28,7 @@ scripts/test-check-ascii.sh
 scripts/test-wolfssl-submodule.sh
 
 go test ./internal/... ./cmd/... ./plugins/email-on-failure
+
+scripts/test-build.sh
 
 echo "scripts/test.sh: all fast checks passed."
