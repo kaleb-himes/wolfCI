@@ -1,9 +1,9 @@
 diff --git a/certgen.go b/certgen.go
 new file mode 100644
-index 0000000..3881d04
+index 0000000..3d1d7b6
 --- /dev/null
 +++ b/certgen.go
-@@ -0,0 +1,156 @@
+@@ -0,0 +1,205 @@
 +/* certgen.go
 + *
 + * Copyright (C) 2006-2025 wolfSSL Inc.
@@ -63,6 +63,33 @@ index 0000000..3881d04
 +//     cert->isCA      = isCA;
 +//     cert->sigType   = sigType;
 +// }
++//
++// // Copy a pre-encoded SubjectAltName extension body
++// // (SEQUENCE OF GeneralName, without the outer extension
++// // wrapper) directly into Cert.altNames. Returns 0 on success
++// // or -1 if the input would not fit in the fixed-size buffer.
++// // Requires WOLFSSL_ALT_NAMES.
++// #ifdef WOLFSSL_ALT_NAMES
++// static int wolfci_cert_set_altnames(Cert* cert, const byte* der,
++//         int derSz)
++// {
++//     if (derSz < 0 || (word32)derSz > CTC_MAX_ALT_SIZE) {
++//         return -1;
++//     }
++//     XMEMCPY(cert->altNames, der, derSz);
++//     cert->altNamesSz = derSz;
++//     return 0;
++// }
++// #else
++// static int wolfci_cert_set_altnames(Cert* cert, const byte* der,
++//         int derSz)
++// {
++//     (void)cert;
++//     (void)der;
++//     (void)derSz;
++//     return -1;
++// }
++// #endif
 +import "C"
 +
 +import (
@@ -122,6 +149,28 @@ index 0000000..3881d04
 +    cv := C.CString(value)
 +    defer C.free(unsafe.Pointer(cv))
 +    return int(C.wc_SetExtKeyUsage(cert, cv))
++}
++
++/*
++ * Wc_SetAltNamesBuffer copies a pre-encoded SubjectAltName
++ * extension body (SEQUENCE OF GeneralName, no outer extension
++ * wrapper) into Cert.altNames. The C-side helper does a memcpy
++ * and sets altNamesSz; the bundled wc_SetAltNamesBuffer
++ * function in wolfSSL itself parses a FULL certificate DER to
++ * extract the altNames, which is the wrong shape for this
++ * use case.
++ *
++ * Requires the wolfSSL build to have WOLFSSL_ALT_NAMES defined;
++ * scripts/build-wolfssl.sh passes that via CPPFLAGS.
++ */
++func Wc_SetAltNamesBuffer(cert *C.struct_Cert, der []byte,
++    derSz int) int {
++    if derSz == 0 {
++        return BAD_FUNC_ARG
++    }
++    return int(C.wolfci_cert_set_altnames(
++        cert,
++        (*C.byte)(unsafe.Pointer(&der[0])), C.int(derSz)))
 +}
 +
 +/*

@@ -1413,18 +1413,50 @@ before the phase started):
         because no upstream go-wolfssh existed and we did not
         want to spin up a brand-new project. The sub-package
         path above replaces that reasoning.)
-- [ ] 10.9 Replace crypto/ecdsa, crypto/elliptic, crypto/rand,
+- [x] 10.9 Replace crypto/ecdsa, crypto/elliptic, crypto/rand,
         crypto/x509, and crypto/x509/pkix in
-        internal/testcerts/testcerts.go with wolfcrypt.MintCert
-        (or whatever the go-wolfssl-backed wolfcrypt exposes
-        after 10.6). Tests that consume the certs may still
-        parse via crypto/x509 (parsing is wire format, not
-        crypto) but the keys and signatures must be wolfCrypt.
-        NewSelfSigned and NewMTLSChain signatures stay the
-        same. Also lands the SAN encoder that 10.1c deferred
-        (build the SubjectAltName extension DER from
-        CertConfig.DNSNames + IPAddresses and thread it through
-        wc_SetAltNamesBuffer).
+        internal/testcerts/testcerts.go with wolfcrypt.MintCert.
+        Done: testcerts.go imports only encoding/pem (wire
+        format) + internal/wolfcrypt; every cryptographic
+        operation routes through wolfcrypt -> go-wolfssl.
+        Dropped from ~155 lines to ~110, public API unchanged
+        (SelfSignedECDSA + NewMTLSChain still return PEM-encoded
+        cert / key blobs).
+        SAN encoder (the 10.1c deferred piece):
+          internal/wolfcrypt/cert.go grows
+          encodeSANExtensionDER + the three ASN.1 DER helpers
+          (appendASN1Contextual, appendASN1Sequence,
+          appendASN1Length). DNS names tag [2], IP addresses
+          tag [7] per RFC 5280; IPv4 -> 4 octets, IPv6 -> 16.
+          MintCert calls gowolf.Wc_SetAltNamesBuffer when
+          CertConfig.DNSNames or IPAddresses is non-empty.
+        wolfSSL build profile gained a CPPFLAGS define:
+          scripts/build-wolfssl.sh exports
+          CPPFLAGS="-DWOLFSSL_ALT_NAMES ..." before configure.
+          The wolfSSL configure script has no --enable-altnames;
+          ALT_NAMES is auto-enabled only by --enable-jni and
+          --enable-lighty (both of which pull in features we do
+          not want). scripts/test-build-wolfssl.sh now gates
+          this CPPFLAGS define directly.
+        go-wolfssl patch 0005 (certgen wrappers) grew:
+          a C-side helper wolfci_cert_set_altnames does the
+          memcpy into Cert.altNames. wolfSSL's bundled
+          wc_SetAltNamesBuffer is mis-named for our use case -
+          it parses a FULL certificate DER to extract altNames,
+          which is the wrong shape when we are building a cert
+          and want to attach a SAN extension we just encoded
+          from Go slices. The helper bypasses that and writes
+          Cert.altNames + Cert.altNamesSz directly. Recorded in
+          the patch and in third_party/go-wolfssl-patches/
+          README.md so the upstream PR description explains
+          why we are not calling wc_SetAltNamesBuffer despite
+          its plausible-sounding name.
+        Gates: every existing test that consumes
+        testcerts.NewMTLSChain (the mTLS handshake suite across
+        agentsvc, tlsutil, scheduler/router, server,
+        cmd/wolfci, cmd/wolfci-ctl) keeps passing - the
+        wolfcrypt-minted certs interop cleanly with the
+        wolfSSL-side handshake.
 - [ ] 10.10 Copy TLS version + relevant cipher constants into
          internal/tlsutil as local consts (VersionTLS13, etc.).
          Drop crypto/tls imports from internal/tlsutil,

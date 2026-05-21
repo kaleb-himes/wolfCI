@@ -1,155 +1,110 @@
-// Package testcerts provides certificate helpers shared by tests
-// across wolfCI packages. It is not test-only (no _test.go suffix)
-// so any test package can import it.
+/* Package testcerts provides certificate helpers shared by tests
+ * across wolfCI packages. It is not test-only (no _test.go suffix)
+ * so any test package can import it.
+ *
+ * Phase 10.9 retired the stdlib crypto/* path (crypto/ecdsa,
+ * crypto/elliptic, crypto/rand, crypto/x509, crypto/x509/pkix)
+ * in favor of internal/wolfcrypt.MintCert. The DNS / IP SubjectAlt
+ * Names that the original implementation set via x509.Certificate
+ * are now encoded via internal/wolfcrypt's SAN helper and pushed
+ * through go-wolfssl's certgen wrappers. The package's public API
+ * (SelfSignedECDSA + NewMTLSChain + MTLSChain) is unchanged.
+ */
 package testcerts
 
 import (
-	"crypto/ecdsa"
-	"crypto/elliptic"
-	"crypto/rand"
-	"crypto/x509"
-	"crypto/x509/pkix"
 	"encoding/pem"
-	"math/big"
-	"net"
 	"testing"
-	"time"
+
+	"github.com/kaleb-himes/wolfCI/internal/wolfcrypt"
 )
 
-// SelfSignedECDSA returns a fresh ECDSA P-256 self-signed
-// certificate valid for one hour against 127.0.0.1 and "localhost",
-// returned as PEM blocks ready to feed tlsutil.Config.
-//
-// Test helper only; callers must pass a testing.TB. Failures call
-// tb.Fatal so the test stops at the helper rather than propagating
-// a meaningless cert into a downstream assertion.
+/* SelfSignedECDSA returns a fresh ECDSA P-256 self-signed
+ * certificate valid for one day against 127.0.0.1 and "localhost",
+ * returned as PEM blocks ready to feed tlsutil.Config.
+ *
+ * Test helper only; callers must pass a testing.TB. Failures call
+ * tb.Fatal so the test stops at the helper rather than propagating
+ * a meaningless cert into a downstream assertion. */
 func SelfSignedECDSA(tb testing.TB) (certPEM, keyPEM []byte) {
 	tb.Helper()
-
-	priv, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	cert, err := wolfcrypt.MintCert(wolfcrypt.CertConfig{
+		CommonName:  "wolfci-test",
+		DaysValid:   1,
+		DNSNames:    []string{"localhost"},
+		IPAddresses: []string{"127.0.0.1"},
+		ExtKeyUsage: "serverAuth",
+	}, nil)
 	if err != nil {
-		tb.Fatalf("testcerts: ecdsa.GenerateKey: %v", err)
+		tb.Fatalf("testcerts: MintCert: %v", err)
 	}
-
-	template := &x509.Certificate{
-		SerialNumber:          big.NewInt(1),
-		Subject:               pkix.Name{CommonName: "wolfci-test"},
-		NotBefore:             time.Now().Add(-time.Hour),
-		NotAfter:              time.Now().Add(time.Hour),
-		KeyUsage:              x509.KeyUsageDigitalSignature,
-		ExtKeyUsage:           []x509.ExtKeyUsage{x509.ExtKeyUsageServerAuth},
-		IPAddresses:           []net.IP{net.ParseIP("127.0.0.1")},
-		DNSNames:              []string{"localhost"},
-		BasicConstraintsValid: true,
-	}
-
-	certDER, err := x509.CreateCertificate(rand.Reader, template, template, &priv.PublicKey, priv)
-	if err != nil {
-		tb.Fatalf("testcerts: x509.CreateCertificate: %v", err)
-	}
-	keyDER, err := x509.MarshalECPrivateKey(priv)
-	if err != nil {
-		tb.Fatalf("testcerts: x509.MarshalECPrivateKey: %v", err)
-	}
-
-	certPEM = pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: certDER})
-	keyPEM = pem.EncodeToMemory(&pem.Block{Type: "EC PRIVATE KEY", Bytes: keyDER})
-	return certPEM, keyPEM
+	return certPEM_(cert.CertDER), keyPEM_(cert.KeyDER)
 }
 
-// MTLSChain holds a freshly-minted certificate chain suitable for
-// mTLS unit tests: a self-signed CA plus a server and an agent
-// (client) cert both signed by that CA. Every field is PEM.
+/* MTLSChain holds a freshly-minted certificate chain suitable for
+ * mTLS unit tests: a self-signed CA plus a server and an agent
+ * (client) cert both signed by that CA. Every field is PEM. */
 type MTLSChain struct {
-	CACert      []byte
-	ServerCert  []byte
-	ServerKey   []byte
-	AgentCert   []byte
-	AgentKey    []byte
+	CACert     []byte
+	ServerCert []byte
+	ServerKey  []byte
+	AgentCert  []byte
+	AgentKey   []byte
 }
 
-// NewMTLSChain mints a fresh CA and signs a server cert (with IP
-// SAN 127.0.0.1 and ServerAuth EKU) plus an agent cert (with
-// ClientAuth EKU). All certificates are ECDSA P-256 and valid
-// for one hour.
+/* NewMTLSChain mints a fresh CA and signs a server cert (with IP
+ * SAN 127.0.0.1 and ServerAuth EKU) plus an agent cert (with
+ * ClientAuth EKU). All certificates are ECDSA P-256 and valid for
+ * one day. */
 func NewMTLSChain(tb testing.TB) MTLSChain {
 	tb.Helper()
-
-	caKey, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	ca, err := wolfcrypt.MintCert(wolfcrypt.CertConfig{
+		CommonName: "wolfci-test-ca",
+		DaysValid:  1,
+		IsCA:       true,
+	}, nil)
 	if err != nil {
-		tb.Fatalf("testcerts: CA GenerateKey: %v", err)
+		tb.Fatalf("testcerts: CA MintCert: %v", err)
 	}
-	caTpl := &x509.Certificate{
-		SerialNumber:          big.NewInt(1),
-		Subject:               pkix.Name{CommonName: "wolfci-test-ca"},
-		NotBefore:             time.Now().Add(-time.Hour),
-		NotAfter:              time.Now().Add(time.Hour),
-		IsCA:                  true,
-		KeyUsage:              x509.KeyUsageCertSign | x509.KeyUsageDigitalSignature,
-		BasicConstraintsValid: true,
-	}
-	caDER, err := x509.CreateCertificate(rand.Reader, caTpl, caTpl, &caKey.PublicKey, caKey)
+	server, err := wolfcrypt.MintCert(wolfcrypt.CertConfig{
+		CommonName:  "wolfci-server",
+		DaysValid:   1,
+		DNSNames:    []string{"localhost"},
+		IPAddresses: []string{"127.0.0.1"},
+		ExtKeyUsage: "serverAuth",
+	}, ca)
 	if err != nil {
-		tb.Fatalf("testcerts: CA CreateCertificate: %v", err)
+		tb.Fatalf("testcerts: server MintCert: %v", err)
 	}
-	caCert, err := x509.ParseCertificate(caDER)
+	agent, err := wolfcrypt.MintCert(wolfcrypt.CertConfig{
+		CommonName:  "wolfci-agent-1",
+		DaysValid:   1,
+		ExtKeyUsage: "clientAuth",
+	}, ca)
 	if err != nil {
-		tb.Fatalf("testcerts: parse CA: %v", err)
+		tb.Fatalf("testcerts: agent MintCert: %v", err)
 	}
-
-	chain := MTLSChain{
-		CACert: pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: caDER}),
+	return MTLSChain{
+		CACert:     certPEM_(ca.CertDER),
+		ServerCert: certPEM_(server.CertDER),
+		ServerKey:  keyPEM_(server.KeyDER),
+		AgentCert:  certPEM_(agent.CertDER),
+		AgentKey:   keyPEM_(agent.KeyDER),
 	}
-
-	chain.ServerCert, chain.ServerKey = signLeaf(tb, caCert, caKey, leafSpec{
-		serial:      big.NewInt(2),
-		commonName:  "wolfci-server",
-		ips:         []net.IP{net.ParseIP("127.0.0.1")},
-		dnsNames:    []string{"localhost"},
-		extKeyUsage: []x509.ExtKeyUsage{x509.ExtKeyUsageServerAuth},
-	})
-	chain.AgentCert, chain.AgentKey = signLeaf(tb, caCert, caKey, leafSpec{
-		serial:      big.NewInt(3),
-		commonName:  "wolfci-agent-1",
-		extKeyUsage: []x509.ExtKeyUsage{x509.ExtKeyUsageClientAuth},
-	})
-	return chain
 }
 
-type leafSpec struct {
-	serial      *big.Int
-	commonName  string
-	ips         []net.IP
-	dnsNames    []string
-	extKeyUsage []x509.ExtKeyUsage
+/* certPEM_ and keyPEM_ wrap a DER blob in the matching PEM block
+ * type. PEM is wire format, not crypto, so encoding/pem stays. */
+func certPEM_(der []byte) []byte {
+	return pem.EncodeToMemory(&pem.Block{
+		Type:  "CERTIFICATE",
+		Bytes: der,
+	})
 }
 
-func signLeaf(tb testing.TB, caCert *x509.Certificate, caKey *ecdsa.PrivateKey, spec leafSpec) (certPEM, keyPEM []byte) {
-	tb.Helper()
-	priv, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
-	if err != nil {
-		tb.Fatalf("testcerts: leaf GenerateKey (%s): %v", spec.commonName, err)
-	}
-	tpl := &x509.Certificate{
-		SerialNumber:          spec.serial,
-		Subject:               pkix.Name{CommonName: spec.commonName},
-		NotBefore:             time.Now().Add(-time.Hour),
-		NotAfter:              time.Now().Add(time.Hour),
-		KeyUsage:              x509.KeyUsageDigitalSignature,
-		ExtKeyUsage:           spec.extKeyUsage,
-		IPAddresses:           spec.ips,
-		DNSNames:              spec.dnsNames,
-		BasicConstraintsValid: true,
-	}
-	leafDER, err := x509.CreateCertificate(rand.Reader, tpl, caCert, &priv.PublicKey, caKey)
-	if err != nil {
-		tb.Fatalf("testcerts: sign leaf %s: %v", spec.commonName, err)
-	}
-	keyDER, err := x509.MarshalECPrivateKey(priv)
-	if err != nil {
-		tb.Fatalf("testcerts: leaf MarshalECPrivateKey (%s): %v", spec.commonName, err)
-	}
-	certPEM = pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: leafDER})
-	keyPEM = pem.EncodeToMemory(&pem.Block{Type: "EC PRIVATE KEY", Bytes: keyDER})
-	return certPEM, keyPEM
+func keyPEM_(der []byte) []byte {
+	return pem.EncodeToMemory(&pem.Block{
+		Type:  "EC PRIVATE KEY",
+		Bytes: der,
+	})
 }

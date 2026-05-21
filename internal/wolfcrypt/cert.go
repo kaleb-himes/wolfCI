@@ -3,6 +3,7 @@ package wolfcrypt
 import (
 	"errors"
 	"fmt"
+	"net"
 
 	gowolf "github.com/wolfssl/go-wolfssl"
 )
@@ -10,11 +11,12 @@ import (
 // CertConfig is the input to MintCert. CommonName and DaysValid
 // are required.
 //
-// DNSNames and IPAddresses are accepted but currently ignored:
-// wolfCrypt's wc_SetAltNames* functions take pre-encoded DER, not
-// the string form Go callers tend to want. The 10.5 (testcerts
-// replacement) work lands a helper that encodes the SAN extension
-// DER from these slices.
+// DNSNames and IPAddresses are encoded into the X.509
+// SubjectAltName extension and threaded through
+// gowolf.Wc_SetAltNamesBuffer. The encoder builds the
+// SEQUENCE OF GeneralName ASN.1 DER from the Go slices; DNS
+// names are tagged [2] and IP addresses (parsed as IPv4 or IPv6)
+// are tagged [7] per RFC 5280.
 type CertConfig struct {
 	CommonName   string
 	Organization string
@@ -102,6 +104,16 @@ func MintCert(cfg CertConfig, signer *Cert) (*Cert, error) {
 		}
 	}
 
+	if len(cfg.DNSNames) > 0 || len(cfg.IPAddresses) > 0 {
+		san, err := encodeSANExtensionDER(cfg.DNSNames, cfg.IPAddresses)
+		if err != nil {
+			return nil, fmt.Errorf("wolfcrypt.MintCert: encode SAN: %w", err)
+		}
+		if rc := gowolf.Wc_SetAltNamesBuffer(&cert, san, len(san)); rc != 0 {
+			return nil, fmt.Errorf("wolfcrypt.MintCert: Wc_SetAltNamesBuffer: %d", rc)
+		}
+	}
+
 	// Decode the signing key (self-signed uses the new key; CA-signed decodes signer.KeyDER).
 	var signKey *gowolf.Ecc_key
 	if signer == nil {
@@ -138,4 +150,80 @@ func MintCert(cfg CertConfig, signer *Cert) (*Cert, error) {
 		KeyDER:  keyDER,
 		PubSEC1: pubSEC1,
 	}, nil
+}
+
+/*
+ * encodeSANExtensionDER builds the SubjectAltName extension's
+ * SEQUENCE OF GeneralName ASN.1 DER from DNS names and IP
+ * address strings. Wire format only - no crypto.
+ *
+ * Per RFC 5280:
+ *   GeneralName ::= CHOICE {
+ *       ...
+ *       dNSName    [2] IA5String,
+ *       ...
+ *       iPAddress  [7] OCTET STRING (4 bytes for IPv4, 16 for IPv6)
+ *   }
+ */
+func encodeSANExtensionDER(dnsNames []string,
+	ipAddresses []string) ([]byte, error) {
+	var body []byte
+	for _, d := range dnsNames {
+		if d == "" {
+			continue
+		}
+		body = appendASN1Contextual(body, 2, []byte(d))
+	}
+	for _, s := range ipAddresses {
+		if s == "" {
+			continue
+		}
+		ip := net.ParseIP(s)
+		if ip == nil {
+			return nil, fmt.Errorf(
+				"SAN: %q is not a valid IP address", s)
+		}
+		if v4 := ip.To4(); v4 != nil {
+			body = appendASN1Contextual(body, 7, v4)
+		} else {
+			body = appendASN1Contextual(body, 7, ip.To16())
+		}
+	}
+	return appendASN1Sequence(body), nil
+}
+
+/*
+ * appendASN1Contextual writes a primitive context-specific tag
+ * (class=10, tag number `tag`) carrying `value`. The tag byte is
+ * 0x80 | tag for the primitive form.
+ */
+func appendASN1Contextual(out []byte, tag byte, value []byte) []byte {
+	out = append(out, 0x80|tag)
+	out = appendASN1Length(out, len(value))
+	out = append(out, value...)
+	return out
+}
+
+func appendASN1Sequence(body []byte) []byte {
+	out := []byte{0x30}
+	out = appendASN1Length(out, len(body))
+	return append(out, body...)
+}
+
+func appendASN1Length(out []byte, n int) []byte {
+	if n < 0x80 {
+		return append(out, byte(n))
+	}
+	/* Long form: 0x80|<num length bytes> then BE length bytes. */
+	var lenBuf [4]byte
+	count := 0
+	for tmp := n; tmp > 0; tmp >>= 8 {
+		lenBuf[count] = byte(tmp & 0xff)
+		count++
+	}
+	out = append(out, 0x80|byte(count))
+	for i := count - 1; i >= 0; i-- {
+		out = append(out, lenBuf[i])
+	}
+	return out
 }

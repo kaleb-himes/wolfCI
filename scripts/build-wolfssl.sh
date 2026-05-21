@@ -85,6 +85,14 @@ if [ "$TARGET_GOOS" = "darwin" ] && [ -n "$target_arch" ]; then
     export LDFLAGS="-arch $target_arch ${LDFLAGS:-}"
 fi
 
+# WOLFSSL_ALT_NAMES enables wc_SetAltNamesBuffer (and the
+# SubjectAltName extension support around it). wolfSSL only
+# turns it on automatically for --enable-jni / --enable-lighty,
+# neither of which we want; pass it directly via CPPFLAGS so
+# internal/wolfcrypt.MintCert can attach SANs without dragging
+# in those bigger feature blocks.
+export CPPFLAGS="-DWOLFSSL_ALT_NAMES ${CPPFLAGS:-}"
+
 configure_extra=""
 if [ -n "$configure_host" ]; then
     configure_extra="--host=$configure_host"

@@ -146,7 +146,7 @@ RSAVerifyPKCS1v15SHA256 path.
 **What would let us drop this patch:** same as 0003 - upstream
 PR merges and tags.
 
-## 0005-add-certgen-wrappers.patch
+## 0005-add-certgen-wrappers.patch (UPDATED in Phase 10.9)
 
 Adds `certgen.go` with the X.509 cert-generation wrappers:
 
@@ -184,10 +184,44 @@ delete the `import "C"` block in internal/wolfcrypt/cert.go.
 **Gate:** `internal/wolfcrypt/gowolf_smoke_test.go`'s
 `TestGoWolfSSL_MakeSelfSignedCert` mints a self-signed ECC
 P-256 CA via the new wrappers and asserts the resulting DER
-is non-empty and starts with the SEQUENCE tag.
+is non-empty and starts with the SEQUENCE tag. Phase 10.9
+grew testcerts.go on top of these wrappers; the wider mTLS
+test surface across wolfCI is the de-facto integration gate.
+
+Phase 10.9 additions to this patch:
+
+  Wc_SetAltNamesBuffer     Go wrapper that copies a
+                           SubjectAltName extension body
+                           (SEQUENCE OF GeneralName, no outer
+                           extension wrapper) into
+                           Cert.altNames.
+
+  wolfci_cert_set_altnames C-side static helper backing the
+                           above. The bundled
+                           wc_SetAltNamesBuffer in wolfSSL is
+                           mis-named for cert-build use cases:
+                           it parses a FULL certificate DER
+                           and copies the SANs out of THAT,
+                           rather than accepting a SAN
+                           extension blob we just encoded
+                           from Go slices. This helper does
+                           the memcpy + altNamesSz assignment
+                           directly. Required because wolfCI
+                           encodes the SAN extension in pure
+                           Go (DNS [2] / IP [7] per RFC 5280)
+                           and needs to push the bytes into
+                           the Cert struct in one shot.
+
+Requires the wolfSSL build to define WOLFSSL_ALT_NAMES;
+scripts/build-wolfssl.sh passes that via CPPFLAGS and
+scripts/test-build-wolfssl.sh gates the define.
 
 **What would let us drop this patch:** same as 0003 / 0004 -
-upstream PR merges + a release tag lands.
+upstream PR merges + a release tag lands. The Phase 10.9
+additions might prompt a discussion with wolfSSL maintainers
+about whether the upstream wc_SetAltNamesBuffer should grow
+a sibling that takes a raw extension blob (matching what
+build-time callers actually need).
 
 ## 0006-add-wolfssh-subpackage.patch
 

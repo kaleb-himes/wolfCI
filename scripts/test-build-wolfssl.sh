@@ -50,6 +50,15 @@ do
     fi
 done
 
+# 2a. Direct CPPFLAGS that wolfSSL has no --enable-* equivalent for.
+for cpp_def in \
+    -DWOLFSSL_ALT_NAMES
+do
+    if ! grep -qF -- "$cpp_def" "$SCRIPT"; then
+        fail "$SCRIPT is missing required CPPFLAGS define $cpp_def"
+    fi
+done
+
 # 3. WOLFSSL_FIPS=1 must be refused (FIPS profile not yet wired).
 if WOLFSSL_FIPS=1 "$SCRIPT" >/dev/null 2>&1; then
     fail "WOLFSSL_FIPS=1 should be refused until the FIPS profile lands"
