@@ -49,8 +49,8 @@ type Options struct {
 	// Storage is the on-disk Job persistence layer. Required.
 	Storage *storage.Storage
 
-	// Auth holds the auth config (password toggle, bcrypt cost).
-	// Required.
+	// Auth holds the auth config (password toggle, PBKDF2
+	// iteration count and salt length). Required.
 	Auth *auth.Config
 
 	// Passwords is the username + password store. Required when

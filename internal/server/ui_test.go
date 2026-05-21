@@ -37,7 +37,7 @@ func TestUI_LoginPageAndJobsList(t *testing.T) {
 		t.Fatalf("SaveJob: %v", err)
 	}
 
-	authCfg := &auth.Config{PasswordEnabled: true, BcryptCost: 4}
+	authCfg := &auth.Config{PasswordEnabled: true, PBKDF2Iterations: 1000}
 	pwDir := filepath.Join(dir, "passwords")
 	pwStore := auth.NewPasswordStore(pwDir, authCfg)
 	if err := pwStore.SetPassword("alice", "hunter2"); err != nil {

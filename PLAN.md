@@ -962,16 +962,52 @@ before the phase started):
               extract tbsCertificate and the signature BIT STRING
               contents from a leaf cert without parsing it with
               stdlib crypto.
-- [ ] 10.2 Replace x/crypto/bcrypt in internal/auth/password.go
+- [x] 10.2 Replace x/crypto/bcrypt in internal/auth/password.go
         with PBKDF2-HMAC-SHA-256 via internal/wolfcrypt.
-        Iteration count and salt length live in
-        config-files/auth/config.yaml under pbkdf2_iterations
-        (default 600000 per OWASP 2023) and pbkdf2_salt_bytes
-        (default 16). On-disk file renames from <user>.bcrypt to
-        <user>.pbkdf2 with a versioned header so the loader can
-        reject the wrong KDF instead of silently misverifying.
-        Verify uses the HMAC-both-sides constant-time compare.
-        Drop golang.org/x/crypto/bcrypt from go.mod.
+        Done: password.go now imports only
+        github.com/kaleb-himes/wolfCI/internal/wolfcrypt (and
+        stdlib non-crypto) - no bcrypt import anywhere.
+        SetPassword draws a salt via wolfcrypt.RandBytes
+        (length = cfg.PBKDF2SaltBytes, default 16), derives a
+        32-byte key via wolfcrypt.PBKDF2HMACSHA256 with
+        cfg.PBKDF2Iterations (default 600000 per OWASP 2023),
+        and writes a versioned file at <root>/<user>.pbkdf2
+        with format:
+            wolfci-pbkdf2-v1
+            iterations:<decimal>
+            salt:<hex>
+            key:<hex>
+        VerifyPassword refuses anything that does not start with
+        the wolfci-pbkdf2-v1 sentinel (catches a leftover
+        bcrypt blob or a wrong-KDF file) and compares stored vs
+        candidate via the HMAC-both-sides constant-time pattern:
+        fresh wolfcrypt.RandBytes(32) -> HMAC-SHA-256 of each
+        side -> byte-XOR of the HMAC outputs. Any timing leak in
+        the byte loop only reveals HMAC outputs over an
+        unpredictable key.
+        Config field rename: BcryptCost is gone;
+        PBKDF2Iterations and PBKDF2SaltBytes take its place
+        with the documented defaults and bounds (iterations in
+        [100, 10000000], salt in [8, 64]).
+        ErrInvalidPasswordFile is a new sentinel for "your hash
+        file is corrupt or wrong-KDF" (distinct from
+        ErrInvalidPassword which is "your password is wrong").
+        Call-site updates: internal/server/{ui,jobform,nodes}_test.go
+        switched from BcryptCost: 4 to PBKDF2Iterations: 1000;
+        internal/server/server.go comment updated.
+        go.mod: golang.org/x/crypto/bcrypt no longer imported
+        (the golang.org/x/crypto module entry stays in go.mod
+        because internal/auth/sshkey.go still imports the ssh
+        subpackage; 10.3 removes that and the whole module entry
+        drops via `go mod tidy`).
+        Gates: existing TestPasswordStore_VerifyWhenEnabled,
+        TestPasswordStore_DisabledRejectsAll,
+        TestConfig_DefaultsAndRoundtrip remain green with the
+        new field names. New tests:
+        TestLoadConfig_RejectsOutOfRangeIterations,
+        TestPasswordStore_OnDiskFormat (asserts .pbkdf2
+        extension + wolfci-pbkdf2-v1 sentinel + no .bcrypt
+        residue), TestPasswordStore_RejectsWrongKDFHeader.
 - [ ] 10.3 Replace x/crypto/ssh in internal/auth/sshkey.go. Hand-
         roll the public-key parser per RFC 4253 Section 6.6 for
         ssh-ed25519, ecdsa-sha2-nistp256, and ssh-rsa. Route

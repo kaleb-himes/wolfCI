@@ -120,7 +120,7 @@ func newAuthedUI(t *testing.T) (*httptest.Server, http.CookieJar) {
 	if err != nil {
 		t.Fatalf("storage.New: %v", err)
 	}
-	authCfg := &auth.Config{PasswordEnabled: true, BcryptCost: 4}
+	authCfg := &auth.Config{PasswordEnabled: true, PBKDF2Iterations: 1000}
 	pwStore := auth.NewPasswordStore(filepath.Join(dir, "passwords"), authCfg)
 	if err := pwStore.SetPassword("alice", "hunter2"); err != nil {
 		t.Fatalf("SetPassword: %v", err)

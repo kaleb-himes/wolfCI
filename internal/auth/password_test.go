@@ -5,17 +5,27 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"strings"
 	"testing"
 
 	"github.com/kaleb-himes/wolfCI/internal/auth"
 )
 
-// TestPasswordStore_VerifyWhenEnabled is the gating test for
-// PLAN.md task 3.3. With password auth enabled, the correct
-// password verifies and a wrong password is rejected.
+// testIterations is a low PBKDF2 iteration count so the password
+// suite still runs in milliseconds. Production defaults to 600000
+// (OWASP 2023 guidance for PBKDF2-HMAC-SHA-256).
+const testIterations = 1000
+
+// TestPasswordStore_VerifyWhenEnabled: with password auth enabled,
+// the correct password verifies and a wrong password is rejected.
+// Same functional contract as the original bcrypt-backed test;
+// Phase 10.2 swaps the underlying KDF to wolfCrypt PBKDF2.
 func TestPasswordStore_VerifyWhenEnabled(t *testing.T) {
 	dir := t.TempDir()
-	cfg := &auth.Config{PasswordEnabled: true, BcryptCost: 4} // min cost; tests run fast
+	cfg := &auth.Config{
+		PasswordEnabled:  true,
+		PBKDF2Iterations: testIterations,
+	}
 	ps := auth.NewPasswordStore(dir, cfg)
 
 	if err := ps.SetPassword("alice", "hunter2"); err != nil {
@@ -33,19 +43,16 @@ func TestPasswordStore_VerifyWhenEnabled(t *testing.T) {
 	}
 }
 
-// TestPasswordStore_DisabledRejectsAll is the gating test for
-// PLAN.md task 3.4's "disabled by default" requirement. With
-// PasswordEnabled false, every password attempt is rejected
-// regardless of whether a hash exists on disk.
+// TestPasswordStore_DisabledRejectsAll: with PasswordEnabled false,
+// every password attempt is rejected without touching disk.
 func TestPasswordStore_DisabledRejectsAll(t *testing.T) {
 	dir := t.TempDir()
-	cfg := &auth.Config{PasswordEnabled: true, BcryptCost: 4}
+	cfg := &auth.Config{PasswordEnabled: true, PBKDF2Iterations: testIterations}
 	ps := auth.NewPasswordStore(dir, cfg)
 	if err := ps.SetPassword("alice", "hunter2"); err != nil {
 		t.Fatalf("SetPassword: %v", err)
 	}
 
-	// Flip the toggle off; the hash on disk remains.
 	cfg.PasswordEnabled = false
 
 	if err := ps.VerifyPassword("alice", "hunter2"); !errors.Is(err, auth.ErrPasswordAuthDisabled) {
@@ -53,16 +60,19 @@ func TestPasswordStore_DisabledRejectsAll(t *testing.T) {
 	}
 }
 
-// TestConfig_DefaultsAndRoundtrip pins the default Config values
-// (PasswordEnabled false, BcryptCost 12) and verifies that
-// Save/LoadConfig is a faithful round trip.
+// TestConfig_DefaultsAndRoundtrip pins the new defaults
+// (PasswordEnabled false, PBKDF2Iterations 600000, PBKDF2SaltBytes 16)
+// and round-trips Save/LoadConfig.
 func TestConfig_DefaultsAndRoundtrip(t *testing.T) {
 	def := auth.DefaultConfig()
 	if def.PasswordEnabled {
 		t.Errorf("DefaultConfig.PasswordEnabled = true, want false")
 	}
-	if def.BcryptCost != 12 {
-		t.Errorf("DefaultConfig.BcryptCost = %d, want 12", def.BcryptCost)
+	if def.PBKDF2Iterations != 600000 {
+		t.Errorf("DefaultConfig.PBKDF2Iterations = %d, want 600000", def.PBKDF2Iterations)
+	}
+	if def.PBKDF2SaltBytes != 16 {
+		t.Errorf("DefaultConfig.PBKDF2SaltBytes = %d, want 16", def.PBKDF2SaltBytes)
 	}
 
 	dir := t.TempDir()
@@ -79,15 +89,83 @@ func TestConfig_DefaultsAndRoundtrip(t *testing.T) {
 	}
 }
 
-// TestLoadConfig_RejectsOutOfRangeCost ensures the config loader
-// catches a wildly out-of-range bcrypt cost.
-func TestLoadConfig_RejectsOutOfRangeCost(t *testing.T) {
+// TestLoadConfig_RejectsOutOfRangeIterations catches a wildly
+// out-of-range iteration count. Too-low iterations defeat the KDF;
+// too-high iterations are a DoS vector against legitimate logins.
+func TestLoadConfig_RejectsOutOfRangeIterations(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "config.yaml")
-	if err := os.WriteFile(path, []byte("password_enabled: false\nbcrypt_cost: 99\n"), 0o644); err != nil {
+	if err := os.WriteFile(path,
+		[]byte("password_enabled: false\npbkdf2_iterations: 50\n"), 0o644); err != nil {
 		t.Fatalf("WriteFile: %v", err)
 	}
 	if _, err := auth.LoadConfig(path); err == nil {
-		t.Fatal("LoadConfig: nil error for bcrypt_cost=99, want range error")
+		t.Fatal("LoadConfig: nil error for pbkdf2_iterations=50, want range error")
 	}
+}
+
+// TestPasswordStore_OnDiskFormat pins the new file layout:
+// extension is .pbkdf2 (not .bcrypt), and the first line of the
+// file is the version sentinel so a wrong-KDF blob can be rejected
+// without trying to use it.
+func TestPasswordStore_OnDiskFormat(t *testing.T) {
+	dir := t.TempDir()
+	cfg := &auth.Config{PasswordEnabled: true, PBKDF2Iterations: testIterations}
+	ps := auth.NewPasswordStore(dir, cfg)
+	if err := ps.SetPassword("alice", "hunter2"); err != nil {
+		t.Fatalf("SetPassword: %v", err)
+	}
+
+	got := filepath.Join(dir, "alice.pbkdf2")
+	if _, err := os.Stat(got); err != nil {
+		t.Fatalf("expected hash file at %s: %v", got, err)
+	}
+
+	bogus := filepath.Join(dir, "alice.bcrypt")
+	if _, err := os.Stat(bogus); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("legacy %s should not exist; got err=%v", bogus, err)
+	}
+
+	data, err := os.ReadFile(got)
+	if err != nil {
+		t.Fatalf("ReadFile: %v", err)
+	}
+	if !strings.HasPrefix(string(data), "wolfci-pbkdf2-v1\n") {
+		t.Fatalf("hash file does not start with wolfci-pbkdf2-v1 sentinel: %q",
+			string(data[:min(len(data), 32)]))
+	}
+}
+
+// TestPasswordStore_RejectsWrongKDFHeader: if the hash file has a
+// different sentinel (e.g. a leftover bcrypt blob, or a corrupted
+// header), VerifyPassword must refuse it instead of mis-using the
+// bytes as a PBKDF2 record.
+func TestPasswordStore_RejectsWrongKDFHeader(t *testing.T) {
+	dir := t.TempDir()
+	cfg := &auth.Config{PasswordEnabled: true, PBKDF2Iterations: testIterations}
+	ps := auth.NewPasswordStore(dir, cfg)
+
+	// Write a hand-rolled file with a wrong sentinel.
+	wrong := filepath.Join(dir, "alice.pbkdf2")
+	if err := os.WriteFile(wrong, []byte("wolfci-pbkdf2-v2\nsomething\n"), 0o600); err != nil {
+		t.Fatalf("WriteFile: %v", err)
+	}
+
+	err := ps.VerifyPassword("alice", "anything")
+	if err == nil {
+		t.Fatal("VerifyPassword on wrong-sentinel file: nil error; want rejection")
+	}
+	if errors.Is(err, auth.ErrInvalidPassword) {
+		// Either treating it as invalid-password or returning a
+		// structural error is acceptable - never (nil) for a
+		// wrong-KDF file.
+		return
+	}
+}
+
+func min(a, b int) int {
+	if a < b {
+		return a
+	}
+	return b
 }
