@@ -130,11 +130,17 @@ before the phase started):
   uses the token to create the first account. Token is
   invalidated once consumed.
 
-- [ ] 3.1 Failing test (internal/auth/sshkey_test.go): public-key
+- [x] 3.1 Failing test (internal/auth/sshkey_test.go): public-key
         login accepts a known authorized key and rejects an unknown
         one.
-- [ ] 3.2 Implement SSH public-key auth. Keys live under
+        Done: TestKeyStore_VerifySignature plus
+        TestKeyStore_RejectsPathTraversal.
+- [x] 3.2 Implement SSH public-key auth. Keys live under
         config-files/auth/keys/<user>.pub.
+        Done: internal/auth/sshkey.go via golang.org/x/crypto/ssh
+        pinned to v0.13.0 for Go 1.18 compatibility. ErrUnknownUser,
+        ErrInvalidSignature, ErrInvalidUsername are sentinel
+        errors for callers.
 - [ ] 3.3 Failing test (internal/auth/password_test.go): username +
         password login succeeds when enabled and is rejected when
         disabled in config-files/auth/config.yaml.
