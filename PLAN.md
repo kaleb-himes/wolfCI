@@ -1335,7 +1335,7 @@ before the phase started):
             libwolfssh.a exports wolfSSH_Init). NOT in
             scripts/test.sh because the build takes minutes;
             run explicitly when wolfssh changes.
-- [ ] 10.8 Replace internal/auth/sshkey.go's hand-rolled
+- [x] 10.8 Replace internal/auth/sshkey.go's hand-rolled
         RFC 4253 wire parser with wolfssh-backed parsing.
         REOPENED 2026-05-21: project owner decided to extend
         go-wolfssl with a wolfssh sub-package rather than
@@ -1364,24 +1364,51 @@ before the phase started):
               nonzero values on the FORMAT_* enum. The deeper
               "parse a real key and hand the blob to
               wolfcrypt for verify" round-trip is 10.8b.
-        - [ ] 10.8b Wire internal/auth/sshkey.go onto the new
-              gowolfssh wrappers. The hand-rolled
-              parseAuthorizedKey + parseSSHWirePublicKey gets
-              replaced by a thin call into
-              gowolfssh.WolfSSH_ReadPublicKey_buffer (with
-              FORMAT_SSH for authorized_keys lines). The
-              signature verify dispatch already goes through
-              wolfcrypt; that stays unchanged. Existing
-              tests (TestKeyStore_VerifySignature,
-              TestKeyStore_RejectsPathTraversal,
-              TestKeyStore_RejectsUnknownAlgo) are the gate.
-              Note: 10.8a smoke testing surfaced that
-              wolfssh's IdentifyOpenSshKey is selective
-              about the inner key format; 10.8b will need to
-              feed it exactly what it expects (likely SSH
-              wire-encoded blob with the right preamble),
-              not just the base64-decoded authorized_keys
-              contents.
+        - [x] 10.8b Wire internal/auth/sshkey.go onto the new
+              gowolfssh wrappers.
+              Done with one twist: wolfssh's C-side
+              wolfSSH_ReadPublicKey_buffer can tokenize an
+              authorized_keys line but its IdentifyOpenSshKey
+              then looks for the "openssl-key-v1" magic that
+              only exists in OpenSSH PRIVATE key files, not in
+              authorized_keys public-key blobs. Until wolfssh
+              upstream fixes that, the Go binding fills the
+              gap: patch 0007 adds
+              third_party/go-wolfssl/wolfssh/sshwire.go - a
+              pure-Go (no cgo) SSH wire-format parser
+              exposing ParseAuthorizedKey,
+              ParseSSHWirePublicKey, ParseSSHSignature,
+              ReadSSHString / ReadSSHMpint, EncodeSSHString,
+              EncodeSSHAuthorizedKey + two ed25519 shortcuts,
+              EncodeECDSASignatureDER, the PublicKey struct,
+              and the Alg* constants.
+              internal/auth/sshkey.go is now a thin facade:
+              imports gowolfssh for parsing + wire helpers,
+              imports internal/wolfcrypt for verify dispatch.
+              All the previously-hand-rolled parsing logic
+              (parseAuthorizedKey, parseSSHWirePublicKey,
+              parseSSHSignature, readSSHString,
+              readSSHMpint, encodeECDSASignatureDER,
+              EncodeSSH* helpers) is gone from sshkey.go;
+              the file dropped from ~250 lines to ~190
+              lines and no longer hand-rolls any SSH wire
+              format. The PublicKey type is now an alias to
+              gowolfssh.PublicKey so existing callers keep
+              compiling.
+              Gates (unchanged from 10.3):
+              TestKeyStore_VerifySignature drives a real
+              wolfcrypt-generated Ed25519 key through
+              gowolfssh.ParseAuthorizedKey then verifies a
+              signature via wolfcrypt.Ed25519Verify.
+              TestKeyStore_RejectsPathTraversal and
+              TestKeyStore_RejectsUnknownAlgo cover the
+              negative paths.
+              When wolfssh upstream fixes
+              IdentifyOpenSshKey (or adds a new
+              wolfSSH_ReadAuthorizedKey_buffer), the
+              gowolfssh sshwire.go file shrinks to thin
+              wrappers over the C calls and eventually drops
+              out.
         (Earlier-DECLINED draft kept for history: declined
         because no upstream go-wolfssh existed and we did not
         want to spin up a brand-new project. The sub-package

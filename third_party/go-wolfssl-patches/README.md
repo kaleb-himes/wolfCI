@@ -245,3 +245,59 @@ FORMAT_* enum values).
 kaleb-himes/go-wolfssl PR carrying patches 0003-0006 merges
 upstream and a release tag lands, the submodule pointer advances
 and this patch drops from `third_party/go-wolfssl-patches/`.
+
+## 0007-add-wolfssh-sshwire-parser.patch
+
+Adds `third_party/go-wolfssl/wolfssh/sshwire.go`, a pure-Go (no
+CGO) SSH wire-format parser that handles the OpenSSH
+authorized_keys text format and the RFC 4253 wire envelope
+formats:
+
+  ParseAuthorizedKey(data)          parse "<algo> <base64> [comment]"
+  ParseSSHWirePublicKey(algo, blob) parse the per-algo wire body
+  ParseSSHSignature(b)              parse "string algo || string blob"
+  ReadSSHString / ReadSSHMpint      wire primitive helpers
+  EncodeSSHString                   inverse of ReadSSHString
+  EncodeSSHAuthorizedKey            render an authorized_keys line
+  EncodeSSHEd25519AuthorizedKey     ed25519-specific shortcut
+  EncodeSSHEd25519Signature         signature envelope shortcut
+  EncodeECDSASignatureDER           SSH (r, s) -> DER for wolfCrypt
+  PublicKey struct                  parsed public key with algo-
+                                    specific fields (Ed25519,
+                                    ECDSAPoint, RSAModulus,
+                                    RSAExponent)
+  Alg* constants                    "ssh-ed25519",
+                                    "ecdsa-sha2-nistp256",
+                                    "ssh-rsa", "rsa-sha2-256"
+
+Three SSH key algorithms are supported: ssh-ed25519,
+ecdsa-sha2-nistp256, and ssh-rsa.
+
+**Why:** wolfssh's C-side `wolfSSH_ReadPublicKey_buffer` cannot
+identify an authorized_keys-format public key today: its
+`IdentifyOpenSshKey` requires the `openssl-key-v1` magic that
+only exists in OpenSSH PRIVATE key files, not in authorized_keys
+public-key blobs (which are the SSH wire format
+`string(algo) || string(pubkey)` after base64 decode). Until
+wolfssh upstream fixes this, the Go binding fills the gap.
+
+The implementation is pure Go because all of it is wire-format
+parsing - no cryptography. The wolfssh sub-package's CGO bridge
+(in wolfssh.go from patch 0006) is unaffected; a caller that
+imports only the sshwire pieces pays no cgo cost.
+
+**Gate:** existing internal/auth tests in wolfCI exercise the
+parser end-to-end: TestKeyStore_VerifySignature drives a real
+wolfcrypt-generated Ed25519 key through
+gowolfssh.ParseAuthorizedKey then verifies a signature via
+internal/wolfcrypt.Ed25519Verify. The same chain covers
+ParseSSHSignature, ReadSSHMpint, EncodeECDSASignatureDER, and
+the encoder helpers.
+
+**What would let us drop this patch:** wolfssh upstream fixes
+`IdentifyOpenSshKey` to recognize the SSH wire format for
+authorized_keys public keys, OR adds a new
+`wolfSSH_ReadAuthorizedKey_buffer` function that does this
+directly. Then the parsing helpers in this file become thin
+wrappers over the wolfssh C calls, and eventually drop out
+entirely.
