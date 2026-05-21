@@ -62,11 +62,14 @@ Bring up TLS using the project's chosen crypto library.
         default; FIPS profile toggleable later).
         Gate: scripts/test-build-wolfssl.sh. Installs to
         build/wolfssl-install/ (gitignored).
-- [ ] 1.3 Create internal/tlsutil with a CGO wrapper that exposes a
+- [x] 1.3 Create internal/tlsutil with a CGO wrapper that exposes a
         Go net.Listener backed by wolfSSL. Failing test
         (internal/tlsutil/tlsutil_test.go): a TLS 1.3 handshake to
         the listener using crypto/tls as a client succeeds against a
         self-signed cert.
+        Done: stub package + failing test exist. Test currently
+        fails because NewListener returns ErrNotImplemented;
+        task 1.4 makes it pass.
 - [ ] 1.4 Implement internal/tlsutil until the test passes.
 - [ ] 1.5 Write a hello-world server cmd/wolfci that opens an HTTPS
         listener via tlsutil and returns 200 OK on /. Test: a
