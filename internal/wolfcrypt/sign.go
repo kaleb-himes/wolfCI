@@ -1,63 +1,43 @@
 package wolfcrypt
 
-/*
-#cgo CFLAGS: -I${SRCDIR}/../../build/wolfssl-install/include
-#cgo LDFLAGS: ${SRCDIR}/../../build/wolfssl-install/lib/libwolfssl.a
-#cgo darwin LDFLAGS: -framework Security -framework CoreFoundation
-
-#include <wolfssl/options.h>
-#include <wolfssl/wolfcrypt/ed25519.h>
-#include <wolfssl/wolfcrypt/random.h>
-*/
-import "C"
-
 import (
 	"errors"
 	"fmt"
-	"unsafe"
+
+	gowolf "github.com/wolfssl/go-wolfssl"
 )
 
-// Ed25519GenKey generates a fresh Ed25519 keypair. Returns the
-// 32-byte public key and a 64-byte private key in the convention
-// the standard library uses: seed (32) || public (32). Ed25519Sign
-// accepts the 64-byte form directly.
+// Ed25519GenKey generates a fresh Ed25519 keypair via go-wolfssl.
+// Returns the 32-byte public key and a 64-byte private key in the
+// stdlib convention: seed (32) || public (32). Ed25519Sign accepts
+// the 64-byte form directly.
 func Ed25519GenKey() (publicKey, privateKey []byte, err error) {
-	var rng C.WC_RNG
-	if rc := C.wc_InitRng(&rng); rc != 0 {
-		return nil, nil, fmt.Errorf("wolfcrypt.Ed25519GenKey: wc_InitRng: %d", int(rc))
+	var rng gowolf.WC_RNG
+	if rc := gowolf.Wc_InitRng(&rng); rc != 0 {
+		return nil, nil, fmt.Errorf("wolfcrypt.Ed25519GenKey: Wc_InitRng: %d", rc)
 	}
-	defer C.wc_FreeRng(&rng)
+	defer gowolf.Wc_FreeRng(&rng)
 
-	var key C.ed25519_key
-	if rc := C.wc_ed25519_init(&key); rc != 0 {
-		return nil, nil, fmt.Errorf("wolfcrypt.Ed25519GenKey: wc_ed25519_init: %d", int(rc))
+	var key gowolf.Ed25519_key
+	if rc := gowolf.Wc_ed25519_init(&key); rc != 0 {
+		return nil, nil, fmt.Errorf("wolfcrypt.Ed25519GenKey: Wc_ed25519_init: %d", rc)
 	}
-	defer C.wc_ed25519_free(&key)
+	defer gowolf.Wc_ed25519_free(&key)
 
-	if rc := C.wc_ed25519_make_key(&rng, 32, &key); rc != 0 {
-		return nil, nil, fmt.Errorf("wolfcrypt.Ed25519GenKey: wc_ed25519_make_key: %d", int(rc))
+	if rc := gowolf.Wc_ed25519_make_key(&rng, 32, &key); rc != 0 {
+		return nil, nil, fmt.Errorf("wolfcrypt.Ed25519GenKey: Wc_ed25519_make_key: %d", rc)
 	}
 
 	pub := make([]byte, ed25519PublicKeySize)
-	pubLen := C.word32(len(pub))
-	rc := C.wc_ed25519_export_public(
-		&key,
-		(*C.byte)(unsafe.Pointer(&pub[0])),
-		&pubLen,
-	)
-	if rc != 0 {
-		return nil, nil, fmt.Errorf("wolfcrypt.Ed25519GenKey: wc_ed25519_export_public: %d", int(rc))
+	pubLen := ed25519PublicKeySize
+	if rc := gowolf.Wc_ed25519_export_public(&key, pub, &pubLen); rc != 0 {
+		return nil, nil, fmt.Errorf("wolfcrypt.Ed25519GenKey: Wc_ed25519_export_public: %d", rc)
 	}
 
 	priv := make([]byte, 64)
-	privSeedLen := C.word32(32)
-	rc = C.wc_ed25519_export_private_only(
-		&key,
-		(*C.byte)(unsafe.Pointer(&priv[0])),
-		&privSeedLen,
-	)
-	if rc != 0 {
-		return nil, nil, fmt.Errorf("wolfcrypt.Ed25519GenKey: wc_ed25519_export_private_only: %d", int(rc))
+	privSeedLen := 32
+	if rc := gowolf.Wc_ed25519_export_private_only(&key, priv, &privSeedLen); rc != 0 {
+		return nil, nil, fmt.Errorf("wolfcrypt.Ed25519GenKey: Wc_ed25519_export_private_only: %d", rc)
 	}
 	copy(priv[32:], pub)
 	return pub, priv, nil
@@ -70,36 +50,22 @@ func Ed25519Sign(privateKey, message []byte) ([]byte, error) {
 	if len(privateKey) != 64 {
 		return nil, errors.New("wolfcrypt.Ed25519Sign: private key must be 64 bytes (seed || pub)")
 	}
-	var key C.ed25519_key
-	if rc := C.wc_ed25519_init(&key); rc != 0 {
-		return nil, fmt.Errorf("wolfcrypt.Ed25519Sign: wc_ed25519_init: %d", int(rc))
+	var key gowolf.Ed25519_key
+	if rc := gowolf.Wc_ed25519_init(&key); rc != 0 {
+		return nil, fmt.Errorf("wolfcrypt.Ed25519Sign: Wc_ed25519_init: %d", rc)
 	}
-	defer C.wc_ed25519_free(&key)
+	defer gowolf.Wc_ed25519_free(&key)
 
 	seed := privateKey[:32]
 	pub := privateKey[32:]
-	rc := C.wc_ed25519_import_private_key(
-		(*C.byte)(unsafe.Pointer(&seed[0])), 32,
-		(*C.byte)(unsafe.Pointer(&pub[0])), 32,
-		&key,
-	)
-	if rc != 0 {
-		return nil, fmt.Errorf("wolfcrypt.Ed25519Sign: wc_ed25519_import_private_key: %d", int(rc))
+	if rc := gowolf.Wc_ed25519_import_private_key(seed, 32, pub, 32, &key); rc != 0 {
+		return nil, fmt.Errorf("wolfcrypt.Ed25519Sign: Wc_ed25519_import_private_key: %d", rc)
 	}
 
 	sig := make([]byte, 64)
-	sigLen := C.word32(len(sig))
-	var msgPtr *C.byte
-	if len(message) > 0 {
-		msgPtr = (*C.byte)(unsafe.Pointer(&message[0]))
-	}
-	rc = C.wc_ed25519_sign_msg(
-		msgPtr, C.word32(len(message)),
-		(*C.byte)(unsafe.Pointer(&sig[0])), &sigLen,
-		&key,
-	)
-	if rc != 0 {
-		return nil, fmt.Errorf("wolfcrypt.Ed25519Sign: wc_ed25519_sign_msg: %d", int(rc))
+	sigLen := 64
+	if rc := gowolf.Wc_ed25519_sign_msg(message, len(message), sig, &sigLen, &key); rc != 0 {
+		return nil, fmt.Errorf("wolfcrypt.Ed25519Sign: Wc_ed25519_sign_msg: %d", rc)
 	}
 	return sig[:sigLen], nil
 }

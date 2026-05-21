@@ -1,41 +1,8 @@
 package wolfcrypt
 
-/*
-#cgo CFLAGS: -I${SRCDIR}/../../build/wolfssl-install/include
-#cgo LDFLAGS: ${SRCDIR}/../../build/wolfssl-install/lib/libwolfssl.a
-#cgo darwin LDFLAGS: -framework Security -framework CoreFoundation
-
-#include <wolfssl/options.h>
-#include <wolfssl/wolfcrypt/ecc.h>
-#include <wolfssl/wolfcrypt/asn.h>
-#include <wolfssl/wolfcrypt/asn_public.h>
-#include <wolfssl/wolfcrypt/hash.h>
-#include <wolfssl/wolfcrypt/random.h>
-#include <string.h>
-#include <stdlib.h>
-
-// wolfci_cert_set_subject copies the printable fields of a CertName
-// from C strings. Doing this in C avoids fiddly Go-to-C string slice
-// copies into the fixed-size char arrays in Cert.subject.
-static void wolfci_cert_set_subject(Cert* cert, const char* cn, const char* org) {
-    if (cn && cn[0]) {
-        strncpy(cert->subject.commonName, cn, CTC_NAME_SIZE - 1);
-        cert->subject.commonName[CTC_NAME_SIZE - 1] = '\0';
-        cert->subject.commonNameEnc = CTC_UTF8;
-    }
-    if (org && org[0]) {
-        strncpy(cert->subject.org, org, CTC_NAME_SIZE - 1);
-        cert->subject.org[CTC_NAME_SIZE - 1] = '\0';
-        cert->subject.orgEnc = CTC_UTF8;
-    }
-}
-*/
-import "C"
-
 import (
 	"errors"
 	"fmt"
-	"unsafe"
 
 	gowolf "github.com/wolfssl/go-wolfssl"
 )
@@ -45,9 +12,9 @@ import (
 //
 // DNSNames and IPAddresses are accepted but currently ignored:
 // wolfCrypt's wc_SetAltNames* functions take pre-encoded DER, not
-// the string form Go callers tend to want. 10.5 (testcerts
-// replacement) lands a helper that encodes the SAN extension DER
-// from these slices and threads it through here.
+// the string form Go callers tend to want. The 10.5 (testcerts
+// replacement) work lands a helper that encodes the SAN extension
+// DER from these slices.
 type CertConfig struct {
 	CommonName   string
 	Organization string
@@ -61,9 +28,6 @@ type CertConfig struct {
 // Cert is the output of MintCert: the X.509 cert in DER, the
 // matching ECC private key in DER (SEC1 ECPrivateKey), and the
 // public key in SEC1 uncompressed form (0x04 || X || Y, 65 bytes).
-// PubSEC1 is convenient for callers that want to verify a signature
-// produced by this cert's signer via wolfcrypt.ECCVerifyP256
-// without re-parsing the cert.
 type Cert struct {
 	CertDER []byte
 	KeyDER  []byte
@@ -92,131 +56,80 @@ func MintCert(cfg CertConfig, signer *Cert) (*Cert, error) {
 		return nil, errors.New("wolfcrypt.MintCert: DaysValid must be positive")
 	}
 
-	// RNG.
-	var rng C.WC_RNG
-	if rc := C.wc_InitRng(&rng); rc != 0 {
-		return nil, fmt.Errorf("wolfcrypt.MintCert: wc_InitRng: %d", int(rc))
+	var rng gowolf.WC_RNG
+	if rc := gowolf.Wc_InitRng(&rng); rc != 0 {
+		return nil, fmt.Errorf("wolfcrypt.MintCert: Wc_InitRng: %d", rc)
 	}
-	defer C.wc_FreeRng(&rng)
+	defer gowolf.Wc_FreeRng(&rng)
 
 	// New keypair for this cert.
-	var newKey C.ecc_key
-	if rc := C.wc_ecc_init(&newKey); rc != 0 {
-		return nil, fmt.Errorf("wolfcrypt.MintCert: wc_ecc_init(newKey): %d", int(rc))
+	var newKey gowolf.Ecc_key
+	if rc := gowolf.Wc_ecc_init(&newKey); rc != 0 {
+		return nil, fmt.Errorf("wolfcrypt.MintCert: Wc_ecc_init(newKey): %d", rc)
 	}
-	defer C.wc_ecc_free(&newKey)
-
-	if rc := C.wc_ecc_make_key(&rng, 32, &newKey); rc != 0 {
-		return nil, fmt.Errorf("wolfcrypt.MintCert: wc_ecc_make_key: %d", int(rc))
+	defer gowolf.Wc_ecc_free(&newKey)
+	if rc := gowolf.Wc_ecc_make_key(&rng, 32, &newKey); rc != 0 {
+		return nil, fmt.Errorf("wolfcrypt.MintCert: Wc_ecc_make_key: %d", rc)
 	}
 
-	// Export the new public key as SEC1 uncompressed (0x04 || X || Y, 65 bytes for P-256).
+	// Export public key as SEC1 uncompressed.
 	pubBuf := make([]byte, 128)
-	pubLen := C.word32(len(pubBuf))
-	if rc := C.wc_ecc_export_x963(
-		&newKey,
-		(*C.byte)(unsafe.Pointer(&pubBuf[0])),
-		&pubLen,
-	); rc != 0 {
-		return nil, fmt.Errorf("wolfcrypt.MintCert: wc_ecc_export_x963: %d", int(rc))
+	pubLen := len(pubBuf)
+	if rc := gowolf.Wc_ecc_export_x963_ex(&newKey, pubBuf, &pubLen, 0); rc != 0 {
+		return nil, fmt.Errorf("wolfcrypt.MintCert: Wc_ecc_export_x963_ex: %d", rc)
 	}
 	pubSEC1 := append([]byte{}, pubBuf[:pubLen]...)
 
-	// Export the private key as SEC1 ECPrivateKey DER.
+	// Export private key as SEC1 ECPrivateKey DER.
 	keyBuf := make([]byte, 256)
-	keyDerSz := C.wc_EccKeyToDer(
-		&newKey,
-		(*C.byte)(unsafe.Pointer(&keyBuf[0])),
-		C.word32(len(keyBuf)),
-	)
+	keyDerSz := gowolf.Wc_EccKeyToDer(&newKey, keyBuf)
 	if keyDerSz < 0 {
-		return nil, fmt.Errorf("wolfcrypt.MintCert: wc_EccKeyToDer: %d", int(keyDerSz))
+		return nil, fmt.Errorf("wolfcrypt.MintCert: Wc_EccKeyToDer: %d", keyDerSz)
 	}
 	keyDER := append([]byte{}, keyBuf[:keyDerSz]...)
 
-	// Build Cert struct.
-	var cert C.Cert
-	if rc := C.wc_InitCert(&cert); rc != 0 {
-		return nil, fmt.Errorf("wolfcrypt.MintCert: wc_InitCert: %d", int(rc))
+	// Build the Cert struct.
+	var cert gowolf.Cert
+	if rc := gowolf.Wc_InitCert(&cert); rc != 0 {
+		return nil, fmt.Errorf("wolfcrypt.MintCert: Wc_InitCert: %d", rc)
 	}
+	gowolf.Wc_SetSubjectCN_Org(&cert, cfg.CommonName, cfg.Organization)
+	gowolf.Wc_SetCertValidity(&cert, cfg.DaysValid, cfg.IsCA, gowolf.CTC_SHA256wECDSA)
 
-	cn := C.CString(cfg.CommonName)
-	defer C.free(unsafe.Pointer(cn))
-	var org *C.char
-	if cfg.Organization != "" {
-		org = C.CString(cfg.Organization)
-		defer C.free(unsafe.Pointer(org))
-	}
-	C.wolfci_cert_set_subject(&cert, cn, org)
-
-	cert.daysValid = C.int(cfg.DaysValid)
-	cert.sigType = C.CTC_SHA256wECDSA
-	if cfg.IsCA {
-		cert.isCA = 1
-	}
-
-	// EKU + SAN if requested.
 	if cfg.ExtKeyUsage != "" {
-		eku := C.CString(cfg.ExtKeyUsage)
-		defer C.free(unsafe.Pointer(eku))
-		if rc := C.wc_SetExtKeyUsage(&cert, eku); rc != 0 {
-			return nil, fmt.Errorf("wolfcrypt.MintCert: wc_SetExtKeyUsage(%q): %d", cfg.ExtKeyUsage, int(rc))
+		if rc := gowolf.Wc_SetExtKeyUsage(&cert, cfg.ExtKeyUsage); rc != 0 {
+			return nil, fmt.Errorf("wolfcrypt.MintCert: Wc_SetExtKeyUsage(%q): %d", cfg.ExtKeyUsage, rc)
 		}
 	}
-	// Choose signing key + issuer.
-	var signKey *C.ecc_key
+
+	// Decode the signing key (self-signed uses the new key; CA-signed decodes signer.KeyDER).
+	var signKey *gowolf.Ecc_key
 	if signer == nil {
-		signKey = &newKey // self-signed
+		signKey = &newKey
 	} else {
-		if rc := C.wc_SetIssuerBuffer(
-			&cert,
-			(*C.byte)(unsafe.Pointer(&signer.CertDER[0])),
-			C.int(len(signer.CertDER)),
-		); rc != 0 {
-			return nil, fmt.Errorf("wolfcrypt.MintCert: wc_SetIssuerBuffer: %d", int(rc))
+		if rc := gowolf.Wc_SetIssuerBuffer(&cert, signer.CertDER, len(signer.CertDER)); rc != 0 {
+			return nil, fmt.Errorf("wolfcrypt.MintCert: Wc_SetIssuerBuffer: %d", rc)
 		}
-		var caKey C.ecc_key
-		if rc := C.wc_ecc_init(&caKey); rc != 0 {
-			return nil, fmt.Errorf("wolfcrypt.MintCert: wc_ecc_init(caKey): %d", int(rc))
+		var caKey gowolf.Ecc_key
+		if rc := gowolf.Wc_ecc_init(&caKey); rc != 0 {
+			return nil, fmt.Errorf("wolfcrypt.MintCert: Wc_ecc_init(caKey): %d", rc)
 		}
-		defer C.wc_ecc_free(&caKey)
-		var idx C.word32 = 0
-		rc := C.wc_EccPrivateKeyDecode(
-			(*C.byte)(unsafe.Pointer(&signer.KeyDER[0])),
-			&idx,
-			&caKey,
-			C.word32(len(signer.KeyDER)),
-		)
-		if rc != 0 {
-			return nil, fmt.Errorf("wolfcrypt.MintCert: wc_EccPrivateKeyDecode(signer): %d", int(rc))
+		defer gowolf.Wc_ecc_free(&caKey)
+		idx := 0
+		if rc := gowolf.Wc_EccPrivateKeyDecode(signer.KeyDER, &idx, &caKey, len(signer.KeyDER)); rc != 0 {
+			return nil, fmt.Errorf("wolfcrypt.MintCert: Wc_EccPrivateKeyDecode(signer): %d", rc)
 		}
 		signKey = &caKey
 	}
 
-	// Make + sign.
 	derBuf := make([]byte, 4096)
-	bodySz := C.wc_MakeCert(
-		&cert,
-		(*C.byte)(unsafe.Pointer(&derBuf[0])),
-		C.word32(len(derBuf)),
-		nil,
-		&newKey,
-		&rng,
-	)
+	bodySz := gowolf.Wc_MakeCert(&cert, derBuf, len(derBuf), nil, &newKey, &rng)
 	if bodySz < 0 {
-		return nil, fmt.Errorf("wolfcrypt.MintCert: wc_MakeCert: %d", int(bodySz))
+		return nil, fmt.Errorf("wolfcrypt.MintCert: Wc_MakeCert: %d", bodySz)
 	}
-	totalSz := C.wc_SignCert(
-		bodySz,
-		C.int(cert.sigType),
-		(*C.byte)(unsafe.Pointer(&derBuf[0])),
-		C.word32(len(derBuf)),
-		nil,
-		signKey,
-		&rng,
-	)
+	totalSz := gowolf.Wc_SignCert(bodySz, gowolf.CTC_SHA256wECDSA, derBuf, len(derBuf), nil, signKey, &rng)
 	if totalSz < 0 {
-		return nil, fmt.Errorf("wolfcrypt.MintCert: wc_SignCert: %d", int(totalSz))
+		return nil, fmt.Errorf("wolfcrypt.MintCert: Wc_SignCert: %d", totalSz)
 	}
 	certDER := append([]byte{}, derBuf[:totalSz]...)
 
@@ -226,4 +139,3 @@ func MintCert(cfg CertConfig, signer *Cert) (*Cert, error) {
 		PubSEC1: pubSEC1,
 	}, nil
 }
-

@@ -1115,10 +1115,18 @@ before the phase started):
         `go build` of the vendored package yet; that gate
         grows in 10.6 once we pick which files we actually
         wire in.
-- [ ] 10.6 Replace internal/wolfcrypt's hand-rolled CGO with
+- [x] 10.6 Replace internal/wolfcrypt's hand-rolled CGO with
         adapters over go-wolfssl. Sub-divided because go-wolfssl
-        is incomplete and partly tied to OpenSSL-compat APIs we
-        forbid (CLAUDE.md Hard Rule #12).
+        was incomplete and partly tied to OpenSSL-compat APIs we
+        forbid (CLAUDE.md Hard Rule #12). All four sub-checkpoints
+        landed: 10.6a (exclude OpenSSL-compat via patch 0001 +
+        cgo directives via patch 0002), 10.6b (wire the
+        primitives go-wolfssl already covered), 10.6c (add the
+        missing Ed25519 + RSA-verify + certgen wrappers as
+        patches 0003-0005), 10.6d (final swap; deleted every
+        remaining `import "C"` from internal/wolfcrypt).
+        internal/wolfcrypt is now pure Go on top of
+        github.com/wolfssl/go-wolfssl.
         - [x] 10.6a Patch infrastructure to exclude go-wolfssl's
               OpenSSL-compat files from our build.
               Done: third_party/go-wolfssl-patches/0001-exclude-
@@ -1282,14 +1290,28 @@ before the phase started):
                     self-signed ECC P-256 CA via the new
                     wrappers and asserts the DER is non-empty
                     and starts with SEQUENCE.
-        - [ ] 10.6d Rewire internal/wolfcrypt to call the
+        - [x] 10.6d Rewire internal/wolfcrypt to call the
               extended go-wolfssl API for Ed25519, RSA verify,
-              and MintCert. Delete every remaining
-              `import "C"` block from internal/wolfcrypt and
-              the corresponding .go files; the package becomes
-              a thin Go-side facade. Acceptance: `grep -r
-              'import "C"' internal/wolfcrypt/` returns nothing
-              and every existing test still passes.
+              and MintCert.
+              Done: internal/wolfcrypt/sign.go (Ed25519GenKey +
+              Ed25519Sign), verify.go (Ed25519Verify +
+              RSAVerifyPKCS1v15SHA256), and cert.go (MintCert)
+              now call go-wolfssl wrappers exclusively. Every
+              `import "C"` block, every #cgo directive, and
+              every cgo-only import (`unsafe`) has been
+              removed from internal/wolfcrypt. The package is
+              now pure Go on top of github.com/wolfssl/
+              go-wolfssl. Acceptance check:
+                `grep 'import "C"' internal/wolfcrypt/*.go`
+                -> empty
+              Gates: every internal/wolfcrypt test (RandBytes,
+              HMACSHA256, PBKDF2HMACSHA256, SHA256, Ed25519Verify
+              + GenKey + Sign + roundtrip, ECCVerifyP256,
+              RSAVerifyPKCS1v15SHA256, MintCert self-signed +
+              CA-signed + leaf-verifies-against-CA, plus all
+              the published-vector negative cases) still
+              passes byte-for-byte. The full scripts/test.sh
+              remains green.
 - [ ] 10.7 Vendor github.com/wolfSSL/wolfssh into
         third_party/wolfssh/ as a git submodule pinned to the
         latest tag. scripts/build-wolfssh.sh (new) compiles it
