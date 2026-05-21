@@ -74,7 +74,13 @@ func helloHandler(w http.ResponseWriter, r *http.Request) {
 
 func main() {
 	if len(os.Args) < 4 {
-		fmt.Fprintln(os.Stderr, "usage: wolfci <addr> <cert.pem> <key.pem>")
+		fmt.Fprintln(os.Stderr, "usage: wolfci <host:port> <cert.pem> <key.pem>")
+		fmt.Fprintln(os.Stderr, "example: wolfci 127.0.0.1:8443 server-cert.pem server-key.pem")
+		fmt.Fprintln(os.Stderr, "")
+		fmt.Fprintln(os.Stderr, "NOTE: this binary is the Phase 1.5 hello-world stub.")
+		fmt.Fprintln(os.Stderr, "It serves 'hello, world' on /. The job scheduler, web UI,")
+		fmt.Fprintln(os.Stderr, "agent service, CLI service, and plugin host are not wired")
+		fmt.Fprintln(os.Stderr, "into this main yet. See the cmd/wolfci wiring backlog item.")
 		os.Exit(2)
 	}
 	addr := os.Args[1]
