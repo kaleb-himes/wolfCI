@@ -314,10 +314,16 @@ before the phase started):
         cgo.Handle.Value panics so a Close racing with an
         in-flight Read returns CBIO_ERR_GENERAL instead of
         crashing the process.
-        Follow-on iterations will (1) wire the agent side as a
-        proper internal/agent.Client that runs LocalExecutor on
-        received JobAssignments and streams LogChunks back, and
-        (2) drive that loop from cmd/wolfci-agent.
+        Agent runtime landed: internal/agent.Client dials via
+        wolfSSL mTLS, registers, opens Connect, dispatches each
+        JobAssignment to LocalExecutor under cfg.WorkDir, and
+        reports BuildComplete on the same stream.
+        cmd/wolfci-agent now drives Client.Run and accepts
+        SIGINT/SIGTERM for clean shutdown. Gate:
+        TestClient_RunDispatchesAndReports drives an end-to-end
+        flow through a real wolfSSL mTLS gRPC server. Follow-on:
+        stream LogChunks back during execution (currently only
+        the final BuildComplete is sent).
 - [ ] 5.4 GCE provisioner (internal/nodes/gce): uses the Google
         Cloud Go SDK to launch an instance with a startup script
         that runs wolfci-agent and joins the server.

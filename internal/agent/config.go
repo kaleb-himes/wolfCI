@@ -20,6 +20,10 @@ import (
 
 // Config is the on-disk shape of config-files/agent.yaml.
 type Config struct {
+	// AgentID is the identifier this agent presents to the
+	// server. Required. Typically the cert CN.
+	AgentID string `yaml:"agent_id"`
+
 	// ServerAddress is the host:port of the wolfCI server, e.g.
 	// "ci.example.com:8443".
 	ServerAddress string `yaml:"server_address"`
@@ -43,6 +47,10 @@ type Config struct {
 	// wolfCI server's CA bundle. Used to verify the server's
 	// certificate during the mTLS handshake.
 	CACertificate string `yaml:"ca_certificate"`
+
+	// WorkDir is the directory where this agent caches build
+	// outputs (builds/<job>/<n>/log etc.). Required.
+	WorkDir string `yaml:"work_dir"`
 }
 
 // DefaultConfig returns a Config with sensible defaults. The
@@ -89,6 +97,9 @@ func (c *Config) Save(path string) error {
 // Validate checks that all required fields are populated and
 // within bounds. Returns nil if the config is usable.
 func (c *Config) Validate() error {
+	if c.AgentID == "" {
+		return errors.New("agent_id is required")
+	}
 	if c.ServerAddress == "" {
 		return errors.New("server_address is required")
 	}
@@ -103,6 +114,9 @@ func (c *Config) Validate() error {
 	}
 	if c.CACertificate == "" {
 		return errors.New("ca_certificate is required")
+	}
+	if c.WorkDir == "" {
+		return errors.New("work_dir is required")
 	}
 	return nil
 }

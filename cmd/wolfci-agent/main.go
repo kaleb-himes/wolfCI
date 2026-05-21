@@ -1,18 +1,21 @@
 // wolfci-agent is the wolfCI executor that runs on a node.
 //
-// On startup it loads its config from a YAML file and validates
-// it. The full agent protocol (gRPC over wolfSSL mTLS) lands
-// with PLAN.md task 5.3; this binary today loads the config
-// and prints what it would do. Run with --dry-run to inspect
-// the resolved config without attempting any network operation.
+// On startup it loads its config, dials the wolfCI server via
+// wolfSSL mTLS, registers, opens the Connect stream, and runs
+// every JobAssignment the server pushes through a local shell
+// executor. Use --dry-run to load + print the resolved config
+// without dialing.
 package main
 
 import (
+	"context"
 	"encoding/json"
 	"flag"
 	"fmt"
 	"log"
 	"os"
+	"os/signal"
+	"syscall"
 
 	"github.com/kaleb-himes/wolfCI/internal/agent"
 )
@@ -36,7 +39,17 @@ func main() {
 		return
 	}
 
-	fmt.Fprintln(os.Stderr, "wolfci-agent: mTLS dial and agent protocol not yet implemented (PLAN.md task 5.3)")
-	fmt.Fprintln(os.Stderr, "wolfci-agent: re-run with --dry-run to inspect the loaded config")
-	os.Exit(2)
+	client, err := agent.NewClient(cfg)
+	if err != nil {
+		log.Fatalf("wolfci-agent: %v", err)
+	}
+
+	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer cancel()
+
+	log.Printf("wolfci-agent: starting agent_id=%q server=%q", cfg.AgentID, cfg.ServerAddress)
+	if err := client.Run(ctx); err != nil {
+		log.Fatalf("wolfci-agent: %v", err)
+	}
+	log.Printf("wolfci-agent: shutting down cleanly")
 }
