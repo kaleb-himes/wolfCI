@@ -51,6 +51,18 @@ owner and override defaults.
    otherwise (go.mod, .gitignore, Makefile, etc.).
 10. Prefer editing existing files to creating new ones. Prefer
     deleting code that becomes unused to leaving it commented out.
+11. Before adding any crypto-adjacent dependency or hand-rolling
+    crypto-adjacent code (SSH wire parsers, TLS bindings, OAuth
+    flows, JWT, X.509 helpers, language wrappers for crypto libs,
+    network protocols that ride on top of crypto), ASK FIRST.
+    wolfSSL almost certainly has it. Known projects:
+        github.com/wolfSSL/go-wolfssl   Go bindings for wolfCrypt
+        github.com/wolfSSL/wolfssh      SSH server + client in C
+    When the project owner confirms a wolfSSL project is the right
+    answer, clone it into third_party/<name>/ as a submodule and
+    check out the latest tag (latest stable release). Do not pull
+    a non-wolfSSL alternative unless the owner explicitly waives
+    this rule for that specific dependency.
 
 ## Operating Procedure (every session)
 
