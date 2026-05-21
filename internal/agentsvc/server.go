@@ -27,11 +27,19 @@ import (
 // match the AgentId the agent passed to Register.
 const AgentIDMetadataKey = "agent-id"
 
+// LogSink receives LogChunk bytes streamed from agents during
+// build execution. Implementations are typically file-backed
+// (one log.live per build) or in-memory (for tests).
+type LogSink interface {
+	WriteLogChunk(jobName string, buildNum int, data []byte)
+}
+
 // Server implements wolfciv1.AgentServiceServer.
 type Server struct {
 	wolfciv1.UnimplementedAgentServiceServer
 
 	version string
+	logSink LogSink
 
 	mu     sync.Mutex
 	agents map[string]*wolfciv1.AgentInfo
@@ -42,7 +50,7 @@ type Server struct {
 	streams   map[string]*agentStream
 
 	pendingMu sync.Mutex
-	pending   map[pendingKey]chan *wolfciv1.BuildComplete
+	pending   map[pendingKey]*assignmentInFlight
 
 	completedMu sync.Mutex
 	completed   []*wolfciv1.BuildComplete
@@ -53,6 +61,14 @@ type Server struct {
 type pendingKey struct {
 	agentID     string
 	buildNumber int32
+}
+
+// assignmentInFlight is the per-pending-job record: the job_name
+// (so LogChunks can be routed to the right log file) and the
+// channel SubmitAndWait blocks on.
+type assignmentInFlight struct {
+	jobName string
+	done    chan *wolfciv1.BuildComplete
 }
 
 // agentStream is the server-side handle on one connected agent.
@@ -70,8 +86,16 @@ func New(serverVersion string) *Server {
 		agents:      make(map[string]*wolfciv1.AgentInfo),
 		pendingJobs: make(chan *wolfciv1.JobAssignment, 64),
 		streams:     make(map[string]*agentStream),
-		pending:     make(map[pendingKey]chan *wolfciv1.BuildComplete),
+		pending:     make(map[pendingKey]*assignmentInFlight),
 	}
+}
+
+// SetLogSink registers a sink for LogChunk messages received
+// from agents. nil disables streaming (the current default).
+// Set this before agents start connecting if you care about
+// every chunk.
+func (s *Server) SetLogSink(sink LogSink) {
+	s.logSink = sink
 }
 
 // QueueJob makes job available for delivery to the next agent
@@ -112,7 +136,10 @@ func (s *Server) SubmitAndWait(ctx context.Context, agentID string, job *wolfciv
 		return nil, errors.New("agentsvc.SubmitAndWait: nil JobAssignment")
 	}
 	key := pendingKey{agentID: agentID, buildNumber: job.BuildNumber}
-	ch := make(chan *wolfciv1.BuildComplete, 1)
+	af := &assignmentInFlight{
+		jobName: job.JobName,
+		done:    make(chan *wolfciv1.BuildComplete, 1),
+	}
 
 	s.pendingMu.Lock()
 	if _, exists := s.pending[key]; exists {
@@ -120,7 +147,7 @@ func (s *Server) SubmitAndWait(ctx context.Context, agentID string, job *wolfciv
 		return nil, fmt.Errorf("agentsvc.SubmitAndWait: already waiting on (%s, %d)",
 			agentID, job.BuildNumber)
 	}
-	s.pending[key] = ch
+	s.pending[key] = af
 	s.pendingMu.Unlock()
 
 	defer func() {
@@ -136,9 +163,22 @@ func (s *Server) SubmitAndWait(ctx context.Context, agentID string, job *wolfciv
 	select {
 	case <-ctx.Done():
 		return nil, ctx.Err()
-	case bc := <-ch:
+	case bc := <-af.done:
 		return bc, nil
 	}
+}
+
+// lookupJobName returns the job_name registered for the given
+// (agent_id, build_number) in-flight assignment, or "" if no
+// SubmitAndWait is tracking that pair.
+func (s *Server) lookupJobName(agentID string, buildNum int32) string {
+	key := pendingKey{agentID: agentID, buildNumber: buildNum}
+	s.pendingMu.Lock()
+	defer s.pendingMu.Unlock()
+	if af, ok := s.pending[key]; ok {
+		return af.jobName
+	}
+	return ""
 }
 
 // IdleAgentWithLabel returns the agent_id of any currently-
@@ -196,13 +236,13 @@ func (s *Server) recordCompletion(c *wolfciv1.BuildComplete) {
 func (s *Server) deliverCompletion(agentID string, c *wolfciv1.BuildComplete) {
 	key := pendingKey{agentID: agentID, buildNumber: c.BuildNumber}
 	s.pendingMu.Lock()
-	ch, ok := s.pending[key]
+	af, ok := s.pending[key]
 	if ok {
 		delete(s.pending, key)
 	}
 	s.pendingMu.Unlock()
 	if ok {
-		ch <- c
+		af.done <- c
 	}
 }
 
@@ -315,8 +355,10 @@ func (s *Server) Connect(stream wolfciv1.AgentService_ConnectServer) error {
 			s.recordCompletion(c)
 			s.deliverCompletion(agentID, c)
 		}
-		// LogChunks are accepted but currently dropped; live log
-		// streaming lands in Phase 5.7.
+		if l := msg.GetLog(); l != nil && s.logSink != nil {
+			jobName := s.lookupJobName(agentID, l.BuildNumber)
+			s.logSink.WriteLogChunk(jobName, int(l.BuildNumber), l.Data)
+		}
 	}
 }
 

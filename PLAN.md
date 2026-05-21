@@ -21,12 +21,12 @@ Format conventions:
 
 ## Current Phase
 
-Phase 5 - Node management
+Phase 6 - Web UI
 
 (Update this line when a phase completes. Phase 0 was completed in
 the initial planning turn. Phase 1 completed in iteration 4,
 Phase 2 in iteration 5, Phase 3 in iteration 8, Phase 4 in
-iteration 10 of the slash-loop run.)
+iteration 10, Phase 5 in iteration 21 of the slash-loop run.)
 
 ## Phase 0 - Bootstrap
 
@@ -447,11 +447,33 @@ Additional priorities confirmed after Phase 5 mid-point review:
         material via GCE Secret Manager (or equivalent), and
         start the agent under systemd with the right agent_id
         and label.
-- [ ] 5.7 LogChunk streaming: the agent emits LogChunk messages
+- [x] 5.7 LogChunk streaming: the agent emits LogChunk messages
         during step execution (not just BuildComplete at the
-        end). Server-side persists them under
-        builds/<job>/<n>/log.live so the Phase 6 UI can tail
-        them. Currently the agent only sends the final result.
+        end). Server-side dispatches them via a pluggable
+        LogSink so the Phase 6 UI (or any other reader) can
+        tail builds live.
+        Done: scheduler.NewLocalExecutorWithLogSink wraps the
+        cmd.Stdout/Stderr writer in a teeLogWriter that
+        forwards each chunk to an onLog(jobName, buildNum,
+        data) callback in addition to writing the on-disk log.
+        agent.Client.runAssignment constructs a per-build
+        executor whose callback sends an AgentMessage_Log
+        through the Connect stream under streamMu (same lock
+        the BuildComplete send uses).
+        agentsvc.Server.SetLogSink(sink) wires a server-side
+        LogSink; Connect's receiver routes each LogChunk by
+        looking up the (agent_id, build_number) from the
+        in-flight SubmitAndWait registry to recover the
+        job_name, then calls sink.WriteLogChunk(jobName,
+        buildNum, data). assignmentInFlight now carries both
+        the job_name and the completion channel.
+        Gate: TestServer_LogChunksDeliveredDuringExecution
+        runs a real agent through a two-line shell job and
+        asserts the server's LogSink saw both lines plus a
+        nonzero call count. Persisting chunks to a
+        log.live file is a thin FileLogSink wrapper that
+        Phase 6 will add once the UI's tailing endpoint
+        exists; backlog item.
 
 ## Phase 6 - Web UI
 
@@ -522,5 +544,10 @@ phase when they become relevant.
   label, start the agent under systemd. Until this lands the
   GCE Provisioner CREATES VMs but the VMs do not actually join
   the wolfCI cluster.
+- FileLogSink in internal/agentsvc that persists LogChunks under
+  builds/<job>/<n>/log.live so the Phase 6 UI can tail an actual
+  file on disk. Today the server-side LogSink is just an
+  interface and a capturing in-memory implementation lives in
+  the test.
 
 End of PLAN.md.

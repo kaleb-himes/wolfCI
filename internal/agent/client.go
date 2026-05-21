@@ -24,17 +24,18 @@ import (
 // Client is the agent-side runtime. It dials the wolfCI server
 // via wolfSSL mTLS, registers, opens the Connect stream, and
 // dispatches received JobAssignments to a LocalExecutor whose
-// build outputs land under cfg.WorkDir.
+// build outputs land under cfg.WorkDir. Step output streams
+// back to the server as LogChunks while the build runs (Phase
+// 5.7).
 type Client struct {
-	cfg      *Config
-	store    *storage.Storage
-	executor scheduler.Executor
+	cfg   *Config
+	store *storage.Storage
 
 	streamMu sync.Mutex // gRPC server-stream Send is single-threaded
 }
 
 // NewClient constructs a Client. The work dir from cfg becomes
-// the storage root for the LocalExecutor.
+// the storage root for the per-assignment LocalExecutor.
 func NewClient(cfg *Config) (*Client, error) {
 	if cfg == nil {
 		return nil, errors.New("agent.NewClient: nil Config")
@@ -49,11 +50,7 @@ func NewClient(cfg *Config) (*Client, error) {
 	if err := os.MkdirAll(cfg.WorkDir, 0o755); err != nil {
 		return nil, fmt.Errorf("agent.NewClient: mkdir work_dir: %w", err)
 	}
-	return &Client{
-		cfg:      cfg,
-		store:    store,
-		executor: scheduler.NewLocalExecutor(store),
-	}, nil
+	return &Client{cfg: cfg, store: store}, nil
 }
 
 // Run dials the server, registers, opens the Connect stream,
@@ -142,7 +139,21 @@ func (c *Client) processStream(ctx context.Context, stream wolfciv1.AgentService
 
 func (c *Client) runAssignment(ctx context.Context, stream wolfciv1.AgentService_ConnectClient, a *wolfciv1.JobAssignment) {
 	job := protoToStorageJob(a)
-	result := c.executor.Execute(ctx, job, int(a.BuildNumber))
+
+	onLog := func(_ string, buildNum int, data []byte) {
+		c.streamMu.Lock()
+		defer c.streamMu.Unlock()
+		_ = stream.Send(&wolfciv1.AgentMessage{
+			Body: &wolfciv1.AgentMessage_Log{
+				Log: &wolfciv1.LogChunk{
+					BuildNumber: int32(buildNum),
+					Data:        append([]byte(nil), data...),
+				},
+			},
+		})
+	}
+	exec := scheduler.NewLocalExecutorWithLogSink(c.store, onLog)
+	result := exec.Execute(ctx, job, int(a.BuildNumber))
 
 	c.streamMu.Lock()
 	defer c.streamMu.Unlock()

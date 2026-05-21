@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -14,17 +15,47 @@ import (
 	"github.com/kaleb-himes/wolfCI/internal/storage"
 )
 
+// teeLogWriter is the io.Writer used when a LocalExecutor has an
+// onLog callback set: every byte written to it goes both to the
+// build's on-disk log file AND to the streaming callback.
+type teeLogWriter struct {
+	inner    io.Writer
+	onLog    func(jobName string, buildNum int, data []byte)
+	jobName  string
+	buildNum int
+}
+
+func (w *teeLogWriter) Write(p []byte) (int, error) {
+	n, err := w.inner.Write(p)
+	if n > 0 && w.onLog != nil {
+		// Copy because os/exec may reuse the buffer.
+		cp := make([]byte, n)
+		copy(cp, p[:n])
+		w.onLog(w.jobName, w.buildNum, cp)
+	}
+	return n, err
+}
+
 // LocalExecutor runs jobs in-process on the wolfCI server host.
 // It is the only Executor implementation that ships in Phase 4;
 // Phase 5 adds agent-driven executors against the same interface.
 type LocalExecutor struct {
 	store *storage.Storage
+	onLog func(jobName string, buildNum int, data []byte)
 }
 
 // NewLocalExecutor constructs a LocalExecutor that writes logs
 // and results under store.Root() / builds / <job> / <num>.
 func NewLocalExecutor(store *storage.Storage) *LocalExecutor {
 	return &LocalExecutor{store: store}
+}
+
+// NewLocalExecutorWithLogSink constructs a LocalExecutor that
+// also fan-outs every stdout/stderr chunk to onLog as soon as
+// the shell writes it. Used by the agent runtime so step
+// output streams back to the wolfCI server live (Phase 5.7).
+func NewLocalExecutorWithLogSink(store *storage.Storage, onLog func(jobName string, buildNum int, data []byte)) *LocalExecutor {
+	return &LocalExecutor{store: store, onLog: onLog}
 }
 
 // Execute runs each Step in job sequentially via /bin/sh -c. The
@@ -75,8 +106,17 @@ func (e *LocalExecutor) Execute(ctx context.Context, job *storage.Job, num int) 
 		fmt.Fprintf(logFile, "] %s\n", step.Shell)
 
 		cmd := exec.CommandContext(ctx, "/bin/sh", "-c", step.Shell)
-		cmd.Stdout = logFile
-		cmd.Stderr = logFile
+		var stepOut io.Writer = logFile
+		if e.onLog != nil {
+			stepOut = &teeLogWriter{
+				inner:    logFile,
+				onLog:    e.onLog,
+				jobName:  job.Name,
+				buildNum: num,
+			}
+		}
+		cmd.Stdout = stepOut
+		cmd.Stderr = stepOut
 		cmd.Env = mergeEnv(os.Environ(), step.Env)
 
 		runErr := cmd.Run()
