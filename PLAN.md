@@ -704,10 +704,25 @@ RPC.
               and TestFormatNodes_Text gate the formatters;
               TestJobList_EndToEnd exercises the full mTLS
               gRPC round trip through dispatch().
-        - [ ] 8.1c Streaming build log + job run subcommands.
-              "build log" tails /api/v1/builds/{job}/{n}/log;
-              "job run" enqueues a build through CLIService and
-              optionally streams.
+        - [x] 8.1c Streaming build log subcommand.
+              Done: CLIService.StreamBuildLog tails
+              builds/<job>/<n>/log.live via polling, with a
+              configurable IdleTimeout and respect for the
+              caller's ctx. wolfci-ctl `build log <job> <n>`
+              wraps it. Path validation guards against
+              traversal in job names. Gates:
+              TestCLIService_StreamBuildLog,
+              TestCLIService_StreamBuildLog_BadInput,
+              TestBuildLog_EndToEnd (full wolfSSL mTLS
+              roundtrip), TestBuildLog_BadArgs.
+              Convention: subcommand flags must precede
+              positional args (Go stdlib flag stops at first
+              non-flag).
+        - [ ] 8.1d `wolfci-ctl job run <name>` subcommand.
+              Blocked on wiring scheduler.Scheduler into the
+              wolfCI server bootstrap so CLIService.RunJob can
+              enqueue builds. The CLI subcommand itself is
+              ~30 lines on top of a new RunJob RPC.
 
 ## Phase 9 - Packaging, docs, polish
 
