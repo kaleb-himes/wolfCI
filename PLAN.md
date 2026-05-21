@@ -246,6 +246,20 @@ before the phase started):
   a single required label per job. Boolean label expressions
   (a la Jenkins "linux && tpm") are backlog.
 
+Additional priorities confirmed after Phase 5 mid-point review:
+
+- On-prem first, cloud as overflow. The scheduler MUST prefer
+  any matching on-prem agent before asking a Provisioner to spin
+  up a GCE node. Cloud nodes are only for overflow when every
+  matching on-prem agent is busy. This shapes the 5.5 selector
+  policy.
+- GCE live test is a placeholder. Write the integration test
+  (against a real Compute Engine endpoint) but gate it on an
+  env var (e.g. WOLFCI_GCE_LIVE_TEST=1) so it stays t.Skip-ed
+  until the project owner provides credentials.
+- LogChunk streaming during execution lands after 5.4b/5.5; see
+  the new Phase 5.7 task below.
+
 - [x] 5.1 cmd/wolfci-agent: a standalone binary that opens an mTLS
         connection back to the server and offers itself as an
         executor. Agent config
