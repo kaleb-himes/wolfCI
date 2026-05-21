@@ -21,11 +21,12 @@ Format conventions:
 
 ## Current Phase
 
-Phase 3 - AuthN and AuthZ
+Phase 4 - Job model and scheduler
 
 (Update this line when a phase completes. Phase 0 was completed in
-the initial planning turn. Phase 1 completed in iteration 4 and
-Phase 2 in iteration 5 of the slash-loop run.)
+the initial planning turn. Phase 1 completed in iteration 4,
+Phase 2 in iteration 5, Phase 3 in iteration 8 of the slash-loop
+run.)
 
 ## Phase 0 - Bootstrap
 
@@ -168,8 +169,11 @@ before the phase started):
         namespaced strings (jobs.read, jobs.build, jobs.configure,
         builds.read, builds.cancel, nodes.read, nodes.configure),
         plus a "*" wildcard for admin.
-- [ ] 3.7 docs/SECURITY.md: write the full security model, including
+- [x] 3.7 docs/SECURITY.md: write the full security model, including
         threat model and how to enable/disable each auth path.
+        Done: covers TLS profile, SSH-key auth, password auth
+        toggle, bootstrap flow, role-permission tables, file modes,
+        and threat model.
 
 ## Phase 4 - Job model and scheduler
 
