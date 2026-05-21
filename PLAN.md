@@ -207,8 +207,15 @@ before the phase started):
         Done: internal/scheduler/scheduler.go. Build numbers
         persisted at builds/<job>/.next-build-number under
         syscall.Flock LOCK_EX.
-- [ ] 4.3 Build runner: spawns a shell, streams stdout and stderr to
+- [x] 4.3 Build runner: spawns a shell, streams stdout and stderr to
         builds/<job>/<n>/log, records exit code in result.json.
+        Done: internal/scheduler/local.go provides LocalExecutor.
+        First non-zero exit terminates the build; remaining steps
+        are skipped. Step.Env is layered over os.Environ for that
+        step only. Gate: TestLocalExecutor_SuccessAndLog,
+        TestLocalExecutor_FailingStep,
+        TestLocalExecutor_StopsAtFirstFailure,
+        TestLocalExecutor_PerStepEnv.
 - [ ] 4.4 Build matrix support: a job can declare an axis (for
         example, OS x compiler), and the scheduler fans out into N
         runs.
