@@ -321,6 +321,26 @@ before the phase started):
 - [ ] 5.4 GCE provisioner (internal/nodes/gce): uses the Google
         Cloud Go SDK to launch an instance with a startup script
         that runs wolfci-agent and joins the server.
+        Sub-checkpoints:
+        - [x] 5.4a Provisioner interface + Config layer + fake
+              backend for tests. internal/nodes defines Node,
+              Provisioner, ErrNoSuchNode, ErrNotImplemented.
+              internal/nodes/fake.Provisioner is an in-memory
+              backend. internal/nodes/gce.Config round-trips
+              YAML at config-files/nodes/gce.yaml with
+              project_id, zone, machine_type,
+              service_account_key, image, network, labels.
+              internal/nodes/gce.Provisioner is a stub that
+              returns nodes.ErrNotImplemented from Provision
+              and Terminate. Gate:
+              TestFake_ProvisionTerminate, TestFake_ListLive,
+              TestConfig_RoundTrip,
+              TestLoadConfig_RejectsMissingRequiredFields.
+        - [ ] 5.4b Real GCE driver against
+              google.golang.org/api/compute/v1. Replace the stub
+              with code that launches an instance via the API
+              and tears it down on Terminate. Startup script
+              installs and runs wolfci-agent.
 - [ ] 5.5 Failing test (internal/nodes/gce/gce_test.go): with a
         faked GCE backend, the scheduler requests a node, the node
         "joins", runs a job, terminates.
