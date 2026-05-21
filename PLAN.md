@@ -608,11 +608,25 @@ owner before the phase started):
         go.mod. docs/PLUGINS.md documents the install layout
         (plugins/installed/<name>/<name>), handshake
         constants, threat model, and a stub Go authoring guide.
-- [ ] 7.2 Failing test (internal/plugin/plugin_test.go): a sample
+- [x] 7.2 Failing test (internal/plugin/plugin_test.go): a sample
         "hello" plugin under plugins/examples/hello is loaded and
         its on-build-complete hook fires.
-- [ ] 7.3 Implement the plugin host in internal/plugin (subprocess
+        Done: TestHost_LoadAndDispatchHello builds the hello
+        plugin into a tempdir layout matching
+        plugins/installed/hello/hello, drives Load + OnBuildComplete,
+        and asserts the plugin wrote the expected JSON event.
+        TestHost_LoadEmpty covers the no-plugins-installed path.
+- [x] 7.3 Implement the plugin host in internal/plugin (subprocess
         management, gRPC client, cleanup on shutdown).
+        Done: internal/plugin.Host scans
+        <pluginsDir>/installed/, spawns each <name>/<name>
+        binary via hashicorp/go-plugin, dispatches
+        OnBuildComplete to every loaded plugin (errors
+        swallowed so one bad plugin can't block the rest), and
+        Kill's every subprocess on Stop. Shared Handshake +
+        PluginMap + WolfCIPlugin live in plugin.go so plugin
+        authors import the same constants the host uses. 5/5
+        stable.
 - [ ] 7.4 Ship a real plugin: email-on-failure.
 
 ## Phase 8 - CLI client
