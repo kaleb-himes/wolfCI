@@ -1,0 +1,16 @@
+{{ define "content" }}
+<section class="panel">
+<h2>{{ if .IsNew }}New job{{ else }}Edit job: {{ .Name }}{{ end }}</h2>
+{{ if .Error }}<p class="error">{{ .Error }}</p>{{ end }}
+<form method="POST" action="{{ .Action }}">
+<label for="spec">Spec (YAML)</label>
+<textarea id="spec" name="spec" rows="20" cols="80" required>{{ .Spec }}</textarea>
+<button type="submit">{{ if .IsNew }}Create{{ else }}Save{{ end }}</button>
+<a href="/jobs">Cancel</a>
+</form>
+<p class="muted">Expected schema: name, description, node_label,
+timeout (Go duration string like "5m"), retries, triggers,
+parameters, steps, axis. See docs/STORAGE.md for the full
+shape.</p>
+</section>
+{{ end }}

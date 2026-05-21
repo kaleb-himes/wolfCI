@@ -10,9 +10,28 @@ import (
 	"strings"
 	"time"
 
+	"gopkg.in/yaml.v3"
+
 	"github.com/kaleb-himes/wolfCI/internal/auth"
 	"github.com/kaleb-himes/wolfCI/internal/storage"
 )
+
+// parseJobSpec is server.go's local helper rather than a method
+// on Storage so the package boundary stays narrow.
+func parseJobSpec(spec string) (*storage.Job, error) {
+	if strings.TrimSpace(spec) == "" {
+		return nil, fmt.Errorf("spec is empty")
+	}
+	var j storage.Job
+	if err := yaml.Unmarshal([]byte(spec), &j); err != nil {
+		return nil, fmt.Errorf("yaml: %w", err)
+	}
+	return &j, nil
+}
+
+func yamlMarshal(j *storage.Job) ([]byte, error) {
+	return yaml.Marshal(j)
+}
 
 //go:embed templates/*.html
 var templatesFS embed.FS
@@ -70,7 +89,139 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("/login", s.handleLogin)
 	s.mux.HandleFunc("/logout", s.handleLogout)
 	s.mux.HandleFunc("/jobs", s.requireSession(s.handleJobs))
+	s.mux.HandleFunc("/jobs/", s.requireSession(s.handleJobRoutes))
 	s.mux.Handle("/static/", http.StripPrefix("/static/", http.FileServer(staticSub())))
+}
+
+// handleJobRoutes dispatches everything under /jobs/, which
+// covers /jobs/new (create) and /jobs/{name}/edit (modify).
+func (s *Server) handleJobRoutes(w http.ResponseWriter, r *http.Request) {
+	rest := strings.TrimPrefix(r.URL.Path, "/jobs/")
+	switch {
+	case rest == "new":
+		switch r.Method {
+		case http.MethodGet:
+			s.renderJobForm(w, "", "", "")
+		case http.MethodPost:
+			s.handleJobCreate(w, r)
+		default:
+			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		}
+	default:
+		parts := strings.SplitN(rest, "/", 2)
+		if len(parts) != 2 || parts[1] != "edit" {
+			http.NotFound(w, r)
+			return
+		}
+		name := parts[0]
+		if !validJobName(name) {
+			http.Error(w, "invalid job name", http.StatusBadRequest)
+			return
+		}
+		switch r.Method {
+		case http.MethodGet:
+			s.handleJobEditGet(w, r, name)
+		case http.MethodPost:
+			s.handleJobEditPost(w, r, name)
+		default:
+			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		}
+	}
+}
+
+func (s *Server) handleJobCreate(w http.ResponseWriter, r *http.Request) {
+	if err := r.ParseForm(); err != nil {
+		http.Error(w, "bad request", http.StatusBadRequest)
+		return
+	}
+	spec := r.FormValue("spec")
+	job, err := parseJobSpec(spec)
+	if err != nil {
+		s.renderJobForm(w, "", spec, err.Error())
+		return
+	}
+	if job.Name == "" {
+		s.renderJobForm(w, "", spec, "spec must include 'name'")
+		return
+	}
+	// Refuse to overwrite an existing job from the "new" route.
+	if existing, _ := s.opts.Storage.LoadJob(job.Name); existing != nil {
+		s.renderJobForm(w, "", spec, fmt.Sprintf("job %q already exists; use /jobs/%s/edit", job.Name, job.Name))
+		return
+	}
+	if err := s.opts.Storage.SaveJob(job); err != nil {
+		s.renderJobForm(w, "", spec, "save: "+err.Error())
+		return
+	}
+	http.Redirect(w, r, "/jobs", http.StatusSeeOther)
+}
+
+func (s *Server) handleJobEditGet(w http.ResponseWriter, r *http.Request, name string) {
+	job, err := s.opts.Storage.LoadJob(name)
+	if err != nil {
+		http.Error(w, "load job: "+err.Error(), http.StatusNotFound)
+		return
+	}
+	out, err := yamlMarshal(job)
+	if err != nil {
+		http.Error(w, "marshal job: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
+	s.renderJobForm(w, name, string(out), "")
+}
+
+func (s *Server) handleJobEditPost(w http.ResponseWriter, r *http.Request, name string) {
+	if err := r.ParseForm(); err != nil {
+		http.Error(w, "bad request", http.StatusBadRequest)
+		return
+	}
+	spec := r.FormValue("spec")
+	job, err := parseJobSpec(spec)
+	if err != nil {
+		s.renderJobForm(w, name, spec, err.Error())
+		return
+	}
+	if job.Name != name {
+		s.renderJobForm(w, name, spec, fmt.Sprintf("name in spec (%q) does not match URL (%q); rename is not supported via the edit form", job.Name, name))
+		return
+	}
+	if err := s.opts.Storage.SaveJob(job); err != nil {
+		s.renderJobForm(w, name, spec, "save: "+err.Error())
+		return
+	}
+	http.Redirect(w, r, "/jobs", http.StatusSeeOther)
+}
+
+// renderJobForm writes the create/edit form. name=="" means
+// "new"; otherwise it's an edit screen for that job.
+func (s *Server) renderJobForm(w http.ResponseWriter, name, spec, errMsg string) {
+	isNew := name == ""
+	action := "/jobs/new"
+	title := "New job"
+	if !isNew {
+		action = "/jobs/" + name + "/edit"
+		title = "Edit job"
+	}
+	s.render(w, "jobedit.html", map[string]interface{}{
+		"Title":  title,
+		"IsNew":  isNew,
+		"Name":   name,
+		"Spec":   spec,
+		"Error":  errMsg,
+		"Action": action,
+	})
+}
+
+// validJobName mirrors the file-system constraint storage uses
+// when it builds jobs/<name>/job.yaml.
+func validJobName(name string) bool {
+	if name == "" || name == "." || name == ".." {
+		return false
+	}
+	if strings.ContainsAny(name, "/\\\x00") {
+		return false
+	}
+	return true
 }
 
 func staticSub() http.FileSystem {

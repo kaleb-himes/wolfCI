@@ -544,7 +544,16 @@ Additional Phase 6 task at the front of the list:
         Previously wolfSSL_free could run while a gRPC HTTP/2
         reader was mid-wolfSSL_read and SIGSEGV the process
         (intermittent in test re-runs). 15/15 stable after.
-- [ ] 6.3 Job create/edit form posts to internal/storage.
+- [x] 6.3 Job create/edit form posts to internal/storage.
+        Done: /jobs/new (GET form, POST creates) and
+        /jobs/{name}/edit (GET pre-filled, POST saves) routes.
+        Single textarea posts raw YAML; the handler parses
+        with gopkg.in/yaml.v3 and saves via Storage.SaveJob.
+        Validation: duplicate create rejected; edit refuses
+        rename (name in spec must match URL). Gate:
+        TestUI_JobCreateAndEdit covers form render, happy-path
+        create, duplicate rejection, edit pre-fill, rename
+        rejection, and successful update.
 - [ ] 6.4 Build log live stream via Server-Sent Events.
 - [ ] 6.5 Node management page lists registered on-prem and GCE
         nodes.
