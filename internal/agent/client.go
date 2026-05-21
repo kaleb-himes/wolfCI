@@ -2,7 +2,6 @@ package agent
 
 import (
 	"context"
-	"crypto/tls"
 	"errors"
 	"fmt"
 	"io"
@@ -106,7 +105,7 @@ func (c *Client) dial(ctx context.Context) (*grpc.ClientConn, error) {
 		Certificate: cert,
 		Key:         key,
 		RootCAs:     ca,
-		MinVersion:  tls.VersionTLS13,
+		MinVersion:  tlsutil.VersionTLS13,
 	}
 
 	return grpc.DialContext(ctx,

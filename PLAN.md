@@ -1457,10 +1457,45 @@ before the phase started):
         cmd/wolfci, cmd/wolfci-ctl) keeps passing - the
         wolfcrypt-minted certs interop cleanly with the
         wolfSSL-side handshake.
-- [ ] 10.10 Copy TLS version + relevant cipher constants into
+- [x] 10.10 Copy TLS version + relevant cipher constants into
          internal/tlsutil as local consts (VersionTLS13, etc.).
          Drop crypto/tls imports from internal/tlsutil,
          internal/agent/client.go, and cmd/wolfci-ctl/client.go.
+         Done: internal/tlsutil/version.go defines the four
+         TLS protocol-version wire constants VersionTLS10,
+         VersionTLS11, VersionTLS12, VersionTLS13 with their
+         IETF wire values (0x0301 through 0x0304). Only
+         VersionTLS13 is referenced by production code today;
+         the older constants are kept so a future explicit-
+         downgrade reject path can name the version instead
+         of using a magic number. No cipher constants were
+         added: no production call site references one, and
+         tlsutil's TLS 1.3 path pins the cipher suite list at
+         the wolfSSL CTX level (not from Go). When a future
+         task surfaces a Go-side cipher constant need, it
+         lands in version.go alongside these.
+         internal/tlsutil/tlsutil.go: crypto/tls import gone,
+         validateBaseConfig's TLS13 check now reads the local
+         constant, Config.MinVersion's doc comment updated to
+         point at the local consts.
+         internal/agent/client.go and cmd/wolfci-ctl/client.go:
+         crypto/tls import gone, the MinVersion field now reads
+         tlsutil.VersionTLS13.
+         Gate: internal/tlsutil/version_test.go ships
+         TestVersionTLS13_WireValue (asserts 0x0304) and
+         TestConfig_AcceptsLocalVersionTLS13 (the constant is
+         accepted by validateBaseConfig via NewListener).
+         The existing TestListener_TLS13Handshake (Phase 1.3/
+         1.4) deliberately keeps importing crypto/tls because
+         it acts as a third-party TLS client to verify wolfSSL
+         interop; that is an intentional interop check rather
+         than wolfCI calling stdlib crypto.
+         Acceptance:
+           grep '"crypto/tls"' internal/tlsutil/tlsutil.go \
+                                internal/agent/client.go \
+                                cmd/wolfci-ctl/client.go
+           -> empty
+         The full scripts/test.sh remains green.
 - [ ] 10.11 docs/SECURITY.md update: document the
          wolfCrypt-only rule (CLAUDE.md Hard Rule #10's
          realization in the source tree), the ask-first rule

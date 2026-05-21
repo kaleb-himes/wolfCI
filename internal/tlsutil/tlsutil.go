@@ -52,7 +52,6 @@ static void wolfci_ctx_verify_server(WOLFSSL_CTX* ctx) {
 import "C"
 
 import (
-	"crypto/tls"
 	"errors"
 	"fmt"
 	"io"
@@ -115,8 +114,8 @@ type Config struct {
 	// Certificate. Required.
 	Key []byte
 
-	// MinVersion is the minimum TLS protocol version, using the
-	// same constants as crypto/tls (e.g. tls.VersionTLS13). Zero
+	// MinVersion is the minimum TLS protocol version on the wire.
+	// Use the tlsutil.VersionTLS1x constants in version.go. Zero
 	// defaults to TLS 1.3. Only TLS 1.3 is implemented today.
 	MinVersion uint16
 
@@ -277,7 +276,7 @@ func validateBaseConfig(cfg *Config) error {
 	if len(cfg.Certificate) == 0 || len(cfg.Key) == 0 {
 		return errors.New("tlsutil: Config.Certificate and Config.Key are required")
 	}
-	if cfg.MinVersion != 0 && cfg.MinVersion != tls.VersionTLS13 {
+	if cfg.MinVersion != 0 && cfg.MinVersion != VersionTLS13 {
 		return fmt.Errorf("tlsutil: only TLS 1.3 is implemented (got MinVersion 0x%04x)",
 			cfg.MinVersion)
 	}
