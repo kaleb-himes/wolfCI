@@ -97,6 +97,35 @@ owner and override defaults.
     OpenSSL-compat collision (e.g. a wrapper library expects the
     compat symbols to be absent), the answer is to fix the
     wrapper, not to enable the compat layer.
+13. All wolfCI code follows K&R C style even when written in
+    Go. The canonical reference is third_party/wolfssl/wolfcrypt/
+    src/aes.c.
+    Specific applications:
+      - 80-column hard wrap. Wrap long lines; do not stretch.
+      - Comments are /* ... */. Use // only when the language
+        SYNTACTICALLY demands it (Go build tags //go:build, cgo
+        directives in line-comment form, // in shell scripts, etc.).
+        Doc comments and inline comments are /* ... */ in every
+        language that accepts both forms.
+      - Braces:
+          Functions and methods: in C, `{` goes on the line BELOW
+            the signature (K&R "Allman-for-functions" variant
+            wolfSSL uses). Go's parser requires `{` on the same
+            line as the signature; that is the only Go-specific
+            override.
+          Control flow (if / for / while / switch / select): `{`
+            on the SAME line as the keyword in both languages.
+      - Indentation: 4 spaces. No tabs in NEW source files
+        (gofmt-emitted tabs in existing Go files stay as-is until
+        a separate cleanup pass; do not flip-flop a file
+        mid-edit).
+      - Identifier case follows the host language (snake_case for
+        C, MixedCaps for Go exports, lowerCamelCase for Go locals);
+        the K&R rule is about syntax shape, not naming.
+    The rule applies to NEW code starting 2026-05-21. Existing
+    wolfCI source predates the rule and will get a reformat pass
+    in a future maintenance phase; do not flip-flop file styles
+    mid-edit while we are mid-feature work.
 
 ## Operating Procedure (every session)
 
