@@ -1142,7 +1142,7 @@ before the phase started):
               third_party/go-wolfssl-patches/README.md documents
               the why and the "what would let us drop this
               patch" condition (upstream fix or build tag).
-        - [ ] 10.6b Wire the primitives that go-wolfssl actually
+        - [ ] 10.6b Wire the primitives that go-wolfssl already
               covers into internal/wolfcrypt: RandBytes,
               HMACSHA256, PBKDF2HMACSHA256, SHA256,
               ECCVerifyP256. Adds a `replace
@@ -1150,15 +1150,55 @@ before the phase started):
               ./third_party/go-wolfssl` directive to wolfCI's
               go.mod so the vendored copy is used; existing
               tests must still pass byte-for-byte (RFC KATs
-              already gate the behavior). Hand-rolled CGO in
-              these primitives gets deleted.
-        - [ ] 10.6c Document why Ed25519 (gen + sign + verify),
-              RSA verify, and MintCert stay hand-rolled:
-              go-wolfssl does not expose them today. Surface as
-              a finding for the project owner so they can
-              decide whether to file upstream feature requests
-              or accept the partial swap. Update CLAUDE.md and
-              docs/SECURITY.md to make the boundary explicit.
+              already gate the behavior). The hand-rolled CGO
+              for these specific primitives gets deleted.
+              Hand-rolled CGO for Ed25519 / RSA verify / MintCert
+              stays for one more iteration; 10.6c removes it.
+        - [ ] 10.6c Add the missing wrappers to
+              third_party/go-wolfssl so internal/wolfcrypt can
+              become a pure Go facade with zero CGO. Per
+              CLAUDE.md Hard Rule #11 (extended on 2026-05-21):
+              when the vendored wolfSSL project is missing a
+              wrapper, we ADD it to the vendored copy and
+              capture as a patch rather than hand-rolling.
+              Wrappers to add (mirroring the wc_* C API
+              one-to-one):
+                ed25519.go     wc_ed25519_init / _free /
+                               _make_key / _import_public /
+                               _import_private_key /
+                               _export_public /
+                               _export_private_only /
+                               _sign_msg / _verify_msg
+                rsa_verify.go  wc_InitRsaKey / wc_FreeRsaKey /
+                               wc_RsaPublicKeyDecodeRaw /
+                               wc_SignatureVerify with
+                               WC_HASH_TYPE_SHA256 and
+                               WC_SIGNATURE_TYPE_RSA_W_ENC
+                certgen.go     wc_InitCert / wc_MakeCert /
+                               wc_SignCert / wc_SetIssuerBuffer /
+                               wc_SetExtKeyUsage (+ the small C
+                               helper for copying subject CN /
+                               Organization into the
+                               fixed-size Cert.subject arrays)
+              Each new file lands as a numbered patch under
+              third_party/go-wolfssl-patches/
+              (0002-add-ed25519.patch, 0003-add-rsa-verify.patch,
+              0004-add-certgen.patch); the submodule worktree
+              stays at the upstream pinned SHA in the committed
+              state. Patches re-apply automatically via
+              scripts/test-go-wolfssl.sh on fresh clones. When
+              Phase 10 closes, the project owner files an
+              upstream PR from kaleb-himes/go-wolfssl carrying
+              these wrappers; merged + tagged upstream drops the
+              patches from third_party/go-wolfssl-patches/.
+        - [ ] 10.6d Rewire internal/wolfcrypt to call the
+              extended go-wolfssl API for Ed25519, RSA verify,
+              and MintCert. Delete every remaining
+              `import "C"` block from internal/wolfcrypt and
+              the corresponding .go files; the package becomes
+              a thin Go-side facade. Acceptance: `grep -r
+              'import "C"' internal/wolfcrypt/` returns nothing
+              and every existing test still passes.
 - [ ] 10.7 Vendor github.com/wolfSSL/wolfssh into
         third_party/wolfssh/ as a git submodule pinned to the
         latest tag. scripts/build-wolfssh.sh (new) compiles it

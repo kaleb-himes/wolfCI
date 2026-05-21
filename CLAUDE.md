@@ -66,6 +66,20 @@ owner and override defaults.
     in third_party/<name>-version.txt. Do not pull a non-wolfSSL
     alternative unless the owner explicitly waives this rule for
     that specific dependency.
+
+    When the vendored wolfSSL project is MISSING a wrapper wolfCI
+    needs, ADD the wrapper to the vendored copy (e.g. add an
+    ed25519.go to third_party/go-wolfssl/) instead of hand-rolling
+    in wolfCI's own tree. Do NOT commit the change to the
+    submodule's own history; capture it as a numbered patch under
+    third_party/<name>-patches/ (0002-add-X.patch,
+    0003-add-Y.patch, ...). scripts/test-<name>.sh re-applies
+    every patch on a clean submodule worktree so fresh clones
+    just work. The project owner files a formal upstream PR from
+    their personal fork (e.g. github.com/kaleb-himes/go-wolfssl)
+    when Phase 10 is finished; when the PR merges and upstream
+    tags a release, the wolfCI submodule pointer advances and the
+    relevant patches drop out of third_party/<name>-patches/.
 12. NEVER enable OpenSSL-compatibility features in the wolfSSL
     build profile or call OpenSSL-compatibility APIs from wolfCI
     code. Forbidden configure flags:
