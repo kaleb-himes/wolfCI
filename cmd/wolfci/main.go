@@ -127,6 +127,12 @@ func Run(ctx context.Context, cfg *server.ServerConfig, opts RunOptions) error {
      */
     svc := agentsvc.New(serverVersion)
     svc.SetLogSink(agentsvc.NewFileLogSink(cfg.WorkDir))
+    /* Built-in master node (Phase 12.5): registers a synthetic
+     * "wolfci-master" agent and refreshes its NodeStatus every
+     * 30s so the /nodes view always has a self-row. The
+     * goroutine stops when ctx fires (server shutdown).
+     */
+    svc.RegisterBuiltInNode(ctx, 30*time.Second, cfg.WorkDir)
 
     var exec scheduler.Executor = scheduler.NewLocalExecutor(store)
     if opts.Executor != nil {

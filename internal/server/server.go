@@ -7,6 +7,7 @@ import (
 	"html/template"
 	"io/fs"
 	"net/http"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -194,20 +195,39 @@ func (s *Server) handleNodes(w http.ResponseWriter, r *http.Request) {
 		connectedSet[a.AgentId] = true
 	}
 	type nodeRow struct {
-		AgentID   string
-		Labels    []string
-		Executors int32
-		Connected bool
+		AgentID     string
+		DisplayName string
+		Labels      []string
+		Executors   int32
+		Connected   bool
+		IsMaster    bool
 	}
 	rows := make([]nodeRow, 0, len(registered))
 	for _, a := range registered {
-		rows = append(rows, nodeRow{
-			AgentID:   a.AgentId,
-			Labels:    a.Labels,
-			Executors: a.Executors,
-			Connected: connectedSet[a.AgentId],
-		})
+		row := nodeRow{
+			AgentID:     a.AgentId,
+			DisplayName: a.AgentId,
+			Labels:      a.Labels,
+			Executors:   a.Executors,
+			Connected:   connectedSet[a.AgentId],
+		}
+		if a.AgentId == agentsvc.BuiltInNodeAgentID {
+			row.DisplayName = agentsvc.BuiltInNodeDisplayName
+			row.IsMaster = true
+		}
+		rows = append(rows, row)
 	}
+	/* Master row first, then everything else in registry order.
+	 * The registry order is non-deterministic (map iteration);
+	 * stable.SortStable would be overkill here since the only
+	 * cross-row ordering rule is "master first".
+	 */
+	sort.SliceStable(rows, func(i, j int) bool {
+		if rows[i].IsMaster != rows[j].IsMaster {
+			return rows[i].IsMaster
+		}
+		return false
+	})
 	s.render(w, "nodes.html", map[string]interface{}{
 		"Title": "Nodes",
 		"Nodes": rows,

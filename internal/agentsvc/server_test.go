@@ -179,3 +179,72 @@ func TestServer_LastHeartbeatUnknownAgent(t *testing.T) {
 		t.Error("LastHeartbeat ok = true for an unknown agent; want false")
 	}
 }
+
+// TestAgentSvc_BuiltInNodeRegistered gates PLAN.md 12.5. After
+// RegisterBuiltInNode, Agents() must include the synthetic
+// wolfci-master entry with label "master" and a single executor.
+// The refresh goroutine must also publish a fresh heartbeat so
+// LastHeartbeat returns ok=true and ConnectedAgents includes the
+// master under the default StaleThreshold.
+func TestAgentSvc_BuiltInNodeRegistered(t *testing.T) {
+	svc := agentsvc.New("hb-test")
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	/* Use a short refresh interval so the test does not wait
+	 * the full 30s production default for the first beat.
+	 */
+	svc.RegisterBuiltInNode(ctx, 50*time.Millisecond, t.TempDir())
+
+	/* AgentInfo registration is synchronous; assert immediately. */
+	found := false
+	for _, a := range svc.Agents() {
+		if a.AgentId == agentsvc.BuiltInNodeAgentID {
+			found = true
+			if a.Executors != 1 {
+				t.Errorf("master Executors = %d, want 1", a.Executors)
+			}
+			if len(a.Labels) != 1 || a.Labels[0] != "master" {
+				t.Errorf("master Labels = %v, want [master]", a.Labels)
+			}
+		}
+	}
+	if !found {
+		t.Fatalf("Agents() missing %q after RegisterBuiltInNode",
+			agentsvc.BuiltInNodeAgentID)
+	}
+
+	/* The first heartbeat fires immediately inside the refresh
+	 * goroutine, so a short poll is plenty.
+	 */
+	deadline := time.Now().Add(time.Second)
+	for time.Now().Before(deadline) {
+		if _, _, ok := svc.LastHeartbeat(agentsvc.BuiltInNodeAgentID); ok {
+			break
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	status, _, ok := svc.LastHeartbeat(agentsvc.BuiltInNodeAgentID)
+	if !ok {
+		t.Fatal("RegisterBuiltInNode refresh goroutine did not record " +
+			"a heartbeat within 1s")
+	}
+	if status.Architecture == "" {
+		t.Error("master NodeStatus.Architecture is empty; " +
+			"refresh did not call nodeinfo.Take")
+	}
+
+	/* ConnectedAgents should include the master because its
+	 * heartbeat is fresh (well within the default 90s
+	 * StaleThreshold).
+	 */
+	inConnected := false
+	for _, a := range svc.ConnectedAgents() {
+		if a.AgentId == agentsvc.BuiltInNodeAgentID {
+			inConnected = true
+		}
+	}
+	if !inConnected {
+		t.Error("ConnectedAgents missing master despite fresh heartbeat")
+	}
+}

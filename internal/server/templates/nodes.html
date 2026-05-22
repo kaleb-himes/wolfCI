@@ -6,8 +6,8 @@
 <thead><tr><th>Agent ID</th><th>Status</th><th>Labels</th><th>Executors</th></tr></thead>
 <tbody>
 {{ range .Nodes }}
-<tr>
-<td><strong>{{ .AgentID }}</strong></td>
+<tr{{ if .IsMaster }} class="node-master"{{ end }}>
+<td><strong>{{ .DisplayName }}</strong>{{ if .IsMaster }} <span class="muted">(self)</span>{{ end }}</td>
 <td>{{ if .Connected }}<span class="status-connected">connected</span>{{ else }}<span class="muted">offline</span>{{ end }}</td>
 <td>{{ range .Labels }}<code>{{ . }}</code> {{ end }}</td>
 <td>{{ .Executors }}</td>

@@ -53,6 +53,53 @@ func TestUI_NodesPage(t *testing.T) {
 	}
 }
 
+// TestUI_NodesShowsMasterFirst gates PLAN.md 12.5. With the
+// built-in master registered alongside a remote agent, /nodes
+// must render the master's "wolfCI Master Node" row before the
+// remote agent's row so the operator's eye lands on it first.
+func TestUI_NodesShowsMasterFirst(t *testing.T) {
+	ts, jar, svc := newAuthedUIWithAgentSvc(t)
+	defer ts.Close()
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	svc.RegisterBuiltInNode(ctx, 50*time.Millisecond, t.TempDir())
+
+	if _, err := svc.Register(context.Background(), &wolfciv1.AgentInfo{
+		AgentId:   "node-alpha",
+		Labels:    []string{"linux", "x86_64"},
+		Executors: 4,
+	}); err != nil {
+		t.Fatalf("Register: %v", err)
+	}
+
+	client := &http.Client{
+		Jar: jar,
+		CheckRedirect: func(*http.Request, []*http.Request) error {
+			return http.ErrUseLastResponse
+		},
+	}
+	resp := mustGet(t, client, ts.URL+"/nodes")
+	body := readBody(t, resp)
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d, want 200", resp.StatusCode)
+	}
+
+	masterIdx := strings.Index(body, "wolfCI Master Node")
+	if masterIdx < 0 {
+		t.Fatalf("body missing 'wolfCI Master Node'; got:\n%s", body)
+	}
+	alphaIdx := strings.Index(body, "node-alpha")
+	if alphaIdx < 0 {
+		t.Fatalf("body missing 'node-alpha'; got:\n%s", body)
+	}
+	if masterIdx > alphaIdx {
+		t.Errorf("master row appears after node-alpha row "+
+			"(master at %d, alpha at %d); want master first",
+			masterIdx, alphaIdx)
+	}
+}
+
 // TestUI_NodesPage_Empty verifies the page renders cleanly with
 // no agents registered and points operators at the right docs.
 func TestUI_NodesPage_Empty(t *testing.T) {

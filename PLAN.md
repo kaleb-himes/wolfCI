@@ -2110,7 +2110,7 @@ Decisions to lock in before the phase starts:
          ConnectedAgents no longer lists the agent),
          TestServer_LastHeartbeatUnknownAgent (ok=false for
          an agent that never registered a heartbeat).
-- [ ] 12.5 Built-in master node registration. cmd/wolfci/main.go,
+- [x] 12.5 Built-in master node registration. cmd/wolfci/main.go,
          right after agentsvc.New, calls
          svc.RegisterBuiltInNode(...) which inserts a synthetic
          AgentInfo:
@@ -2123,10 +2123,54 @@ Decisions to lock in before the phase starts:
          "wolfCI Master Node" via a server-side display-name
          override; the wire identifier stays "wolfci-master"
          so the matrix and scheduler don't need a special case.
-         Gates: TestAgentSvc_BuiltInNodeRegistered (after
+         Done: agentsvc grew three exported constants
+         (BuiltInNodeAgentID = "wolfci-master",
+         BuiltInNodeDisplayName = "wolfCI Master Node",
+         BuiltInNodeLabel = "master") and a method
+         RegisterBuiltInNode(ctx, interval, statfsRoot) that
+         inserts the synthetic AgentInfo into s.agents under
+         the same mutex Register uses, takes a synchronous
+         first nodeinfo.Snapshot via the new
+         refreshBuiltInNode helper (so callers see a populated
+         LastHeartbeat immediately on return), and spawns a
+         ticker goroutine that re-refreshes every interval
+         until ctx fires. refreshBuiltInNode maps Snapshot ->
+         NodeStatus with the same int64 time encodings the
+         agent uses, then calls RecordHeartbeat with the
+         master's id; partial snapshots (nodeinfo.ErrUnsupported
+         on a strange GOOS, statfs failure) are still
+         recorded so the master row never goes silently dead
+         on a single metric error.
+         internal/server.handleNodes computes a DisplayName +
+         IsMaster pair per row (master row gets
+         BuiltInNodeDisplayName, everyone else echoes
+         AgentID) and uses sort.SliceStable to float the
+         master row to position 0 while preserving registry
+         order for everything below it.
+         internal/server/templates/nodes.html renders
+         DisplayName instead of AgentID and adds a "(self)"
+         suffix + class="node-master" on the master row;
+         the AgentID is still on the wire and reachable via
+         /nodes/<agent-id> for Phase 12.7.
+         cmd/wolfci/main.go calls svc.RegisterBuiltInNode(ctx,
+         30*time.Second, cfg.WorkDir) right after
+         agentsvc.New so the refresh goroutine binds to the
+         server's root ctx and stops cleanly on shutdown.
+         Gates (internal/agentsvc/server_test.go):
+         TestAgentSvc_BuiltInNodeRegistered (after
          RegisterBuiltInNode, Agents() contains the master with
          label "master"), TestUI_NodesShowsMasterFirst (the
          table renders the master row above any remote agent).
+         Done: both gates green;
+         TestAgentSvc_BuiltInNodeRegistered also verifies
+         LastHeartbeat is populated post-Register (the
+         synchronous first beat lands before the call returns)
+         and that ConnectedAgents includes the master under
+         the default StaleThreshold.
+         TestUI_NodesShowsMasterFirst stands up the authed UI
+         with both a master and a remote node-alpha, then
+         asserts the body's "wolfCI Master Node" substring
+         appears before "node-alpha".
 - [ ] 12.6 /nodes UI rewrite. Replace
          internal/server/templates/nodes.html with the columns:
            S (status icon: green dot connected, red X offline,

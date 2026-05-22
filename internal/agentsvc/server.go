@@ -21,7 +21,23 @@ import (
 	"google.golang.org/grpc/status"
 
 	wolfciv1 "github.com/kaleb-himes/wolfCI/api/v1"
+	"github.com/kaleb-himes/wolfCI/internal/nodeinfo"
 )
+
+// BuiltInNodeAgentID is the synthetic agent_id for the wolfCI
+// master node (PLAN.md 12.5). Kept as a wire identifier so the
+// authz matrix and scheduler do not need a special case; the
+// /nodes UI renders the row with BuiltInNodeDisplayName instead.
+const BuiltInNodeAgentID = "wolfci-master"
+
+// BuiltInNodeDisplayName is the human-readable label the Phase
+// 12.6 Nodes UI renders for the master row.
+const BuiltInNodeDisplayName = "wolfCI Master Node"
+
+// BuiltInNodeLabel is the label the master row advertises. The
+// scheduler's Router (Phase 5.5) can match jobs that explicitly
+// require running on the master via this label.
+const BuiltInNodeLabel = "master"
 
 // DefaultStaleThreshold is how long ConnectedAgents waits before
 // dropping an agent whose heartbeat has gone silent. Matches the
@@ -114,6 +130,72 @@ func New(serverVersion string) *Server {
 		pending:     make(map[pendingKey]*assignmentInFlight),
 		heartbeats:  make(map[string]heartbeatRecord),
 	}
+}
+
+// RegisterBuiltInNode inserts the synthetic wolfCI master node
+// into the agent registry and starts a goroutine that refreshes
+// its NodeStatus from internal/nodeinfo every interval. The
+// goroutine takes the first snapshot synchronously before
+// returning so callers (notably the Phase 12.5 cmd/wolfci main)
+// can rely on LastHeartbeat being populated immediately.
+//
+// ctx scopes the refresh goroutine; when ctx fires the goroutine
+// exits and no further heartbeats are recorded. The master entry
+// itself stays in Agents() (matches Jenkins's "Built-In Node"
+// row, which is visible even when the controller is shutting
+// down).
+//
+// statfsRoot is the path the inner nodeinfo.Take statfs against
+// for FreeDiskBytes. cmd/wolfci passes its work_dir; tests pass
+// t.TempDir.
+func (s *Server) RegisterBuiltInNode(ctx context.Context, interval time.Duration, statfsRoot string) {
+	info := &wolfciv1.AgentInfo{
+		AgentId:   BuiltInNodeAgentID,
+		Labels:    []string{BuiltInNodeLabel},
+		Executors: 1,
+	}
+	s.mu.Lock()
+	s.agents[BuiltInNodeAgentID] = info
+	s.mu.Unlock()
+
+	/* Synchronous first beat so callers see a populated
+	 * LastHeartbeat immediately on return; subsequent beats
+	 * happen on the ticker.
+	 */
+	s.refreshBuiltInNode(statfsRoot)
+
+	go func() {
+		ticker := time.NewTicker(interval)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case <-ticker.C:
+				s.refreshBuiltInNode(statfsRoot)
+			}
+		}
+	}()
+}
+
+// refreshBuiltInNode takes a fresh nodeinfo snapshot, maps it to
+// NodeStatus, and records it via the same path agents use. A
+// partial snapshot (statfs failure on root, sysctl error, etc.)
+// still gets recorded because the master row should never look
+// silently dead just because one metric was unreadable.
+func (s *Server) refreshBuiltInNode(statfsRoot string) {
+	snap, _ := nodeinfo.Take(statfsRoot)
+	status := &wolfciv1.NodeStatus{
+		Architecture:        snap.Architecture,
+		GoVersion:           snap.GoVersion,
+		FreeDiskBytes:       snap.FreeDiskBytes,
+		FreeSwapBytes:       snap.FreeSwapBytes,
+		FreeTempBytes:       snap.FreeTempBytes,
+		HostUptimeSeconds:   int64(snap.HostUptime / time.Second),
+		WallClockUnixMicros: snap.Now.UnixMicro(),
+		AgentVersion:        s.version,
+	}
+	s.RecordHeartbeat(BuiltInNodeAgentID, status)
 }
 
 // RecordHeartbeat stores the latest NodeStatus for agentID and
