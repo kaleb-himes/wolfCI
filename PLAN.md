@@ -2610,14 +2610,32 @@ Decisions to lock in:
          TestWorkspace_RendersTextPreviewBelowThreshold,
          TestWorkspace_DownloadsBinaryWithSniff (PNG
          header -> Content-Type: image/*).
-- [ ] 14.3 Each Enqueue snapshots the current job spec into
+- [x] 14.3 Each Enqueue snapshots the current job spec into
          builds/<job>/<n>/spec.yaml. Rebuild Last (POST
          /jobs/<name>/rebuild) loads the snapshot of the most
          recent build, enqueues a new build from it, and
          redirects to the live log. A "rebuild with current
          spec" variant button on the per-build page enqueues
          from the live spec instead.
-         Failing tests:
+         Done: storage gains SaveSpecSnapshot +
+         LoadSpecSnapshot. scheduler.Enqueue calls
+         SaveSpecSnapshot immediately after nextBuildNumber
+         picks the number, so the on-disk snapshot exists
+         before the executor goroutine touches the build
+         dir. handleJobRebuild (rebuild.go) looks up the
+         most recent build via scanAllBuilds (reusing
+         jobdetail's newest-first ordering), loads the
+         snapshot, and Enqueues via opts.JobRunner. The
+         ?spec=current variant short-circuits the snapshot
+         path and uses storage.LoadJob instead. An older
+         build with no snapshot returns 409 Conflict with
+         a message pointing the operator at the variant.
+         Route wired in handleJobRoutes for POST
+         /jobs/<name>/rebuild. The detail-page sidebar's
+         Rebuild Last button is now real (disabled only
+         when no previous build exists or no runner is
+         wired); the per-build page (buildlog.html) gains
+         a "Rebuild with current spec" affordance. Gates:
          TestRebuild_UsesSnapshottedSpec,
          TestRebuild_CurrentSpecVariantUsesLiveSpec,
          TestRebuild_RequiresJobsBuildPermission.

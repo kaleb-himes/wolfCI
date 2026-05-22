@@ -1,6 +1,15 @@
 {{ define "content" }}
 <section class="panel">
 <h2>Build {{ .BuildNum }} - {{ .JobName }}</h2>
+<p>
+<a href="/jobs/{{ .JobName }}">&larr; Back to {{ .JobName }}</a>
+&middot; <a href="/jobs/{{ .JobName }}/builds/{{ .BuildNum }}/ws/">Workspace</a>
+{{ if .CanRun }}
+&middot; <form method="POST" action="/jobs/{{ .JobName }}/rebuild?spec=current" class="rebuild-inline-form" style="display:inline">
+<button type="submit">Rebuild with current spec</button>
+</form>
+{{ end }}
+</p>
 <p class="muted">Live log; new output appends as it arrives.</p>
 <pre id="log" class="log"></pre>
 <script>

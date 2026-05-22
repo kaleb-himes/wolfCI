@@ -183,6 +183,12 @@ func (s *Server) handleJobRoutes(w http.ResponseWriter, r *http.Request) {
 				return
 			}
 			s.handleJobDelete(w, r, name)
+		case len(parts) == 2 && parts[1] == "rebuild":
+			if r.Method != http.MethodPost {
+				http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+				return
+			}
+			s.handleJobRebuild(w, r, name)
 		case len(parts) == 2 && parts[1] == "builds":
 			if r.Method != http.MethodGet {
 				http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
@@ -561,6 +567,7 @@ func (s *Server) handleBuildLogPage(w http.ResponseWriter, r *http.Request, name
 		"JobName":   name,
 		"BuildNum":  num,
 		"StreamURL": fmt.Sprintf("/api/v1/builds/%s/%d/log", name, num),
+		"CanRun":    s.opts.JobRunner != nil,
 	})
 }
 

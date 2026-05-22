@@ -213,6 +213,69 @@ func (s *Storage) ListJobs() ([]*Job, error) {
 	return out, nil
 }
 
+// SaveSpecSnapshot writes job to builds/<job.Name>/<buildNum>/
+// spec.yaml. Phase 14.3 calls this from scheduler.Enqueue so
+// "Rebuild Last" can re-enqueue with the exact spec a past
+// build saw, even if the live spec has drifted since.
+//
+// Intermediate directories are created. No lock: each
+// snapshot lives at a unique build number, so there is no
+// concurrent writer to serialize against.
+func (s *Storage) SaveSpecSnapshot(jobName string, buildNum int,
+	job *Job) error {
+	if jobName == "" {
+		return errors.New("storage.SaveSpecSnapshot: jobName is required")
+	}
+	if buildNum < 1 {
+		return errors.New("storage.SaveSpecSnapshot: buildNum must be >= 1")
+	}
+	if job == nil {
+		return errors.New("storage.SaveSpecSnapshot: nil Job")
+	}
+	dir := filepath.Join(s.root, "builds", jobName,
+		fmt.Sprintf("%d", buildNum))
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		return fmt.Errorf("storage.SaveSpecSnapshot: mkdir: %w", err)
+	}
+	data, err := yaml.Marshal(job)
+	if err != nil {
+		return fmt.Errorf("storage.SaveSpecSnapshot: marshal: %w", err)
+	}
+	path := filepath.Join(dir, "spec.yaml")
+	if err := os.WriteFile(path, data, 0o644); err != nil {
+		return fmt.Errorf("storage.SaveSpecSnapshot: write: %w", err)
+	}
+	return nil
+}
+
+// LoadSpecSnapshot reads builds/<jobName>/<buildNum>/spec.yaml.
+// Returns os.ErrNotExist if no snapshot was written for this
+// build (older builds from before Phase 14.3, or third-party
+// executors that bypassed the scheduler).
+func (s *Storage) LoadSpecSnapshot(jobName string, buildNum int) (
+	*Job, error) {
+	if jobName == "" {
+		return nil, errors.New("storage.LoadSpecSnapshot: jobName is required")
+	}
+	if buildNum < 1 {
+		return nil, errors.New("storage.LoadSpecSnapshot: buildNum must be >= 1")
+	}
+	path := filepath.Join(s.root, "builds", jobName,
+		fmt.Sprintf("%d", buildNum), "spec.yaml")
+	data, err := os.ReadFile(path)
+	if err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return nil, os.ErrNotExist
+		}
+		return nil, fmt.Errorf("storage.LoadSpecSnapshot: read: %w", err)
+	}
+	var job Job
+	if err := yaml.Unmarshal(data, &job); err != nil {
+		return nil, fmt.Errorf("storage.LoadSpecSnapshot: parse: %w", err)
+	}
+	return &job, nil
+}
+
 // DeleteJob removes the named job's spec directory
 // (jobs/<name>/) including any sibling files inside it. It
 // does NOT touch builds/<name>/: the operator can re-create

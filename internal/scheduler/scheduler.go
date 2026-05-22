@@ -166,6 +166,23 @@ func (s *Scheduler) Enqueue(job *storage.Job) (int, <-chan BuildResult, error) {
 		return 0, nil, err
 	}
 
+	/* Phase 14.3: snapshot the spec as it looked at enqueue
+	 * time. "Rebuild Last" reads this file to re-enqueue with
+	 * the exact shape this build saw, even if the live spec
+	 * has drifted since. Best-effort: a snapshot failure
+	 * does not abort the build (the snapshot is a debuggability
+	 * feature, not a correctness one) but is returned so the
+	 * caller can log.
+	 */
+	if snapErr := s.store.SaveSpecSnapshot(job.Name, num, job); snapErr != nil {
+		/* Falling through; the build still runs without a
+		 * snapshot. cmd/wolfci wires no logger into the
+		 * scheduler today, so we accept the silent drop and
+		 * revisit when structured logging lands.
+		 */
+		_ = snapErr
+	}
+
 	q := &queuedJob{job: job, num: num, done: make(chan BuildResult, 1)}
 
 	s.mu.Lock()

@@ -20,9 +20,23 @@
 <button type="submit" class="danger">Delete</button>
 </form>
 </li>
-<li><button type="button" disabled title="Phase 14">Rebuild Last</button></li>
-<li><button type="button" disabled title="Phase 14">Rename</button></li>
-<li><button type="button" disabled title="Phase 14">Workspace</button></li>
+<li>
+{{ if and .CanRun .Permalinks.LastBuild }}
+<form method="POST" action="/jobs/{{ .Name }}/rebuild" class="rebuild-form">
+<button type="submit">Rebuild Last</button>
+</form>
+{{ else }}
+<button type="button" disabled title="{{ if not .Permalinks.LastBuild }}No previous build{{ else }}No job runner is wired{{ end }}">Rebuild Last</button>
+{{ end }}
+</li>
+<li><button type="button" disabled title="Phase 14.4">Rename</button></li>
+<li>
+{{ if .Permalinks.LastBuild }}
+<a href="/jobs/{{ .Name }}/builds/{{ .Permalinks.LastBuild.Number }}/ws/"><button type="button">Workspace</button></a>
+{{ else }}
+<button type="button" disabled title="No previous build">Workspace</button>
+{{ end }}
+</li>
 </ul>
 </aside>
 
