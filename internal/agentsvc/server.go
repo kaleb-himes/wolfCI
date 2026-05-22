@@ -88,6 +88,9 @@ type Server struct {
 
 	heartbeatsMu sync.Mutex
 	heartbeats   map[string]heartbeatRecord
+
+	disabledMu sync.Mutex
+	disabled   map[string]bool
 }
 
 // heartbeatRecord is the per-agent latest NodeStatus + the
@@ -129,7 +132,33 @@ func New(serverVersion string) *Server {
 		streams:     make(map[string]*agentStream),
 		pending:     make(map[pendingKey]*assignmentInFlight),
 		heartbeats:  make(map[string]heartbeatRecord),
+		disabled:    make(map[string]bool),
 	}
+}
+
+// SetDisabled marks (or unmarks) agentID as administratively
+// offline. Disabled agents are skipped by IdleAgentWithLabel
+// and by the scheduler Router's local-path master check
+// (PLAN.md 12.7); the AgentInfo stays in the registry and on
+// the /nodes view so the operator can see and reverse the
+// state. Idempotent.
+func (s *Server) SetDisabled(agentID string, disabled bool) {
+	s.disabledMu.Lock()
+	defer s.disabledMu.Unlock()
+	if disabled {
+		s.disabled[agentID] = true
+	} else {
+		delete(s.disabled, agentID)
+	}
+}
+
+// IsDisabled reports whether agentID has been administratively
+// taken offline via SetDisabled. Always false for agents that
+// have never been disabled.
+func (s *Server) IsDisabled(agentID string) bool {
+	s.disabledMu.Lock()
+	defer s.disabledMu.Unlock()
+	return s.disabled[agentID]
 }
 
 // RegisterBuiltInNode inserts the synthetic wolfCI master node
@@ -335,13 +364,18 @@ func (s *Server) lookupJobName(agentID string, buildNum int32) string {
 }
 
 // IdleAgentWithLabel returns the agent_id of any currently-
-// connected agent that advertises the given label. Returns the
-// empty string if no match. Phase 5.5a treats "connected" as
-// "idle"; per-agent job-busy tracking lands in 5.5b.
+// connected agent that advertises the given label, skipping
+// any agent that has been administratively disabled via
+// SetDisabled (PLAN.md 12.7). Returns the empty string if no
+// match. Phase 5.5a treats "connected" as "idle"; per-agent
+// job-busy tracking lands in 5.5b.
 func (s *Server) IdleAgentWithLabel(label string) string {
 	s.streamsMu.Lock()
 	defer s.streamsMu.Unlock()
 	for id, st := range s.streams {
+		if s.IsDisabled(id) {
+			continue
+		}
 		if label == "" {
 			return id
 		}

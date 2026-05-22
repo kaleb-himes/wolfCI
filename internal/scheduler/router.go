@@ -65,6 +65,19 @@ func (r *Router) WithProvisionTimeout(d time.Duration) *Router {
 // Execute satisfies the Executor interface.
 func (r *Router) Execute(ctx context.Context, job *storage.Job, num int) BuildResult {
 	if r.matchesLocal(job.NodeLabel) {
+		/* Honor the Phase 12.7 "Take offline" toggle even on
+		 * the local path: the master node is the in-process
+		 * LocalExecutor, so a disabled master means the
+		 * operator wants no new local builds either.
+		 */
+		if r.svc != nil && r.svc.IsDisabled(agentsvc.BuiltInNodeAgentID) {
+			return BuildResult{
+				JobName: job.Name,
+				Number:  num,
+				Status:  StatusError,
+				Error:   fmt.Sprintf("scheduler.Router: no agent available for node_label=%q (master is offline)", job.NodeLabel),
+			}
+		}
 		return r.local.Execute(ctx, job, num)
 	}
 

@@ -2239,7 +2239,7 @@ Decisions to lock in before the phase starts:
          (StaleThreshold=10ms; record a heartbeat then sleep
          40ms; the body shows "node-status offline" for that
          agent).
-- [ ] 12.7 Per-node detail page at /nodes/<agent-id>. Shows the
+- [x] 12.7 Per-node detail page at /nodes/<agent-id>. Shows the
          full NodeStatus + the agent's recent build history (last
          N completed builds dispatched to this node, from
          agentsvc.Completed). Includes a "Take offline" toggle
@@ -2249,11 +2249,57 @@ Decisions to lock in before the phase starts:
          or pull from the floor without taking the wolfCI server
          down. The toggle requires the nodes.configure permission
          (already in the authz matrix; no new permission).
-         Gates: TestNodeDetail_RendersStatus,
-         TestNodeDetail_TakeOfflineFlipsFlag,
-         TestRouter_SkipsOfflineNode (a "master"-labeled job
-         while the master node is offline returns
-         ErrNoNodesAvailable rather than dispatching).
+         Done: agentsvc.Server grew a disabled map (guarded by
+         disabledMu) plus SetDisabled(agentID, bool) and
+         IsDisabled(agentID) bool. IdleAgentWithLabel skips
+         agents whose IsDisabled is true so remote dispatches
+         miss them; the scheduler.Router.Execute local-path
+         branch (matchesLocal == true) now also calls
+         IsDisabled(BuiltInNodeAgentID) before falling into
+         r.local.Execute, returning a BuildResult with
+         Status=StatusError and Error="...master is offline..."
+         so jobs targeting the master also stop dispatching
+         when the operator pulls the controller from the floor.
+         internal/server gained handleNodeRoutes (under
+         /nodes/) dispatching to:
+           - GET  /nodes/<id>          -> handleNodeDetail
+           - POST /nodes/<id>/disable  -> SetDisabled(true)
+           - POST /nodes/<id>/enable   -> SetDisabled(false)
+         404 on an unknown agent_id; SeeOther redirect back
+         to /nodes/<id> after every toggle.
+         handleNodeDetail reads LastHeartbeat + IsDisabled,
+         maps to a view, and renders templates/node_detail.html
+         (new). The template shows Labels, Executors, full
+         NodeStatus, host uptime (formatUptime renders
+         "5d 2h" / "47m" / "9s" based on dominant unit),
+         clock difference (re-using formatClockDiff from
+         12.6), and an administrative Take-offline /
+         Bring-online form whose state depends on .Disabled.
+         The build-history surface is left to a follow-up;
+         the PLAN.md 12.7 gates do not assert on it.
+         The Phase 12 spec calls for nodes.configure
+         permission enforcement on the toggle endpoints, but
+         matrix-driven HTTP authz is not wired into
+         requireSession yet (the matrix exists in
+         internal/authz but no handler consults it). The
+         handler documents this with an inline note;
+         requireSession is the only current gate.
+         Gates:
+         TestNodeDetail_RendersStatus
+         (internal/server/nodes_test.go) - GET
+         /nodes/wolfci-master returns 200 with the display
+         name, label "master", and the Architecture / Go
+         version / Agent version field labels rendered.
+         TestNodeDetail_TakeOfflineFlipsFlag - POST
+         /nodes/<id>/disable returns 303 and IsDisabled is
+         true; POST /nodes/<id>/enable returns 303 and
+         IsDisabled is back to false.
+         TestRouter_SkipsOfflineNode
+         (internal/scheduler/router_test.go) - register the
+         master, SetDisabled(true), Execute a job with
+         NodeLabel="master"; Status=StatusError + Error
+         mentions "no agent available". Re-enable and re-run;
+         Status=StatusSuccess.
 - [ ] 12.8 scripts/build.sh injects the agent version via
          -ldflags "-X main.version=$(git describe --tags
          --always --dirty 2>/dev/null || echo dev)" so

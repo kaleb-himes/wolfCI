@@ -219,6 +219,93 @@ func TestUI_NodesPage_OfflineAgentRendersOfflineBadge(t *testing.T) {
 	}
 }
 
+// TestNodeDetail_RendersStatus gates PLAN.md 12.7. GET
+// /nodes/wolfci-master returns 200 with the master's display
+// name and snapshot fields (architecture + go version + agent
+// version) on the page. The detail page is where labels and
+// executor count live now (since the table on /nodes dropped
+// them in 12.6).
+func TestNodeDetail_RendersStatus(t *testing.T) {
+	ts, jar, svc := newAuthedUIWithAgentSvc(t)
+	defer ts.Close()
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	svc.RegisterBuiltInNode(ctx, 50*time.Millisecond, t.TempDir())
+
+	client := &http.Client{Jar: jar, CheckRedirect: func(*http.Request, []*http.Request) error {
+		return http.ErrUseLastResponse
+	}}
+	resp := mustGet(t, client,
+		ts.URL+"/nodes/"+agentsvc.BuiltInNodeAgentID)
+	body := readBody(t, resp)
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d, want 200; body:\n%s",
+			resp.StatusCode, body)
+	}
+	for _, want := range []string{
+		"wolfCI Master Node",
+		agentsvc.BuiltInNodeLabel,
+		"Architecture",
+		"Go version",
+		"Agent version",
+	} {
+		if !strings.Contains(body, want) {
+			t.Errorf("body missing %q", want)
+		}
+	}
+}
+
+// TestNodeDetail_TakeOfflineFlipsFlag gates PLAN.md 12.7's
+// Take offline toggle. POSTing the disable action flips the
+// in-memory disabled flag agentsvc tracks; toggling back via
+// enable clears it. The Router skip-offline test
+// (TestRouter_SkipsOfflineNode) covers the dispatch effect.
+func TestNodeDetail_TakeOfflineFlipsFlag(t *testing.T) {
+	ts, jar, svc := newAuthedUIWithAgentSvc(t)
+	defer ts.Close()
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	svc.RegisterBuiltInNode(ctx, 50*time.Millisecond, t.TempDir())
+
+	client := &http.Client{Jar: jar, CheckRedirect: func(*http.Request, []*http.Request) error {
+		return http.ErrUseLastResponse
+	}}
+
+	/* POST /nodes/<id>/disable -> agent becomes disabled. */
+	disableURL := ts.URL + "/nodes/" + agentsvc.BuiltInNodeAgentID +
+		"/disable"
+	resp, err := client.PostForm(disableURL, nil)
+	if err != nil {
+		t.Fatalf("POST disable: %v", err)
+	}
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusSeeOther {
+		t.Fatalf("POST disable status = %d, want 303",
+			resp.StatusCode)
+	}
+	if !svc.IsDisabled(agentsvc.BuiltInNodeAgentID) {
+		t.Error("agent not disabled after POST /disable")
+	}
+
+	/* POST /nodes/<id>/enable -> agent becomes enabled again. */
+	enableURL := ts.URL + "/nodes/" + agentsvc.BuiltInNodeAgentID +
+		"/enable"
+	resp, err = client.PostForm(enableURL, nil)
+	if err != nil {
+		t.Fatalf("POST enable: %v", err)
+	}
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusSeeOther {
+		t.Fatalf("POST enable status = %d, want 303",
+			resp.StatusCode)
+	}
+	if svc.IsDisabled(agentsvc.BuiltInNodeAgentID) {
+		t.Error("agent still disabled after POST /enable")
+	}
+}
+
 // TestUI_NodesPage_Empty verifies the page renders cleanly with
 // no agents registered and points operators at the right docs.
 func TestUI_NodesPage_Empty(t *testing.T) {

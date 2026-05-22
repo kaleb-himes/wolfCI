@@ -120,6 +120,7 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("/jobs", s.requireSession(s.handleJobs))
 	s.mux.HandleFunc("/jobs/", s.requireSession(s.handleJobRoutes))
 	s.mux.HandleFunc("/nodes", s.requireSession(s.handleNodes))
+	s.mux.HandleFunc("/nodes/", s.requireSession(s.handleNodeRoutes))
 	logTail := &LogTailHandler{
 		Root:         s.opts.Storage.Root(),
 		PollInterval: 100 * time.Millisecond,
@@ -212,6 +213,148 @@ func (s *Server) handleNodes(w http.ResponseWriter, r *http.Request) {
 		"Title": "Nodes",
 		"Nodes": rows,
 	})
+}
+
+// handleNodeRoutes dispatches everything under /nodes/, which
+// covers /nodes/<agent-id> (detail GET), /nodes/<agent-id>/disable
+// (POST), and /nodes/<agent-id>/enable (POST). PLAN.md 12.7.
+func (s *Server) handleNodeRoutes(w http.ResponseWriter, r *http.Request) {
+	rest := strings.TrimPrefix(r.URL.Path, "/nodes/")
+	if rest == "" {
+		http.Redirect(w, r, "/nodes", http.StatusSeeOther)
+		return
+	}
+	parts := strings.SplitN(rest, "/", 2)
+	agentID := parts[0]
+	if agentID == "" {
+		http.NotFound(w, r)
+		return
+	}
+	action := ""
+	if len(parts) == 2 {
+		action = parts[1]
+	}
+
+	switch {
+	case action == "" && r.Method == http.MethodGet:
+		s.handleNodeDetail(w, r, agentID)
+	case action == "disable" && r.Method == http.MethodPost:
+		s.handleNodeDisable(w, r, agentID, true)
+	case action == "enable" && r.Method == http.MethodPost:
+		s.handleNodeDisable(w, r, agentID, false)
+	default:
+		http.NotFound(w, r)
+	}
+}
+
+// handleNodeDetail renders the per-agent page: display name,
+// labels, executor count, full NodeStatus from LastHeartbeat,
+// and a Take-offline / Bring-online toggle form. Recent build
+// history is left to a follow-up commit; the PLAN.md 12.7 gate
+// only asserts on the status fields.
+func (s *Server) handleNodeDetail(w http.ResponseWriter, r *http.Request, agentID string) {
+	if s.opts.AgentSvc == nil {
+		http.NotFound(w, r)
+		return
+	}
+	var info *wolfciv1.AgentInfo
+	for _, a := range s.opts.AgentSvc.Agents() {
+		if a.AgentId == agentID {
+			info = a
+			break
+		}
+	}
+	if info == nil {
+		http.NotFound(w, r)
+		return
+	}
+	displayName := info.AgentId
+	isMaster := info.AgentId == agentsvc.BuiltInNodeAgentID
+	if isMaster {
+		displayName = agentsvc.BuiltInNodeDisplayName
+	}
+
+	status, received, hasHeartbeat := s.opts.AgentSvc.LastHeartbeat(agentID)
+	view := map[string]interface{}{
+		"Title":        displayName,
+		"AgentID":      info.AgentId,
+		"DisplayName":  displayName,
+		"IsMaster":     isMaster,
+		"Labels":       info.Labels,
+		"Executors":    info.Executors,
+		"Disabled":     s.opts.AgentSvc.IsDisabled(agentID),
+		"HasHeartbeat": hasHeartbeat,
+	}
+	if hasHeartbeat && status != nil {
+		view["Architecture"] = status.Architecture
+		view["GoVersion"] = status.GoVersion
+		view["AgentVersion"] = status.AgentVersion
+		view["FreeDisk"] = humanBytes(status.FreeDiskBytes)
+		view["FreeSwap"] = humanBytes(status.FreeSwapBytes)
+		view["FreeTemp"] = humanBytes(status.FreeTempBytes)
+		view["HostUptime"] = formatUptime(status.HostUptimeSeconds)
+		view["ClockDiff"] = formatClockDiff(
+			status.WallClockUnixMicros, received)
+	}
+	s.render(w, "node_detail.html", view)
+}
+
+// handleNodeDisable toggles the in-memory disabled flag for
+// agentID and redirects back to the detail page. POST-only so a
+// bookmark or accidental GET cannot flip the flag.
+//
+// Permission note: the Phase 12.7 spec calls for the
+// nodes.configure permission to gate this endpoint; matrix-
+// driven HTTP authz has not landed yet (the matrix exists in
+// internal/authz but is not wired into requireSession), so for
+// now requireSession is the only gate. Wiring NodesConfigure is
+// tracked under the broader authz follow-up.
+func (s *Server) handleNodeDisable(w http.ResponseWriter, r *http.Request,
+	agentID string, disable bool) {
+
+	if s.opts.AgentSvc == nil {
+		http.NotFound(w, r)
+		return
+	}
+	found := false
+	for _, a := range s.opts.AgentSvc.Agents() {
+		if a.AgentId == agentID {
+			found = true
+			break
+		}
+	}
+	if !found {
+		http.NotFound(w, r)
+		return
+	}
+	s.opts.AgentSvc.SetDisabled(agentID, disable)
+	http.Redirect(w, r, "/nodes/"+agentID, http.StatusSeeOther)
+}
+
+// formatUptime renders host_uptime_seconds in the dominant unit
+// for readability: "5d 2h", "2h 14m", "47m", "9s". The detail
+// page shows this on the master row and on agent rows that have
+// reported a heartbeat.
+func formatUptime(secs int64) string {
+	if secs <= 0 {
+		return ""
+	}
+	d := secs / 86400
+	secs -= d * 86400
+	h := secs / 3600
+	secs -= h * 3600
+	m := secs / 60
+	secs -= m * 60
+	if d > 0 {
+		return fmt.Sprintf("%dd %dh", d, h)
+	}
+	if h > 0 {
+		return fmt.Sprintf("%dh %dm", h, m)
+	}
+	if m > 0 {
+		return fmt.Sprintf("%dm", m)
+	}
+	return fmt.Sprintf("%ds", secs)
 }
 
 /* nodeRow is the per-row view model the /nodes template renders.

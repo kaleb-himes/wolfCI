@@ -1,0 +1,58 @@
+{{ define "content" }}
+<section class="panel">
+<h2>{{ .DisplayName }}{{ if .IsMaster }} <span class="muted">(self)</span>{{ end }}</h2>
+
+<p>
+<a href="/nodes">&larr; Back to nodes</a>
+</p>
+
+<dl class="node-detail">
+<dt>Agent ID</dt><dd><code>{{ .AgentID }}</code></dd>
+<dt>Labels</dt><dd>
+{{ if .Labels }}
+  {{ range .Labels }}<code>{{ . }}</code> {{ end }}
+{{ else }}
+  <span class="muted">none</span>
+{{ end }}
+</dd>
+<dt>Executors</dt><dd>{{ .Executors }}</dd>
+<dt>Status</dt><dd>
+{{ if .Disabled }}
+  <span class="node-status offline">&#x2715;</span> taken offline
+{{ else if .HasHeartbeat }}
+  <span class="node-status ok">&#x25CF;</span> connected
+{{ else }}
+  <span class="node-status na">?</span> no heartbeat yet
+{{ end }}
+</dd>
+{{ if .HasHeartbeat }}
+<dt>Architecture</dt><dd>{{ or .Architecture "&mdash;" }}</dd>
+<dt>Go version</dt><dd>{{ or .GoVersion "&mdash;" }}</dd>
+<dt>Agent version</dt><dd>{{ or .AgentVersion "&mdash;" }}</dd>
+<dt>Free disk</dt><dd>{{ or .FreeDisk "&mdash;" }}</dd>
+<dt>Free swap</dt><dd>{{ or .FreeSwap "&mdash;" }}</dd>
+<dt>Free temp</dt><dd>{{ or .FreeTemp "&mdash;" }}</dd>
+<dt>Host uptime</dt><dd>{{ or .HostUptime "&mdash;" }}</dd>
+<dt>Clock difference</dt><dd>{{ or .ClockDiff "&mdash;" }}</dd>
+{{ end }}
+</dl>
+
+<h3>Administrative</h3>
+{{ if .Disabled }}
+<form method="POST" action="/nodes/{{ .AgentID }}/enable">
+  <button type="submit">Bring online</button>
+  <p class="muted">New jobs are not being dispatched to this node. Bring it
+  online to resume scheduling. The in-flight build (if any) is unaffected.</p>
+</form>
+{{ else }}
+<form method="POST" action="/nodes/{{ .AgentID }}/disable">
+  <button type="submit">Take offline</button>
+  <p class="muted">Prevents new jobs from being dispatched to this node.
+  The in-flight build (if any) keeps running; only future dispatches are
+  blocked. Use this when you are about to reboot the host or pull it from
+  the floor without taking the wolfCI server down.</p>
+</form>
+{{ end }}
+
+</section>
+{{ end }}

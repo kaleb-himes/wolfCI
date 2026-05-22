@@ -21,6 +21,48 @@ import (
 	"github.com/kaleb-himes/wolfCI/internal/tlsutil"
 )
 
+// TestRouter_SkipsOfflineNode gates PLAN.md 12.7. With the
+// built-in master registered as a local label, a job labeled
+// "master" normally flows through the LocalExecutor. After
+// SetDisabled(BuiltInNodeAgentID, true) the Router must
+// refuse to dispatch so the operator can pull the host out of
+// service without taking the whole wolfCI server down.
+func TestRouter_SkipsOfflineNode(t *testing.T) {
+	svc := agentsvc.New("router-disabled-test")
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	svc.RegisterBuiltInNode(ctx, 100*time.Millisecond, t.TempDir())
+	svc.SetDisabled(agentsvc.BuiltInNodeAgentID, true)
+
+	local := &fakeExecutor{
+		result: scheduler.BuildResult{Status: scheduler.StatusSuccess},
+	}
+	r := scheduler.NewRouter(svc, local, []string{agentsvc.BuiltInNodeLabel})
+
+	job := &storage.Job{Name: "demo", NodeLabel: agentsvc.BuiltInNodeLabel}
+	result := r.Execute(context.Background(), job, 1)
+
+	if result.Status != scheduler.StatusError {
+		t.Errorf("Status = %s, want %s",
+			result.Status, scheduler.StatusError)
+	}
+	if !strings.Contains(result.Error, "no agent available") &&
+		!strings.Contains(result.Error, "offline") {
+		t.Errorf("Error = %q, want to mention 'no agent available' "+
+			"or 'offline'", result.Error)
+	}
+
+	/* Re-enable the master; the Router should now resume
+	 * dispatching to the local executor.
+	 */
+	svc.SetDisabled(agentsvc.BuiltInNodeAgentID, false)
+	result = r.Execute(context.Background(), job, 2)
+	if result.Status != scheduler.StatusSuccess {
+		t.Errorf("after re-enable, Status = %s, want %s",
+			result.Status, scheduler.StatusSuccess)
+	}
+}
+
 // TestRouter_OnPremFirstAndLabelMatch is the gating test for
 // PLAN.md 5.5b. It stands up a real wolfSSL+gRPC server with
 // agentsvc, spins up a real on-prem agent.Client advertising
