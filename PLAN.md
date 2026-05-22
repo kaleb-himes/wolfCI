@@ -1828,6 +1828,205 @@ Decisions locked in for Phase 11 (2026-05-21):
          scripts/test-getting-started.sh gate stays green by
          construction.
 
+## Phase 12 - Nodes view UX parity
+
+Bring the wolfCI /nodes UI up to the level operators expect from
+Jenkins's Manage / Nodes page. Today the UI is a four-column table
+(Agent ID, Status, Labels, Executors); Jenkins's equivalent
+exposes architecture, clock difference vs the master, free disk /
+swap / temp space, runtime version, response time, and the agent
+build version (Jenkins calls it "Remoting Version"). The master
+node itself shows up there as "Built-In Node"; wolfCI's master
+currently has no row at all, which is wrong because the in-process
+LocalExecutor IS a node.
+
+User ask 2026-05-22: "the host machine running the master instance
+... we'll just call it 'wolfCI Master Node'. Can we also get
+similar reports in our Nodes view on architecture, clock diff,
+free disk space, free swap, free temp, any relevant version info
+(I know we're not using java but maybe we need go version??)
+Response time and the version of the remoting client if it's a
+remote node?"
+
+Decisions to lock in before the phase starts:
+
+- Where the host metrics live: a new internal/nodeinfo package
+  (sibling of internal/agentsvc), portable across darwin and
+  linux. Linux readings come from /proc; darwin readings come
+  from sysctl + statfs. No new C deps; pure Go + golang.org/x/
+  sys (existing transitive).
+- Whether the agent pushes metrics on a schedule or the server
+  pulls. Push on heartbeat: every agent's existing Connect
+  stream gains an optional Heartbeat message carrying the
+  current NodeStatus snapshot. Cheap, no extra RPC, and
+  back-pressure-friendly. Server stamps a "last seen" timestamp
+  per snapshot; rows with stale (>90s) timestamps render
+  greyed-out N/A like Jenkins's offline rows.
+- Whether the wolfCI master appears as a real agent (loopback
+  TLS dial) or as a synthetic in-process entry. Synthetic: at
+  startup cmd/wolfci registers a NodeStatus with agent_id
+  "wolfci-master" labeled "master" and a fixed "self" badge in
+  the UI. No mTLS loopback dance, no extra port. The
+  LocalExecutor stays the dispatcher for jobs that target the
+  master; Phase 5's Router already treats it as a local-vs-
+  remote routing question, so no scheduler change is needed
+  here.
+- Clock difference reference: the master's monotonic clock vs
+  the agent's wall clock at heartbeat receipt. Reported in ms;
+  a positive number means the agent is ahead. The master's own
+  row shows 0ms.
+- Response time: the round-trip latency of the most recent
+  heartbeat (server send timestamp -> agent ack timestamp ->
+  server receive timestamp, all clock-skew-corrected). For the
+  master row it is 0ms.
+- Agent version string: built into cmd/wolfci-agent via
+  -ldflags "-X main.version=$(git describe --tags --always)"
+  at scripts/build.sh time, surfaced in NodeStatus.agent_version.
+  This is the wolfCI analog of Jenkins's "Remoting Version".
+
+- [ ] 12.1 New internal/nodeinfo package with the portable
+         host-metrics surface. Exposes a Snapshot type with
+         fields:
+           Architecture (e.g. "darwin/arm64")
+           GoVersion (runtime.Version())
+           FreeDiskBytes (statfs on a configurable root path)
+           FreeSwapBytes
+           FreeTempBytes (statfs on os.TempDir())
+           HostUptime time.Duration
+           Now time.Time (the agent's wall clock at snapshot)
+         Per-OS implementations: nodeinfo_darwin.go (sysctl
+         vm.swapusage + statfs), nodeinfo_linux.go (/proc/meminfo
+         + statfs). A nodeinfo_unsupported.go build-tagged
+         fallback returns zero values + a sentinel error on
+         other GOOSes so the wolfCI binary still links.
+         Gates: TestSnapshot_DarwinReturnsNonZero (build-tagged
+         darwin), TestSnapshot_LinuxReturnsNonZero (build-tagged
+         linux), TestSnapshot_RootMissing (FreeDiskBytes for a
+         non-existent path is 0 + error), TestSnapshot_TempDir
+         (FreeTempBytes always non-zero on a host with a usable
+         /tmp).
+- [ ] 12.2 Extend api/v1/agent.proto with NodeStatus and the
+         agent's optional Heartbeat message.
+           message NodeStatus {
+             string architecture = 1;
+             string go_version = 2;
+             int64 free_disk_bytes = 3;
+             int64 free_swap_bytes = 4;
+             int64 free_temp_bytes = 5;
+             int64 host_uptime_seconds = 6;
+             int64 wall_clock_unix_micros = 7;
+             string agent_version = 8;
+           }
+           message Heartbeat {
+             NodeStatus status = 1;
+           }
+         Adds Heartbeat to the AgentMessage oneof (existing:
+         Log, Complete). Regenerate via scripts/gen-proto.sh.
+         Gates: TestProto_NodeStatusRoundtrip (marshal +
+         unmarshal preserves every field),
+         TestProto_AgentMessageHeartbeatVariant (oneof selector
+         is Heartbeat after unmarshal of a wire-encoded
+         Heartbeat).
+- [ ] 12.3 cmd/wolfci-agent emits a Heartbeat on the existing
+         Connect stream every 30s (configurable via
+         heartbeat_interval in agent.yaml; default 30s, allowed
+         range 5s-300s). Snapshot drawn from internal/nodeinfo.
+         Gates: TestAgent_SendsHeartbeatOnSchedule (fake
+         AgentService records Heartbeats, verifies one fires
+         within 1s of a tightened 100ms interval and the
+         NodeStatus.architecture matches runtime.GOOS+GOARCH).
+         agent.Config gains HeartbeatInterval (default "30s").
+- [ ] 12.4 internal/agentsvc records the most recent NodeStatus
+         + receive timestamp per agent_id. Exposes
+         Server.LastHeartbeat(agentID) (NodeStatus, time.Time,
+         bool). The Connect stream's existing message loop
+         handles AgentMessage_Heartbeat by calling the new
+         method. Server.Agents() result extends with
+         LastHeartbeat data; Server.ConnectedAgents() is now
+         derived from "received heartbeat within
+         StaleThreshold" (default 90s) instead of "stream open
+         right now" - this matches Jenkins's "offline" badge
+         heuristic and survives transient stream re-connects.
+         Gates: TestServer_RecordHeartbeat,
+         TestServer_LastHeartbeatStale (older than threshold ->
+         ok=true but Connected=false),
+         TestServer_LastHeartbeatUnknownAgent.
+- [ ] 12.5 Built-in master node registration. cmd/wolfci/main.go,
+         right after agentsvc.New, calls
+         svc.RegisterBuiltInNode(...) which inserts a synthetic
+         AgentInfo:
+           agent_id: "wolfci-master"
+           labels: ["master"]
+           executors: 1
+         and starts a goroutine that refreshes the master's
+         NodeStatus from internal/nodeinfo every
+         HeartbeatInterval (default 30s). The UI labels this row
+         "wolfCI Master Node" via a server-side display-name
+         override; the wire identifier stays "wolfci-master"
+         so the matrix and scheduler don't need a special case.
+         Gates: TestAgentSvc_BuiltInNodeRegistered (after
+         RegisterBuiltInNode, Agents() contains the master with
+         label "master"), TestUI_NodesShowsMasterFirst (the
+         table renders the master row above any remote agent).
+- [ ] 12.6 /nodes UI rewrite. Replace
+         internal/server/templates/nodes.html with the columns:
+           S (status icon: green dot connected, red X offline,
+              grey question N/A pre-first-heartbeat)
+           Name (with the wolfCI Master Node display-name for
+              wolfci-master)
+           Architecture
+           Clock difference (signed ms; "in sync" if |diff|<2s)
+           Free disk space (human-readable bytes)
+           Free swap space
+           Free temp space
+           Go version
+           Response time (last heartbeat round-trip ms)
+           Agent version
+         The status icon column uses the Phase 12 status badge
+         in internal/server/static/app.css (new entries:
+         .node-status.ok, .node-status.offline, .node-status.na).
+         Gates: TestUI_NodesPageColumnsPresent (asserts every
+         <th> header text appears once),
+         TestUI_NodesPage_MasterRowRendersDisplayName,
+         TestUI_NodesPage_OfflineAgentRendersOfflineBadge.
+- [ ] 12.7 Per-node detail page at /nodes/<agent-id>. Shows the
+         full NodeStatus + the agent's recent build history (last
+         N completed builds dispatched to this node, from
+         agentsvc.Completed). Includes a "Take offline" toggle
+         that flips an in-memory disabled flag the scheduler's
+         Router consults before dispatching - prevents new jobs
+         from landing on a node the operator is about to reboot
+         or pull from the floor without taking the wolfCI server
+         down. The toggle requires the nodes.configure permission
+         (already in the authz matrix; no new permission).
+         Gates: TestNodeDetail_RendersStatus,
+         TestNodeDetail_TakeOfflineFlipsFlag,
+         TestRouter_SkipsOfflineNode (a "master"-labeled job
+         while the master node is offline returns
+         ErrNoNodesAvailable rather than dispatching).
+- [ ] 12.8 scripts/build.sh injects the agent version via
+         -ldflags "-X main.version=$(git describe --tags
+         --always --dirty 2>/dev/null || echo dev)" so
+         NodeStatus.agent_version is meaningful on a release
+         build and stamps the build commit on a dev build.
+         Gates: TestBuild_AgentBinaryEmbedsVersion (run the
+         freshly-built wolfci-agent with --version, assert
+         output matches the git-derived string).
+         scripts/test-build.sh already gates the -ldflags
+         injection for wolfci itself; extend the gate to
+         wolfci-agent.
+- [ ] 12.9 docs/ARCHITECTURE.md + docs/SECURITY.md updates:
+         - ARCHITECTURE.md gains a Nodes section describing
+           the master-node synthetic entry, the heartbeat
+           message, and the Per-Node detail page.
+         - SECURITY.md notes that NodeStatus is sent over the
+           existing mTLS-protected Connect stream; no new auth
+           surface, no new ports. The nodes.configure
+           permission gating the Take-offline toggle is
+           documented.
+         scripts/test-architecture.sh + scripts/test-security.sh
+         gate the new content.
+
 ## Backlog (not in main flow)
 
 Items that came up but are not on the critical path. Promote into a
