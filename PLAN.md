@@ -2742,13 +2742,30 @@ Decisions to lock in:
          OK, then B->A errors and B does not persist),
          TestJob_TriggerGraphRejectsLongerCycle (A->B->
          C->D OK, then D->A closes the four-node loop).
-- [ ] 15.2 BuildResult gains TriggeredBy {Job string; Build int}
+- [x] 15.2 BuildResult gains TriggeredBy {Job string; Build int}
          so a downstream build attributes itself to a specific
          upstream build. result.json carries it; the per-build
          page renders it as a backlink.
-         Failing tests:
+         Done: scheduler.BuildResult gains TriggeredBy
+         *BuildRef. The field is a pointer (not a value)
+         so encoding/json's omitempty actually fires for
+         root builds - encoding/json only treats a struct
+         field as empty when it is a nil pointer; a
+         zero-valued struct still serializes as "{}". A
+         nil TriggeredBy means "root build" (operator
+         clicked Run or a non-cascade trigger fired); a
+         downstream build records both the upstream job
+         name and the specific build number that caused
+         the enqueue. Gates:
          TestBuildResult_TriggeredByRoundtrip,
-         TestBuildResult_TriggeredByEmptyForRootBuild.
+         TestBuildResult_TriggeredByEmptyForRootBuild
+         (asserts the JSON does NOT contain
+         "triggered_by" for a root build, so old consumers
+         that ignore the field do not see a misleading
+         empty entry).
+         Per-build page render of TriggeredBy as a
+         backlink is folded into 15.4's UI work, since
+         that's where the field starts getting set.
 - [ ] 15.3 LocalExecutor (and the agent's executor) copies
          declared artifacts into builds/<job>/<n>/artifacts/
          as the LAST step of a successful build, before writing

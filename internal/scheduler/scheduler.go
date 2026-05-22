@@ -46,6 +46,23 @@ type BuildResult struct {
 	Status   Status
 	ExitCode int
 	Error    string // executor-level error, empty on success/failure
+
+	// TriggeredBy attributes a downstream build to the
+	// (upstream job, build number) that caused its enqueue.
+	// nil means "root build" - operator clicked Run or a
+	// non-cascade trigger fired. Pointer (not value) so the
+	// json encoder's omitempty actually fires for root
+	// builds: encoding/json only treats a struct-typed field
+	// as empty when it is a nil pointer. Phase 15.2.
+	TriggeredBy *BuildRef `json:"triggered_by,omitempty"`
+}
+
+// BuildRef identifies a specific build of a named job. Used
+// by BuildResult.TriggeredBy to link downstream builds back
+// to their upstream parent. Phase 15.2.
+type BuildRef struct {
+	Job   string `json:"job"`
+	Build int    `json:"build"`
 }
 
 // Executor runs a Job and returns its result. Implementations
