@@ -2806,17 +2806,37 @@ Decisions to lock in:
          TestExecutor_CopiesDeclaredArtifacts,
          TestExecutor_MissingArtifactFailsBuild,
          TestExecutor_DownstreamSeesUpstreamArtifacts.
-- [ ] 15.4 Scheduler trigger fan-out. After each
+- [x] 15.4 Scheduler trigger fan-out. After each
          BuildResult.Status==Success, the scheduler walks the
          job's TriggersDownstream and Enqueues each named job
          with TriggeredBy set. Failures, cancels, and errors do
          not fan out. Missing downstream jobs log a warning
          (not a crash) so a half-deleted graph stays operable.
-         Failing tests:
-         TestScheduler_FanoutOnSuccess (job A succeeds -> jobs
-         B and C are enqueued with TriggeredBy.Job=A),
-         TestScheduler_NoFanoutOnFailure,
-         TestScheduler_FanoutSkipsMissingDownstreamJobWithWarning.
+         Done: queuedJob gains a parent *BuildRef; the
+         dispatch loop wraps ctx with WithTriggeredBy when
+         parent is non-nil so LocalExecutor (Phase 15.3)
+         sees the upstream ref and populates WOLFCI_INPUTS.
+         After each successful build with a non-empty
+         TriggersDownstream, the loop calls
+         enqueueWithParent for each downstream that
+         resolves via store.LoadJob; missing specs are
+         skipped with a log.Printf warning so a half-
+         deleted graph keeps cascading the surviving jobs.
+         EnqueueChild is the exported variant of
+         enqueueWithParent for an external trigger source
+         that wants to stamp its own attribution; today
+         only the internal loop uses the parent path. The
+         loop also defensively stamps result.TriggeredBy
+         when the executor (e.g. a test fake) forgot to
+         set it, so result.json round-trips the parentage
+         either way. Gates:
+         TestScheduler_FanoutOnSuccess (job A succeeds ->
+         jobs B and C both run with TriggeredBy.Job=A),
+         TestScheduler_NoFanoutOnFailure (failure stops
+         the cascade, exactly one executor call),
+         TestScheduler_FanoutSkipsMissingDownstreamJobWithWarning
+         (ghost downstream is skipped; loop accepts a
+         later enqueue, proving it did not wedge).
 - [ ] 15.5 New AgentService.GetArtifact streaming RPC. The
          agent calls it with (upstream_job, upstream_build,
          artifact_basename) and the server streams the bytes

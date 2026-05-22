@@ -18,6 +18,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -118,9 +119,10 @@ type Scheduler struct {
 }
 
 type queuedJob struct {
-	job  *storage.Job
-	num  int
-	done chan BuildResult
+	job    *storage.Job
+	num    int
+	done   chan BuildResult
+	parent *BuildRef // non-nil when this is a fan-out enqueue (Phase 15.4)
 }
 
 type buildKey struct {
@@ -196,6 +198,24 @@ func (s *Scheduler) Stop() {
 // the job to the FIFO queue. The returned channel receives the
 // BuildResult once the dispatcher runs it.
 func (s *Scheduler) Enqueue(job *storage.Job) (int, <-chan BuildResult, error) {
+	return s.enqueueWithParent(job, nil)
+}
+
+// EnqueueChild is the fan-out variant used by the dispatch loop
+// (Phase 15.4) when a successful build's TriggersDownstream
+// fires. parent identifies the upstream build and is plumbed
+// through to the executor via the run-context's TriggeredBy
+// value. Exported so a future external trigger source can
+// stamp its own attribution; today the only caller is the
+// internal loop.
+func (s *Scheduler) EnqueueChild(job *storage.Job,
+	parent *BuildRef) (int, <-chan BuildResult, error) {
+	return s.enqueueWithParent(job, parent)
+}
+
+func (s *Scheduler) enqueueWithParent(job *storage.Job,
+	parent *BuildRef) (int, <-chan BuildResult, error) {
+
 	if job == nil {
 		return 0, nil, errors.New("scheduler.Enqueue: nil Job")
 	}
@@ -212,20 +232,18 @@ func (s *Scheduler) Enqueue(job *storage.Job) (int, <-chan BuildResult, error) {
 	 * time. "Rebuild Last" reads this file to re-enqueue with
 	 * the exact shape this build saw, even if the live spec
 	 * has drifted since. Best-effort: a snapshot failure
-	 * does not abort the build (the snapshot is a debuggability
-	 * feature, not a correctness one) but is returned so the
-	 * caller can log.
+	 * does not abort the build.
 	 */
 	if snapErr := s.store.SaveSpecSnapshot(job.Name, num, job); snapErr != nil {
-		/* Falling through; the build still runs without a
-		 * snapshot. cmd/wolfci wires no logger into the
-		 * scheduler today, so we accept the silent drop and
-		 * revisit when structured logging lands.
-		 */
 		_ = snapErr
 	}
 
-	q := &queuedJob{job: job, num: num, done: make(chan BuildResult, 1)}
+	q := &queuedJob{
+		job:    job,
+		num:    num,
+		done:   make(chan BuildResult, 1),
+		parent: parent,
+	}
 
 	s.mu.Lock()
 	s.queue = append(s.queue, q)
@@ -259,12 +277,23 @@ func (s *Scheduler) loop(ctx context.Context) {
 		s.queue = s.queue[1:]
 		s.mu.Unlock()
 
-		result := s.executor.Execute(ctx, q.job, q.num)
+		runCtx := ctx
+		if q.parent != nil {
+			runCtx = WithTriggeredBy(ctx, q.parent)
+		}
+		result := s.executor.Execute(runCtx, q.job, q.num)
 		if result.JobName == "" {
 			result.JobName = q.job.Name
 		}
 		if result.Number == 0 {
 			result.Number = q.num
+		}
+		if q.parent != nil && result.TriggeredBy == nil {
+			/* Executor did not stamp the ref (e.g. a fake
+			 * executor in tests); preserve it so result.json
+			 * still records the parentage.
+			 */
+			result.TriggeredBy = q.parent
 		}
 
 		s.mu.Lock()
@@ -272,6 +301,39 @@ func (s *Scheduler) loop(ctx context.Context) {
 		s.mu.Unlock()
 
 		q.done <- result
+
+		/* Phase 15.4: on a successful build with downstream
+		 * triggers, walk the list and enqueue each that
+		 * exists. Missing specs are skipped without failing
+		 * the loop so a half-deleted graph stays operable.
+		 */
+		if result.Status == StatusSuccess &&
+			len(q.job.TriggersDownstream) > 0 {
+
+			parent := &BuildRef{
+				Job:   q.job.Name,
+				Build: q.num,
+			}
+			for _, ts := range q.job.TriggersDownstream {
+				if ts.Name == "" {
+					continue
+				}
+				down, err := s.store.LoadJob(ts.Name)
+				if err != nil {
+					log.Printf("scheduler.fanout: "+
+						"skipping missing downstream "+
+						"%q (triggered by %s/#%d): %v",
+						ts.Name, q.job.Name, q.num, err)
+					continue
+				}
+				if _, _, err := s.enqueueWithParent(
+					down, parent); err != nil {
+					log.Printf("scheduler.fanout: "+
+						"enqueue downstream %q "+
+						"failed: %v", ts.Name, err)
+				}
+			}
+		}
 	}
 }
 
