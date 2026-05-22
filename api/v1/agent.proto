@@ -41,6 +41,7 @@ message AgentMessage {
   oneof body {
     LogChunk log = 1;
     BuildComplete complete = 2;
+    Heartbeat heartbeat = 3;
   }
 }
 
@@ -80,4 +81,28 @@ message BuildComplete {
   string status = 2;
   int32 exit_code = 3;
   string error = 4;
+}
+
+// NodeStatus is the portable host-metrics snapshot the agent
+// sends with every Heartbeat (Phase 12 Nodes view). Field names
+// mirror internal/nodeinfo.Snapshot; wall_clock_unix_micros and
+// host_uptime_seconds are the wire-safe encodings of the Go
+// time.Time and time.Duration the agent carries internally.
+message NodeStatus {
+  string architecture = 1;
+  string go_version = 2;
+  int64 free_disk_bytes = 3;
+  int64 free_swap_bytes = 4;
+  int64 free_temp_bytes = 5;
+  int64 host_uptime_seconds = 6;
+  int64 wall_clock_unix_micros = 7;
+  string agent_version = 8;
+}
+
+// Heartbeat is the agent's periodic ping carrying a NodeStatus.
+// Cadence is configurable via agent.yaml's heartbeat_interval
+// (Phase 12.3); the server treats absence as "agent offline"
+// past StaleThreshold (Phase 12.4).
+message Heartbeat {
+  NodeStatus status = 1;
 }

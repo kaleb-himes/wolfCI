@@ -1973,7 +1973,7 @@ Decisions to lock in before the phase starts:
          Linux host. Cross-compiled clean for linux/amd64
          and windows/amd64 (latter exercises the unsupported
          fallback link path).
-- [ ] 12.2 Extend api/v1/agent.proto with NodeStatus and the
+- [x] 12.2 Extend api/v1/agent.proto with NodeStatus and the
          agent's optional Heartbeat message.
            message NodeStatus {
              string architecture = 1;
@@ -1990,11 +1990,29 @@ Decisions to lock in before the phase starts:
            }
          Adds Heartbeat to the AgentMessage oneof (existing:
          Log, Complete). Regenerate via scripts/gen-proto.sh.
-         Gates: TestProto_NodeStatusRoundtrip (marshal +
-         unmarshal preserves every field),
-         TestProto_AgentMessageHeartbeatVariant (oneof selector
-         is Heartbeat after unmarshal of a wire-encoded
-         Heartbeat).
+         Done: agent.proto extended with the two messages
+         and AgentMessage.body.heartbeat = 3 (Log and Complete
+         keep their existing tags). NodeStatus's field order
+         and tag numbers match internal/nodeinfo.Snapshot 1:1
+         except the time fields, which serialize as
+         host_uptime_seconds (int64 seconds, the wire-safe
+         encoding of time.Duration) and wall_clock_unix_micros
+         (int64 micros since the Unix epoch, the wire-safe
+         encoding of time.Time). Phase 12.3's agent will
+         convert Snapshot -> NodeStatus inline. gen-proto.sh
+         re-emitted api/v1/agent.pb.go and
+         api/v1/agent_grpc.pb.go without diffs to the
+         existing message types; no consumers needed an
+         update because AgentMessage.body is a oneof.
+         Gates (api/v1/agent_test.go):
+         TestProto_NodeStatusRoundtrip (every field set to a
+         distinct non-zero value; proto.Equal after
+         Marshal/Unmarshal),
+         TestProto_AgentMessageHeartbeatVariant (Marshal a
+         Heartbeat-tagged AgentMessage, Unmarshal, assert the
+         body type is *AgentMessage_Heartbeat and
+         Status.Architecture/AgentVersion survive the round
+         trip).
 - [ ] 12.3 cmd/wolfci-agent emits a Heartbeat on the existing
          Connect stream every 30s (configurable via
          heartbeat_interval in agent.yaml; default 30s, allowed
