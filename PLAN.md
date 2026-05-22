@@ -1724,14 +1724,30 @@ Decisions locked in for Phase 11 (2026-05-21):
          real pubkey line; per feedback memory
          byok-no-keygen, test-only keygen is allowed - the
          BYOK rule is for production code, not fixtures.
-- [ ] 11.4 HTTP + gRPC dispatcher in internal/server/. One
+- [x] 11.4 HTTP + gRPC dispatcher in internal/server/. One
          http.Handler that routes application/grpc requests to
          grpc.Server.ServeHTTP and everything else to the
          existing UI mux. Wolfssl ALPN already advertises h2.
-         Failing tests (internal/server/dispatcher_test.go):
+         Done: Dispatcher{UI, GRPC http.Handler} in
+         internal/server/dispatcher.go. ServeHTTP inspects
+         r.Header.Get("Content-Type") and forks on
+         strings.HasPrefix("application/grpc") so every gRPC
+         subtype (application/grpc, +proto, +json,
+         "; charset=utf-8") routes to GRPC; everything else
+         (text/html, application/json, form-urlencoded,
+         empty) routes to UI. application/grpc-web is
+         deliberately NOT matched - wolfCI gRPC is plain gRPC
+         only. A nil UI or GRPC field returns 503 so a
+         partial wiring in cmd/wolfci surfaces immediately
+         instead of falling through silently.
+         Gates (internal/server/dispatcher_test.go):
          TestDispatcher_RoutesGRPCContentType,
+         TestDispatcher_RoutesGRPCContentTypeSubtypes (four
+         variants table-driven),
          TestDispatcher_RoutesUIPath,
-         TestDispatcher_404OnUnknownUIPath.
+         TestDispatcher_DefaultsToUI_OnOtherContentTypes
+         (five non-gRPC content types, plus the empty-string
+         GET case).
 - [ ] 11.5 cmd/wolfci main rewires to use the dispatcher and
          the bootstrap flow. Reads config-files/server.yaml,
          constructs storage + scheduler + agentsvc + cliservice
