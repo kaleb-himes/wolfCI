@@ -29,7 +29,12 @@
 <button type="button" disabled title="{{ if not .Permalinks.LastBuild }}No previous build{{ else }}No job runner is wired{{ end }}">Rebuild Last</button>
 {{ end }}
 </li>
-<li><button type="button" disabled title="Phase 14.4">Rename</button></li>
+<li>
+<form method="POST" action="/jobs/{{ .Name }}/rename" class="rename-form">
+<input type="text" name="new_name" placeholder="new name" required>
+<button type="submit">Rename</button>
+</form>
+</li>
 <li>
 {{ if .Permalinks.LastBuild }}
 <a href="/jobs/{{ .Name }}/builds/{{ .Permalinks.LastBuild.Number }}/ws/"><button type="button">Workspace</button></a>

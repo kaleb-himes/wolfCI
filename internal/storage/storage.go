@@ -276,6 +276,64 @@ func (s *Storage) LoadSpecSnapshot(jobName string, buildNum int) (
 	return &job, nil
 }
 
+// ErrJobExists is returned by RenameJob when the target name
+// is already taken. Callers map this to 409 Conflict in the
+// HTTP layer.
+var ErrJobExists = errors.New("storage: target job name already exists")
+
+// RenameJob moves jobs/<oldName>/ to jobs/<newName>/, rewrites
+// the spec's Name field to newName, and moves
+// builds/<oldName>/ to builds/<newName>/ (if it exists). The
+// spec move is the source of truth: if it succeeds, the
+// rename is considered to have happened, and a follow-up
+// builds-move failure is reported as an error but does not
+// roll back the spec move (the operator can recover by
+// renaming the builds directory by hand).
+//
+// Returns ErrJobExists when jobs/<newName>/ is already on
+// disk so the caller can reject without clobbering. Returns
+// os.ErrNotExist when jobs/<oldName>/ is missing.
+func (s *Storage) RenameJob(oldName, newName string) error {
+	if oldName == "" || newName == "" {
+		return errors.New("storage.RenameJob: oldName and newName are required")
+	}
+	if oldName == newName {
+		return nil
+	}
+	oldDir := filepath.Join(s.root, "jobs", oldName)
+	newDir := filepath.Join(s.root, "jobs", newName)
+	if _, err := os.Stat(oldDir); err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return os.ErrNotExist
+		}
+		return fmt.Errorf("storage.RenameJob: stat old: %w", err)
+	}
+	if _, err := os.Stat(newDir); err == nil {
+		return ErrJobExists
+	}
+	job, err := s.LoadJob(oldName)
+	if err != nil {
+		return fmt.Errorf("storage.RenameJob: load: %w", err)
+	}
+	job.Name = newName
+	if err := s.SaveJob(job); err != nil {
+		return fmt.Errorf("storage.RenameJob: save new: %w", err)
+	}
+	if err := s.DeleteJob(oldName); err != nil {
+		return fmt.Errorf("storage.RenameJob: delete old: %w", err)
+	}
+	oldBuilds := filepath.Join(s.root, "builds", oldName)
+	if _, err := os.Stat(oldBuilds); err == nil {
+		newBuilds := filepath.Join(s.root, "builds", newName)
+		if err := os.Rename(oldBuilds, newBuilds); err != nil {
+			return fmt.Errorf("storage.RenameJob: "+
+				"move builds: %w (spec already renamed)",
+				err)
+		}
+	}
+	return nil
+}
+
 // DeleteJob removes the named job's spec directory
 // (jobs/<name>/) including any sibling files inside it. It
 // does NOT touch builds/<name>/: the operator can re-create

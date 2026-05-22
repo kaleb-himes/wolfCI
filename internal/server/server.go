@@ -189,6 +189,12 @@ func (s *Server) handleJobRoutes(w http.ResponseWriter, r *http.Request) {
 				return
 			}
 			s.handleJobRebuild(w, r, name)
+		case len(parts) == 2 && parts[1] == "rename":
+			if r.Method != http.MethodPost {
+				http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+				return
+			}
+			s.handleJobRename(w, r, name)
 		case len(parts) == 2 && parts[1] == "builds":
 			if r.Method != http.MethodGet {
 				http.Error(w, "method not allowed", http.StatusMethodNotAllowed)

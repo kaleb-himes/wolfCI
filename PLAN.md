@@ -21,7 +21,7 @@ Format conventions:
 
 ## Current Phase
 
-Phase 14 - Build retention, workspace browser, rebuild, rename
+Phase 15 - Upstream / downstream jobs + artifacts
 
 (Phase completion log. Phase 0 was completed in the initial
 planning turn. Phase 1 completed in iteration 4, Phase 2 in
@@ -29,7 +29,8 @@ iteration 5, Phase 3 in iteration 8, Phase 4 in iteration 10,
 Phase 5 in iteration 21, Phase 6 in iteration 25, Phase 7 in
 iteration 28, Phase 8 in iteration 32, Phase 9 in iteration 37,
 Phase 10 in iteration 49, Phase 11 in iteration 51, Phase 12 in
-iteration 59, Phase 13 in iteration 63 of the slash-loop run.)
+iteration 59, Phase 13 in iteration 63, Phase 14 in iteration
+67 of the slash-loop run.)
 
 ## Phase 0 - Bootstrap
 
@@ -2639,7 +2640,7 @@ Decisions to lock in:
          TestRebuild_UsesSnapshottedSpec,
          TestRebuild_CurrentSpecVariantUsesLiveSpec,
          TestRebuild_RequiresJobsBuildPermission.
-- [ ] 14.4 Rename project. POST /jobs/<name>/rename takes a
+- [x] 14.4 Rename project. POST /jobs/<name>/rename takes a
          new_name form field, validates per validJobName,
          atomically moves jobs/<old>/ -> jobs/<new>/ and
          builds/<old>/ -> builds/<new>/. matrix.yaml has no
@@ -2647,10 +2648,24 @@ Decisions to lock in:
          compatible with Phase 15's trigger graph (the cycle
          check there walks job names, so a rename will
          automatically pick up the new name on next save).
-         Failing tests:
+         Done: storage.RenameJob handles the spec move
+         (LoadJob -> patch Name -> SaveJob -> DeleteJob old)
+         then os.Rename for builds/<old> -> builds/<new>.
+         A pre-check on jobs/<new>/ existence yields a
+         typed ErrJobExists so the handler can map it to
+         409 Conflict. handleJobRename validates new_name
+         via validJobName, treats new==old as a redirect
+         no-op, and 303s to /jobs/<new> on success. Route
+         wired in handleJobRoutes for POST
+         /jobs/<name>/rename. The detail-page sidebar
+         placeholder becomes an inline <form> with a text
+         input + submit button so the operator can rename
+         in place from the per-job page. Gates:
          TestRename_MovesSpecAndBuildHistory,
          TestRename_RejectsExistingTargetName,
          TestRename_RequiresJobsConfigurePermission.
+
+Phase 14 complete; Current Phase advances to Phase 15.
 
 ## Phase 15 - Upstream / downstream jobs + artifacts
 
