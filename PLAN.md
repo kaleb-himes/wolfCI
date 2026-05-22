@@ -1623,13 +1623,33 @@ Decisions locked in for Phase 11 (2026-05-21):
   hosts, paused VMs) without raising the bar against an
   attacker who has filesystem read on config-files/auth/.
 
-- [ ] 11.1 ServerConfig type + YAML loader at
+- [x] 11.1 ServerConfig type + YAML loader at
          internal/server/serverconfig.go.
-         Failing tests (internal/server/serverconfig_test.go):
-         TestServerConfig_Roundtrip,
-         TestServerConfig_Defaults,
-         TestServerConfig_RejectsMissingRequiredFields,
-         TestServerConfig_RejectsBadDuration.
+         Done: ServerConfig has five required string fields
+         (ListenAddr, Cert, Key, CACert, WorkDir) and three
+         optional fields (ShutdownDrainTimeout as a
+         time.ParseDuration-compatible string defaulting to
+         "30s" via DrainTimeout(), PluginDir defaulting to
+         "plugins/", GCEConfig defaulting to ""). YAML round-
+         trip via gopkg.in/yaml.v3 matches the pattern in
+         internal/agent/config.go. DefaultServerConfig pre-fills
+         the optional defaults; LoadServerConfig calls
+         DefaultServerConfig before Unmarshal so the file can
+         omit optional keys. Validate() rejects each missing
+         required field by name and parses the drain timeout
+         eagerly so a bad string is caught at load time, not at
+         shutdown.
+         Gates (internal/server/serverconfig_test.go):
+         TestServerConfig_Roundtrip (full struct -> Save ->
+         LoadServerConfig -> reflect.DeepEqual),
+         TestServerConfig_Defaults (omitted optionals get the
+         documented defaults; DrainTimeout() returns 30s when
+         the field is empty),
+         TestServerConfig_RejectsMissingRequiredFields (each
+         required field individually removed; plus an
+         empty-file case),
+         TestServerConfig_RejectsBadDuration
+         ("shutdown_drain_timeout: notaduration" fails load).
 - [ ] 11.2 First-admin bootstrap mint at
          internal/server/bootstrap.go. Implements the
          no-users-on-disk -> mint Ed25519 keypair + token +
