@@ -1927,7 +1927,7 @@ Decisions to lock in before the phase starts:
   at scripts/build.sh time, surfaced in NodeStatus.agent_version.
   This is the wolfCI analog of Jenkins's "Remoting Version".
 
-- [ ] 12.1 New internal/nodeinfo package with the portable
+- [x] 12.1 New internal/nodeinfo package with the portable
          host-metrics surface. Exposes a Snapshot type with
          fields:
            Architecture (e.g. "darwin/arm64")
@@ -1942,12 +1942,37 @@ Decisions to lock in before the phase starts:
          + statfs). A nodeinfo_unsupported.go build-tagged
          fallback returns zero values + a sentinel error on
          other GOOSes so the wolfCI binary still links.
-         Gates: TestSnapshot_DarwinReturnsNonZero (build-tagged
-         darwin), TestSnapshot_LinuxReturnsNonZero (build-tagged
-         linux), TestSnapshot_RootMissing (FreeDiskBytes for a
-         non-existent path is 0 + error), TestSnapshot_TempDir
-         (FreeTempBytes always non-zero on a host with a usable
-         /tmp).
+         Done: package shipped with the spec'd API.
+         Take(root) is the single entry point; it fills the
+         cheap fields (Architecture, GoVersion, Now) at the
+         top of the function and dispatches to platformTake,
+         the build-tagged hook. Darwin parses sysctl
+         vm.swapusage (xsu_avail at byte 8-15) and kern.boottime
+         (timeval.tv_sec at byte 0-7) via encoding/binary so
+         the file works unchanged on darwin/amd64 and
+         darwin/arm64. Linux walks /proc/meminfo for SwapFree
+         and reads the first field of /proc/uptime; a missing
+         SwapFree line is treated as "swap disabled" rather
+         than a parse error so containers with CONFIG_SWAP off
+         do not surface as broken nodes. ErrUnsupported is the
+         sentinel returned by the !darwin && !linux fallback;
+         the cross-platform tests skip on it via errors.Is.
+         The only new dep is golang.org/x/sys/unix, already a
+         transitive of cloud.google.com/go's tree.
+         Gates: TestSnapshot_RootMissing (Take on a path that
+         does not exist returns error + zero FreeDiskBytes;
+         cheap fields still populated), TestSnapshot_TempDir
+         (FreeTempBytes > 0 on a host with /tmp;
+         Architecture contains runtime.GOOS+GOARCH; Now within
+         1s of wall clock). Build-tagged darwin gate
+         TestSnapshot_DarwinReturnsNonZero asserts non-zero
+         FreeDiskBytes, FreeTempBytes, HostUptime and rejects
+         a >100yr uptime as a byte-order bug; equivalent
+         TestSnapshot_LinuxReturnsNonZero gate ships in
+         nodeinfo_linux_test.go for the next CI run on a
+         Linux host. Cross-compiled clean for linux/amd64
+         and windows/amd64 (latter exercises the unsupported
+         fallback link path).
 - [ ] 12.2 Extend api/v1/agent.proto with NodeStatus and the
          agent's optional Heartbeat message.
            message NodeStatus {
