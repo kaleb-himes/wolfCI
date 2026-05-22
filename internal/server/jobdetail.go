@@ -98,6 +98,17 @@ func (s *Server) handleJobDetail(w http.ResponseWriter, r *http.Request,
         truncated = true
     }
 
+    /* Phase 15.6: trigger graph relationships. ListJobs is
+     * a directory scan; for the per-job page this is fine
+     * since the count is bounded by the operator's job
+     * inventory. If it grows enough to matter, an in-memory
+     * cache is the obvious follow-up.
+     */
+    var links triggerLinks
+    if jobs, err := s.opts.Storage.ListJobs(); err == nil {
+        links = computeTriggerLinks(name, jobs)
+    }
+
     s.render(w, "jobdetail.html", map[string]interface{}{
         "Title":       job.Name,
         "Name":        job.Name,
@@ -105,6 +116,9 @@ func (s *Server) handleJobDetail(w http.ResponseWriter, r *http.Request,
         "Builds":      visible,
         "Truncated":   truncated,
         "Permalinks":  perms,
+        "Upstream":    links.Upstream,
+        "Downstream":  links.Downstream,
+        "Siblings":    links.Siblings,
         "CanRun":      s.opts.JobRunner != nil,
     })
 }

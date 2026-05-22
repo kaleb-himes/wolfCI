@@ -7,8 +7,14 @@
 <thead><tr><th>Name</th><th>Description</th><th>Node label</th><th>Steps</th><th></th><th></th></tr></thead>
 <tbody>
 {{ range .Jobs }}
+{{ $c := index $.TriggerCounts .Name }}
 <tr>
-<td><strong>{{ .Name }}</strong></td>
+<td>
+<a href="/jobs/{{ .Name }}"><strong>{{ .Name }}</strong></a>
+{{ if or $c.Inbound $c.Outbound }}
+<span class="trigger-badge muted">({{ $c.Outbound }} out, {{ $c.Inbound }} in)</span>
+{{ end }}
+</td>
 <td>{{ .Description }}</td>
 <td>{{ if .NodeLabel }}<code>{{ .NodeLabel }}</code>{{ else }}<span class="muted">any</span>{{ end }}</td>
 <td>{{ len .Steps }}</td>

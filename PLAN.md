@@ -2870,7 +2870,7 @@ Decisions to lock in:
          TestGetArtifact_RejectsTraversal (six attack
          basenames, each must yield InvalidArgument and
          never leak the sibling SENTINEL string).
-- [ ] 15.6 Job detail page (Phase 13.1) gains two new sections:
+- [x] 15.6 Job detail page (Phase 13.1) gains two new sections:
            Upstream Projects: list from job.Upstream, each link
              goes to /jobs/<upstream-name>.
            Downstream Projects: computed by scanning every job's
@@ -2881,11 +2881,41 @@ Decisions to lock in:
              rendered when len(siblings) > 0.
          The /jobs index page gains a small badge next to each
          job name showing inbound + outbound trigger counts.
-         Failing tests:
+         Done: internal/server/triggerlinks.go carries
+         computeTriggerLinks + computeAllTriggerCounts.
+         Upstream of J = J.Upstream entries UNION jobs whose
+         TriggersDownstream names J (live graph wins over
+         the operator's advisory Upstream list).
+         Downstream of J = J.TriggersDownstream intersected
+         with the on-disk job set (a ghost downstream that
+         was never saved stays hidden so the section reads
+         accurately while the operator is still typing).
+         Siblings = other jobs whose upstream set
+         intersects J's upstream set (computed the same way
+         on each side). All three lists are sorted +
+         deduped; self-references are dropped. handleJobDetail
+         calls ListJobs once and passes Upstream/Downstream/
+         Siblings into the template, which renders each
+         non-empty list as a labelled <ul>. handleJobs
+         computes computeAllTriggerCounts (one pass over
+         the job list to build name -> {Inbound, Outbound})
+         and the index template renders "(N out, M in)" in
+         muted text next to each job name when either count
+         is non-zero. The Name column also becomes a link
+         to the per-job detail page, closing the UX gap
+         flagged after Phase 13.1. Gates:
          TestJobDetail_RendersUpstreamLinks,
-         TestJobDetail_RendersDownstreamLinks_ComputedFromOtherJobs,
-         TestJobDetail_RendersSiblingsWhenSharingUpstream,
-         TestJobsIndex_BadgesShowTriggerCounts.
+         TestJobDetail_RendersDownstreamLinks_ComputedFromOtherJobs
+         (downstream is read from the OTHER side of the
+         edge so a downstream that someone added to their
+         own spec shows up automatically),
+         TestJobDetail_RendersSiblingsWhenSharingUpstream
+         (windows-test + macos-test both Upstream=
+         [linux-build] -> sibling; an unrelated job does
+         not appear),
+         TestJobsIndex_BadgesShowTriggerCounts (A triggers
+         [B, C] -> A's row shows "2 out", B and C each
+         show "1 in").
 - [ ] 15.7 End-to-end example under examples/jobs/. Ships
          linux-bundle.yaml (builds a tarball, declares
          triggers_downstream: [windows-test] with artifacts:

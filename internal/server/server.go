@@ -754,10 +754,12 @@ func (s *Server) handleJobs(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "list jobs: "+err.Error(), http.StatusInternalServerError)
 		return
 	}
+	counts := computeAllTriggerCounts(jobs)
 	s.render(w, "jobs.html", map[string]interface{}{
-		"Title":  "Jobs",
-		"Jobs":   jobs,
-		"CanRun": s.opts.JobRunner != nil,
+		"Title":         "Jobs",
+		"Jobs":          jobs,
+		"CanRun":        s.opts.JobRunner != nil,
+		"TriggerCounts": counts,
 	})
 }
 

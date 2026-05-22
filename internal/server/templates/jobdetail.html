@@ -55,6 +55,34 @@
 <p class="muted">No description.</p>
 {{ end }}
 
+{{ if or .Upstream .Downstream .Siblings }}
+<h3>Trigger graph</h3>
+{{ if .Upstream }}
+<h4>Upstream Projects</h4>
+<ul class="trigger-list">
+{{ range .Upstream }}
+<li><a href="/jobs/{{ . }}">{{ . }}</a></li>
+{{ end }}
+</ul>
+{{ end }}
+{{ if .Downstream }}
+<h4>Downstream Projects</h4>
+<ul class="trigger-list">
+{{ range .Downstream }}
+<li><a href="/jobs/{{ . }}">{{ . }}</a></li>
+{{ end }}
+</ul>
+{{ end }}
+{{ if .Siblings }}
+<h4>Sibling Projects</h4>
+<ul class="trigger-list">
+{{ range .Siblings }}
+<li><a href="/jobs/{{ . }}">{{ . }}</a></li>
+{{ end }}
+</ul>
+{{ end }}
+{{ end }}
+
 <h3>Permalinks</h3>
 <ul class="permalinks">
 <li>Last build:
