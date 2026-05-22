@@ -219,6 +219,17 @@ func Run(ctx context.Context, cfg *server.ServerConfig, addrCh chan<- string) er
     }
 
     httpSrv := &http.Server{Handler: dispatcher}
+    /* Keep-alive is disabled at the http.Server level because the
+     * underlying tlsutil net.Conn (wolfSSL CGO) misframes data on
+     * connection reuse: the second request on a keep-alive conn
+     * comes through as a malformed request line and the server
+     * replies 400, which Firefox surfaces as "Secure Connection
+     * Failed". Connection: close on every response sidesteps the
+     * issue; the real fix is the PLAN.md backlog item to harden
+     * internal/tlsutil's per-conn serialization, after which this
+     * line can be removed.
+     */
+    httpSrv.SetKeepAlivesEnabled(false)
     serveErr := make(chan error, 1)
     go func() { serveErr <- httpSrv.Serve(ln) }()
 
