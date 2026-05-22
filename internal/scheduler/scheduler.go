@@ -65,6 +65,31 @@ type BuildRef struct {
 	Build int    `json:"build"`
 }
 
+// triggeredByCtxKey is the unexported context.WithValue key
+// used to thread a TriggeredBy ref from scheduler.Enqueue (a
+// future Phase 15.4 EnqueueChild) into the Executor. Phase
+// 15.3 needs it so LocalExecutor can populate WOLFCI_INPUTS
+// without an interface change on Executor.Execute.
+type triggeredByCtxKey struct{}
+
+// WithTriggeredBy attaches a TriggeredBy ref to ctx. The
+// Executor reads it with TriggeredByFrom. nil ref is a
+// no-op so callers do not have to check before chaining.
+func WithTriggeredBy(ctx context.Context, ref *BuildRef) context.Context {
+	if ref == nil {
+		return ctx
+	}
+	return context.WithValue(ctx, triggeredByCtxKey{}, ref)
+}
+
+// TriggeredByFrom returns the TriggeredBy ref attached to
+// ctx by WithTriggeredBy, or nil if none. Executors use it
+// to decide whether to populate WOLFCI_INPUTS.
+func TriggeredByFrom(ctx context.Context) *BuildRef {
+	v, _ := ctx.Value(triggeredByCtxKey{}).(*BuildRef)
+	return v
+}
+
 // Executor runs a Job and returns its result. Implementations
 // must be safe for concurrent calls (the scheduler dispatches one
 // at a time today but the interface contract does not promise

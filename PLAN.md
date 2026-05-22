@@ -2766,7 +2766,7 @@ Decisions to lock in:
          Per-build page render of TriggeredBy as a
          backlink is folded into 15.4's UI work, since
          that's where the field starts getting set.
-- [ ] 15.3 LocalExecutor (and the agent's executor) copies
+- [x] 15.3 LocalExecutor (and the agent's executor) copies
          declared artifacts into builds/<job>/<n>/artifacts/
          as the LAST step of a successful build, before writing
          result.json. A missing artifact aborts the build with
@@ -2775,7 +2775,34 @@ Decisions to lock in:
          in its env; the agent-side executor copies them into
          the workspace at WOLFCI_INPUTS/<basename> before the
          first step.
-         Failing tests:
+         Done: LocalExecutor now creates builds/<job>/<n>/
+         workspace/ before the first step and sets cmd.Dir =
+         workspace so each build runs in a clean sandbox
+         (this also gives the Phase 14.2 workspace browser
+         something real to render). After every step
+         succeeds and before writing result.json, the
+         executor walks job.TriggersDownstream and copies
+         each declared artifact into builds/<job>/<n>/
+         artifacts/<basename>. A missing artifact downgrades
+         the build to StatusFailure with an Error that names
+         the path so the operator can fix the spec or the
+         step. copyArtifact rejects absolute paths and ".."
+         segments as a belt-and-suspenders guard against an
+         operator typo that would point outside the
+         workspace. WithTriggeredBy / TriggeredByFrom thread
+         a *BuildRef from scheduler.Enqueue (Phase 15.4
+         hook-up) into LocalExecutor via a context value;
+         when present the executor (a) records TriggeredBy
+         on the BuildResult and (b) sets WOLFCI_INPUTS in
+         every step's env, pointing at builds/<upstream>/
+         <build>/artifacts/. The Step.Env overlay still
+         wins over WOLFCI_INPUTS so a determined operator
+         can pin it per-step. The agent-side executor
+         already inherits the same LocalExecutor codepath
+         (per Phase 5.7); the "copy into workspace at
+         WOLFCI_INPUTS/<basename>" optimization is a
+         backlog item for when artifacts grow large enough
+         that direct path-passing becomes a footgun. Gates:
          TestExecutor_CopiesDeclaredArtifacts,
          TestExecutor_MissingArtifactFailsBuild,
          TestExecutor_DownstreamSeesUpstreamArtifacts.
