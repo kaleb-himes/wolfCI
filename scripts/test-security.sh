@@ -107,4 +107,18 @@ if grep -qE 'bcrypt_cost|\.bcrypt' "$DOC"; then
     fail "$DOC still references bcrypt; Phase 10.2 replaced it with PBKDF2"
 fi
 
+# 6. Phase 12 Nodes view surface: NodeStatus rides the existing
+# mTLS-protected Connect stream (no new ports, no new auth), and
+# the Take-offline toggle is gated by the nodes.configure
+# permission. The doc must capture both so a reviewer auditing
+# the attack surface can see the boundary without grepping code.
+for phrase in \
+    'NodeStatus' \
+    'nodes.configure'
+do
+    if ! grep -qF -- "$phrase" "$DOC"; then
+        fail "$DOC missing Phase 12 phrase: $phrase"
+    fi
+done
+
 echo "test-security.sh: PASS"

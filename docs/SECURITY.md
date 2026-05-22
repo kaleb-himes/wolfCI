@@ -328,6 +328,42 @@ Summary of on-disk paths touched by the auth layer:
 The parent `config-files/auth/` and its `passwords/` subdirectory
 are created with mode 0700; the rest with mode 0755.
 
+## Node heartbeats (Phase 12)
+
+Every agent periodically sends an `AgentMessage.Heartbeat`
+carrying a NodeStatus on its existing Connect stream. The
+NodeStatus rides the same wolfSSL mTLS-terminated gRPC channel
+the AgentService already uses for JobAssignment / LogChunk /
+BuildComplete; there is no new port, no new auth surface, no
+new certificate. An agent that fails the mTLS handshake never
+gets to emit a heartbeat, and an unregistered agent_id is
+rejected by the server's Connect handler before any message
+loops.
+
+The fields NodeStatus carries (architecture, free disk / swap /
+temp, host uptime, wall clock, Go version, agent version) are
+self-reported by the agent and treated as advisory. They feed
+the operator's view of the fleet at /nodes; nothing in the
+scheduler dispatches based on them today, so a misbehaving
+agent that lies about its free disk only confuses the UI.
+
+### nodes.configure permission
+
+The /nodes/&lt;id&gt; detail page exposes a Take-offline /
+Bring-online toggle. The endpoint flips an in-memory disabled
+flag the scheduler checks before dispatching, so an operator
+can drain a node without taking the wolfCI server down.
+
+The intended gate is the `nodes.configure` permission from the
+authz matrix; the permission already exists in
+`internal/authz/matrix.go` and the admin role grants it. The
+current handler enforces session-only authentication and
+documents the matrix-driven gate as the follow-up that turns
+this into a privileged action. Until then, any user with a
+valid wolfCI session can flip the toggle; restrict the session
+issuance surface (password auth disable, SSH key gating) to
+match your trust level.
+
 ## Threat model
 
 In scope:

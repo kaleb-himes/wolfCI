@@ -237,6 +237,97 @@ Everything is under one tree (CLAUDE.md "self-contained" rule):
   nodes/<id>/                         Reserved for per-node state
 ```
 
+## Nodes view (Phase 12)
+
+The /nodes page is the operator's fleet map. Each row is a wolfCI
+node - either a remote agent that has Register'd via the
+AgentService gRPC interface or the synthetic master row described
+below. Phase 12 brought it to rough parity with Jenkins's Manage
+Nodes screen.
+
+### Master node row
+
+The wolfCI controller binary itself is one of the executors that
+runs builds (anything with `node_label: ""` lands on the
+in-process LocalExecutor). Without a /nodes entry for it, the
+table told only half the story.
+
+`cmd/wolfci/main.go` now calls `svc.RegisterBuiltInNode` right
+after `agentsvc.New`. That inserts a synthetic AgentInfo into the
+registry with `agent_id = "wolfci-master"`, `labels = ["master"]`,
+`executors = 1`. The UI renders this row with the
+"wolfCI Master Node" display name, but the wire identifier stays
+`wolfci-master` so the authz matrix and the scheduler do not need
+a special case.
+
+A goroutine inside `RegisterBuiltInNode` refreshes the master's
+NodeStatus every 30s by calling `internal/nodeinfo.Take` on the
+server's work directory. The same `RecordHeartbeat` path agent
+heartbeats use applies, so the master shows up in
+ConnectedAgents the same way real agents do.
+
+### Heartbeat protocol
+
+Every agent emits an `AgentMessage.Heartbeat` on the existing
+Connect stream every `heartbeat_interval` (default 30s,
+configurable in agent.yaml). The Heartbeat wraps a NodeStatus:
+
+```
++------------------------------------------+
+| NodeStatus                               |
++------------------------------------------+
+| architecture            "darwin/arm64"   |
+| go_version              runtime.Version  |
+| free_disk_bytes         statfs(work_dir) |
+| free_swap_bytes         /proc | sysctl   |
+| free_temp_bytes         statfs(TempDir)  |
+| host_uptime_seconds     /proc | sysctl   |
+| wall_clock_unix_micros  time.Now         |
+| agent_version           -ldflags stamp   |
++------------------------------------------+
+```
+
+`internal/nodeinfo` is the portable host-metrics package the
+heartbeat lives on: per-OS files for darwin and linux (sysctl +
+statfs and /proc + statfs respectively), a build-tagged
+`nodeinfo_unsupported.go` fallback that returns
+`ErrUnsupported` so wolfCI binaries still link on Windows / BSD /
+plan9 hosts, and a cross-platform `Take(root)` entry point that
+populates the cheap fields (Architecture, GoVersion, Now) even
+when the platform-specific reads fail.
+
+Server-side, `internal/agentsvc.Server` stores the most recent
+NodeStatus + receive timestamp per agent_id in a `heartbeats`
+map. `LastHeartbeat(agentID)` returns that record;
+`ConnectedAgents()` returns the subset of agents whose receive
+timestamp is younger than `StaleThreshold` (default 90s - two
+missed default-interval beats of grace). Stale records stay in
+LastHeartbeat so the /nodes view can still show last-known
+metrics on an offline row instead of dropping the row entirely.
+
+### Per-node detail page
+
+`GET /nodes/<agent-id>` renders the per-node detail at
+`internal/server/templates/node_detail.html`. The page shows the
+labels and executor count (which dropped off the table in
+12.6), the full NodeStatus, host uptime, clock difference, and
+an administrative Take-offline / Bring-online form.
+
+The toggle posts to `POST /nodes/<id>/disable` and
+`POST /nodes/<id>/enable`, which call
+`agentsvc.Server.SetDisabled(agentID, bool)`. A disabled agent
+stays in the registry (so the operator can still see and
+reverse it), but `IdleAgentWithLabel` skips it and the scheduler
+Router's local-path branch also bails on a disabled master. Net
+effect: new builds stop dispatching to the node; the in-flight
+build (if any) keeps running, so the operator can drain
+cleanly before pulling the host from the floor.
+
+The Take-offline endpoint is intended to be gated by the
+`nodes.configure` permission from the authz matrix. The current
+implementation only requires session authentication; matrix-
+driven HTTP authz is a follow-up.
+
 ## Why these choices
 
 - **One binary**: every package lives in the same Go module, links

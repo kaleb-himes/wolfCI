@@ -32,6 +32,7 @@ for pkg in \
     internal/agentsvc \
     internal/agent \
     internal/nodes \
+    internal/nodeinfo \
     internal/plugin \
     internal/server \
     internal/cliservice \
@@ -41,6 +42,20 @@ for pkg in \
 do
     if ! grep -qF -- "$pkg" "$DOC"; then
         fail "$DOC missing package reference: $pkg"
+    fi
+done
+
+# 1b. Phase 12 Nodes view surface: master node, heartbeat
+# protocol, detail page. The doc must trace each so an operator
+# coming to wolfCI from Jenkins can map the concepts.
+for phrase in \
+    'wolfci-master' \
+    'Heartbeat' \
+    'NodeStatus' \
+    '/nodes/'
+do
+    if ! grep -qF -- "$phrase" "$DOC"; then
+        fail "$DOC missing Phase 12 Nodes phrase: $phrase"
     fi
 done
 

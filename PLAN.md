@@ -21,15 +21,15 @@ Format conventions:
 
 ## Current Phase
 
-Phase 12 - Nodes view UX parity
+Phase 13 - Per-job detail page
 
 (Phase completion log. Phase 0 was completed in the initial
 planning turn. Phase 1 completed in iteration 4, Phase 2 in
 iteration 5, Phase 3 in iteration 8, Phase 4 in iteration 10,
 Phase 5 in iteration 21, Phase 6 in iteration 25, Phase 7 in
 iteration 28, Phase 8 in iteration 32, Phase 9 in iteration 37,
-Phase 10 in iteration 49, Phase 11 in iteration 51 of the
-slash-loop run.)
+Phase 10 in iteration 49, Phase 11 in iteration 51, Phase 12 in
+iteration 59 of the slash-loop run.)
 
 ## Phase 0 - Bootstrap
 
@@ -2337,7 +2337,7 @@ Decisions to lock in before the phase starts:
          Verified locally:
            WOLFCI_BUILD_VERSION=test-9.1 -> "wolfci-agent test-9.1"
            default (no env var)         -> "wolfci-agent 81b2f2b-dirty"
-- [ ] 12.9 docs/ARCHITECTURE.md + docs/SECURITY.md updates:
+- [x] 12.9 docs/ARCHITECTURE.md + docs/SECURITY.md updates:
          - ARCHITECTURE.md gains a Nodes section describing
            the master-node synthetic entry, the heartbeat
            message, and the Per-Node detail page.
@@ -2348,6 +2348,32 @@ Decisions to lock in before the phase starts:
            documented.
          scripts/test-architecture.sh + scripts/test-security.sh
          gate the new content.
+         Done: ARCHITECTURE.md grew a Nodes view (Phase 12)
+         section with three sub-sections (Master node row,
+         Heartbeat protocol with an ASCII NodeStatus diagram,
+         Per-node detail page) sitting between the runtime
+         data layout and the closing rationale block. Every
+         Phase 12 building block is named: internal/nodeinfo,
+         RegisterBuiltInNode + wolfci-master, the Heartbeat
+         message, LastHeartbeat + StaleThreshold, the
+         /nodes/&lt;id&gt; route, SetDisabled, and the Router
+         local-path skip. SECURITY.md grew a "Node heartbeats
+         (Phase 12)" block before the Threat model that
+         documents the two operator-facing facts: NodeStatus
+         rides the existing mTLS Connect stream so the
+         attack surface is unchanged, and the Take-offline
+         toggle is intended to be gated by the nodes.configure
+         permission (documented as a follow-up because matrix-
+         driven HTTP authz is not wired into requireSession
+         yet; until then session auth is the only gate).
+         scripts/test-architecture.sh grew a 1b block that
+         requires the doc to mention internal/nodeinfo,
+         wolfci-master, Heartbeat, NodeStatus, and /nodes/.
+         scripts/test-security.sh grew a step 6 that requires
+         NodeStatus and nodes.configure. Both gates fail
+         pre-rewrite and pass against the new content.
+
+Phase 12 complete; Current Phase advances to Phase 13.
 
 ## Phase 13 - Per-job detail page
 
