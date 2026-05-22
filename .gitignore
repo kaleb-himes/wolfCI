@@ -39,6 +39,10 @@ third_party/wolfssl/aclocal.m4
 /config-files/runtime/
 /nodes/runtime/
 
+# Quick-mode runtime dirs (cmd/wolfci defaults: $CWD/work, $CWD/auth)
+/work/
+/auth/
+
 # OS and editor noise
 .DS_Store
 .idea/

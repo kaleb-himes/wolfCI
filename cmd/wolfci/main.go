@@ -142,9 +142,12 @@ func Run(ctx context.Context, cfg *server.ServerConfig, addrCh chan<- string) er
     }
 
     setupHandler := &server.SetupHandler{
-        KeysDir:      filepath.Join(cfg.AuthDir, "keys"),
-        BootstrapDir: filepath.Join(cfg.AuthDir, "bootstrap"),
-        MatrixPath:   filepath.Join(cfg.AuthDir, "matrix.yaml"),
+        KeysDir:        filepath.Join(cfg.AuthDir, "keys"),
+        BootstrapDir:   filepath.Join(cfg.AuthDir, "bootstrap"),
+        MatrixPath:     filepath.Join(cfg.AuthDir, "matrix.yaml"),
+        Passwords:      passwords,
+        AuthConfig:     authCfg,
+        AuthConfigPath: authConfigPath,
     }
 
     /* Top-level UI mux: /setup routes around the auth gate to the
@@ -231,13 +234,14 @@ func Run(ctx context.Context, cfg *server.ServerConfig, addrCh chan<- string) er
 
 func main() {
     var configPath string
-    flag.StringVar(&configPath, "config", "config-files/server.yaml",
-        "path to server.yaml")
+    flag.StringVar(&configPath, "config", "",
+        "path to server.yaml (production mode)")
+    flag.Usage = printUsage
     flag.Parse()
 
-    cfg, err := server.LoadServerConfig(configPath)
+    cfg, err := resolveConfig(configPath, flag.Args())
     if err != nil {
-        log.Fatalf("wolfci: load config: %v", err)
+        log.Fatalf("wolfci: %v", err)
     }
 
     ctx, cancel := signal.NotifyContext(context.Background(),
@@ -247,6 +251,66 @@ func main() {
     if err := Run(ctx, cfg, nil); err != nil {
         log.Fatalf("wolfci: %v", err)
     }
+}
+
+/* resolveConfig picks between the two supported CLI shapes:
+ *
+ *   wolfci --config <path>      Production: load YAML from disk.
+ *   wolfci <addr> <cert> <key>  Quick: inline config with CWD-
+ *                               relative work/auth dirs and the
+ *                               cert acting as its own CA.
+ *
+ * Both shapes feed the same Run() function; the quick shape just
+ * dodges the requirement to author a YAML before a first run.
+ */
+func resolveConfig(configPath string, args []string) (*server.ServerConfig, error) {
+    if configPath != "" {
+        if len(args) > 0 {
+            return nil, fmt.Errorf("--config is exclusive with positional args; got %d extra args", len(args))
+        }
+        return server.LoadServerConfig(configPath)
+    }
+    if len(args) == 3 {
+        cwd, err := os.Getwd()
+        if err != nil {
+            return nil, fmt.Errorf("getwd: %w", err)
+        }
+        cfg := server.DefaultServerConfig()
+        cfg.ListenAddr = args[0]
+        cfg.Cert = args[1]
+        cfg.Key = args[2]
+        /* Quick mode: the server cert is its own CA. Single-node
+         * trust; fine for local development and the basic-test-*
+         * scripts. Production should set ca_cert explicitly in
+         * server.yaml.
+         */
+        cfg.CACert = args[1]
+        cfg.WorkDir = filepath.Join(cwd, "work")
+        cfg.AuthDir = filepath.Join(cwd, "auth")
+        if err := cfg.Validate(); err != nil {
+            return nil, err
+        }
+        return cfg, nil
+    }
+    return nil, fmt.Errorf("invalid invocation; see -h for usage")
+}
+
+func printUsage() {
+    out := flag.CommandLine.Output()
+    fmt.Fprintln(out, "wolfCI server")
+    fmt.Fprintln(out)
+    fmt.Fprintln(out, "Usage:")
+    fmt.Fprintln(out, "  wolfci --config <path-to-server.yaml>")
+    fmt.Fprintln(out, "  wolfci <host:port> <cert.pem> <key.pem>")
+    fmt.Fprintln(out)
+    fmt.Fprintln(out, "Quick mode (positional) uses ./work and ./auth for runtime")
+    fmt.Fprintln(out, "state and treats <cert.pem> as its own CA. Use --config for")
+    fmt.Fprintln(out, "production deployments where work_dir, auth_dir, and ca_cert")
+    fmt.Fprintln(out, "should differ from the defaults.")
+    fmt.Fprintln(out)
+    fmt.Fprintln(out, "On first start, wolfci prints a /setup URL to stdout. Visit")
+    fmt.Fprintln(out, "it, paste your OpenSSH public key, and you become the first")
+    fmt.Fprintln(out, "admin (BYOK: wolfci never generates user keypairs).")
 }
 
 /* parseDurationOr returns time.ParseDuration(s); on failure it

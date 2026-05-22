@@ -25,6 +25,7 @@ import (
 
     gowolfssh "github.com/wolfssl/go-wolfssl/wolfssh"
 
+    "github.com/kaleb-himes/wolfCI/internal/auth"
     "github.com/kaleb-himes/wolfCI/internal/authz"
 )
 
@@ -45,6 +46,25 @@ type SetupHandler struct {
      * is added.
      */
     MatrixPath string
+
+    /* Passwords is the in-memory PasswordStore. The handler calls
+     * SetPassword on it so the admin can sign in to the web UI
+     * with the password they chose at /setup. Required.
+     */
+    Passwords *auth.PasswordStore
+
+    /* AuthConfig is the runtime auth config. The handler flips
+     * PasswordEnabled to true in place so the matching
+     * PasswordStore (which holds the same pointer) accepts the
+     * new password immediately. Required.
+     */
+    AuthConfig *auth.Config
+
+    /* AuthConfigPath is where AuthConfig is persisted after the
+     * PasswordEnabled flip, so future restarts keep password
+     * auth on. Required.
+     */
+    AuthConfigPath string
 }
 
 var setupFormTmpl = template.Must(template.New("setup").Parse(`<!DOCTYPE html>
@@ -52,15 +72,16 @@ var setupFormTmpl = template.Must(template.New("setup").Parse(`<!DOCTYPE html>
 <head><meta charset="utf-8"><title>wolfCI first-admin setup</title></head>
 <body>
 <h1>wolfCI first-admin setup</h1>
-<p>Paste your OpenSSH public key (the contents of e.g.
-<code>~/.ssh/id_ed25519.pub</code>) and pick a username. wolfCI
-will register you as the first admin and consume this one-time
-setup token.</p>
+<p>Register yourself as the first admin. The pubkey authenticates
+your agents and wolfci-ctl; the password authenticates you to the
+web UI. wolfCI never generates either - bring your own.</p>
 <form method="POST" action="/setup">
 <input type="hidden" name="token" value="{{ .Token }}">
 <p><label>Username: <input type="text" name="username" required></label></p>
-<p><label>OpenSSH public key:<br>
+<p><label>OpenSSH public key (contents of e.g. <code>~/.ssh/id_ed25519.pub</code>):<br>
 <textarea name="pubkey" rows="3" cols="80" required></textarea></label></p>
+<p><label>Web UI password: <input type="password" name="password" required></label></p>
+<p><label>Confirm password: <input type="password" name="password_confirm" required></label></p>
 <p><button type="submit">Register first admin</button></p>
 </form>
 </body>
@@ -147,6 +168,17 @@ func (h *SetupHandler) handleSubmit(w http.ResponseWriter, r *http.Request) {
             http.StatusBadRequest)
         return
     }
+    password := r.PostFormValue("password")
+    passwordConfirm := r.PostFormValue("password_confirm")
+    if password == "" {
+        http.Error(w, "password is required", http.StatusBadRequest)
+        return
+    }
+    if password != passwordConfirm {
+        http.Error(w, "password and confirmation do not match",
+            http.StatusBadRequest)
+        return
+    }
 
     keyPath := filepath.Join(h.KeysDir, username+".pub")
     /* Persist with a trailing newline; OpenSSH's
@@ -171,6 +203,35 @@ func (h *SetupHandler) handleSubmit(w http.ResponseWriter, r *http.Request) {
         http.Error(w, "update matrix.yaml: "+err.Error(),
             http.StatusInternalServerError)
         return
+    }
+
+    /* Enable password auth and persist the operator's password.
+     * Flip the in-memory cfg first so the matching PasswordStore
+     * (which holds the same pointer) immediately accepts the
+     * new hash; then write the config to disk so the flag
+     * survives restarts. If either step fails, roll back the
+     * pubkey + matrix mutations so the operator can retry.
+     */
+    if h.AuthConfig != nil && !h.AuthConfig.PasswordEnabled {
+        h.AuthConfig.PasswordEnabled = true
+    }
+    if h.AuthConfig != nil && h.AuthConfigPath != "" {
+        if err := h.AuthConfig.Save(h.AuthConfigPath); err != nil {
+            _ = os.Remove(keyPath)
+            _ = h.removeAdminFromMatrix(username)
+            http.Error(w, "persist auth config: "+err.Error(),
+                http.StatusInternalServerError)
+            return
+        }
+    }
+    if h.Passwords != nil {
+        if err := h.Passwords.SetPassword(username, password); err != nil {
+            _ = os.Remove(keyPath)
+            _ = h.removeAdminFromMatrix(username)
+            http.Error(w, "set password: "+err.Error(),
+                http.StatusInternalServerError)
+            return
+        }
     }
 
     /* Consume: rename bootstrap -> bootstrap.consumed atomically.
@@ -210,6 +271,21 @@ func (h *SetupHandler) loadToken() (string, error) {
         return "", err
     }
     return strings.TrimSpace(string(data)), nil
+}
+
+/* removeAdminFromMatrix is the rollback partner to
+ * addAdminToMatrix; called when a later step (set password,
+ * persist auth config) fails so the operator can re-submit /setup
+ * without a half-written admin entry sitting around. Best-effort:
+ * a load failure leaves the matrix as-is.
+ */
+func (h *SetupHandler) removeAdminFromMatrix(username string) error {
+    m, err := authz.LoadMatrix(h.MatrixPath)
+    if err != nil {
+        return err
+    }
+    delete(m.Users, username)
+    return m.Save(h.MatrixPath)
 }
 
 func (h *SetupHandler) addAdminToMatrix(username string) error {

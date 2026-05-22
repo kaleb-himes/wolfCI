@@ -21,6 +21,7 @@ import (
     "strings"
     "testing"
 
+    "github.com/kaleb-himes/wolfCI/internal/auth"
     "github.com/kaleb-himes/wolfCI/internal/server"
     "github.com/kaleb-himes/wolfCI/internal/wolfcrypt"
 
@@ -32,13 +33,18 @@ import (
  * gets a fresh temp dir.
  */
 type setupFixture struct {
-    handler      *server.SetupHandler
-    keysDir      string
-    bootstrapDir string
-    matrixPath   string
-    token        string
-    pubKeyLine   string
+    handler        *server.SetupHandler
+    keysDir        string
+    bootstrapDir   string
+    matrixPath     string
+    authCfg        *auth.Config
+    authConfigPath string
+    passwords      *auth.PasswordStore
+    token          string
+    pubKeyLine     string
 }
+
+const testPassword = "correct horse battery staple"
 
 func newSetupFixture(t *testing.T) *setupFixture {
     t.Helper()
@@ -66,26 +72,47 @@ func newSetupFixture(t *testing.T) *setupFixture {
     }
     pubLine := string(gowolfssh.EncodeSSHEd25519AuthorizedKey(pub, "test-key"))
 
+    authCfg := auth.DefaultConfig()
+    /* Cheap iteration count so the test does not spend a second
+     * per PBKDF2 derivation; production defaults to 600000.
+     */
+    authCfg.PBKDF2Iterations = 1000
+    passwords := auth.NewPasswordStore(filepath.Join(dir, "passwords"), authCfg)
+    authConfigPath := filepath.Join(dir, "auth", "config.yaml")
+
     return &setupFixture{
         handler: &server.SetupHandler{
-            KeysDir:      keysDir,
-            BootstrapDir: bootstrapDir,
-            MatrixPath:   matrixPath,
+            KeysDir:        keysDir,
+            BootstrapDir:   bootstrapDir,
+            MatrixPath:     matrixPath,
+            Passwords:      passwords,
+            AuthConfig:     authCfg,
+            AuthConfigPath: authConfigPath,
         },
-        keysDir:      keysDir,
-        bootstrapDir: bootstrapDir,
-        matrixPath:   matrixPath,
-        token:        mintRes.Token,
-        pubKeyLine:   pubLine,
+        keysDir:        keysDir,
+        bootstrapDir:   bootstrapDir,
+        matrixPath:     matrixPath,
+        authCfg:        authCfg,
+        authConfigPath: authConfigPath,
+        passwords:      passwords,
+        token:          mintRes.Token,
+        pubKeyLine:     pubLine,
     }
 }
 
 func (f *setupFixture) postForm(t *testing.T, token, user, pubkey string) *httptest.ResponseRecorder {
     t.Helper()
+    return f.postFormPw(t, token, user, pubkey, testPassword, testPassword)
+}
+
+func (f *setupFixture) postFormPw(t *testing.T, token, user, pubkey, pw, pwConfirm string) *httptest.ResponseRecorder {
+    t.Helper()
     form := url.Values{}
     form.Set("token", token)
     form.Set("username", user)
     form.Set("pubkey", pubkey)
+    form.Set("password", pw)
+    form.Set("password_confirm", pwConfirm)
     req := httptest.NewRequest(http.MethodPost, "/setup",
         strings.NewReader(form.Encode()))
     req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
@@ -213,5 +240,61 @@ func TestSetup_RenamesBootstrapDir(t *testing.T) {
     }
     if !info.IsDir() {
         t.Errorf("bootstrap.consumed is not a directory")
+    }
+}
+
+func TestSetup_StoresPasswordAndEnablesPasswordAuth(t *testing.T) {
+    f := newSetupFixture(t)
+    rec := f.postForm(t, f.token, "alice", f.pubKeyLine)
+    if rec.Code >= 400 {
+        t.Fatalf("POST status = %d, body=%q", rec.Code, rec.Body.String())
+    }
+
+    /* Password store accepts the chosen password. */
+    if err := f.passwords.VerifyPassword("alice", testPassword); err != nil {
+        t.Errorf("VerifyPassword(alice, ...): %v", err)
+    }
+
+    /* Wrong password is still wrong. */
+    if err := f.passwords.VerifyPassword("alice", "wrong"); err == nil {
+        t.Error("VerifyPassword accepted wrong password")
+    }
+
+    /* In-memory flag flipped. */
+    if !f.authCfg.PasswordEnabled {
+        t.Error("AuthConfig.PasswordEnabled = false; want true after /setup")
+    }
+
+    /* Persisted to disk for the next restart. */
+    persisted, err := auth.LoadConfig(f.authConfigPath)
+    if err != nil {
+        t.Fatalf("LoadConfig: %v", err)
+    }
+    if !persisted.PasswordEnabled {
+        t.Error("persisted PasswordEnabled = false; want true")
+    }
+}
+
+func TestSetup_RejectsMismatchedPassword(t *testing.T) {
+    f := newSetupFixture(t)
+    rec := f.postFormPw(t, f.token, "alice", f.pubKeyLine,
+        "one", "two")
+    if rec.Code != http.StatusBadRequest {
+        t.Errorf("status = %d, want 400", rec.Code)
+    }
+    /* No persistence on a rejected attempt. */
+    if _, err := os.Stat(filepath.Join(f.keysDir, "alice.pub")); !os.IsNotExist(err) {
+        t.Errorf("alice.pub leaked: err=%v", err)
+    }
+    if _, err := os.Stat(f.bootstrapDir); err != nil {
+        t.Errorf("bootstrap dir destroyed on mismatch: %v", err)
+    }
+}
+
+func TestSetup_RejectsEmptyPassword(t *testing.T) {
+    f := newSetupFixture(t)
+    rec := f.postFormPw(t, f.token, "alice", f.pubKeyLine, "", "")
+    if rec.Code != http.StatusBadRequest {
+        t.Errorf("status = %d, want 400", rec.Code)
     }
 }
