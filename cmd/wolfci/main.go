@@ -29,6 +29,7 @@ import (
     "github.com/kaleb-himes/wolfCI/internal/agentsvc"
     "github.com/kaleb-himes/wolfCI/internal/auth"
     "github.com/kaleb-himes/wolfCI/internal/cliservice"
+    "github.com/kaleb-himes/wolfCI/internal/retention"
     "github.com/kaleb-himes/wolfCI/internal/scheduler"
     "github.com/kaleb-himes/wolfCI/internal/server"
     "github.com/kaleb-himes/wolfCI/internal/storage"
@@ -151,6 +152,18 @@ func Run(ctx context.Context, cfg *server.ServerConfig, opts RunOptions) error {
     }()
     if opts.SchedulerCh != nil {
         opts.SchedulerCh <- sched
+    }
+
+    /* Retention sweeper (Phase 14.1). Ticks every
+     * cfg.RetentionSweepInterval (default 5m); each removed
+     * build directory is logged to stdout for auditability.
+     * A zero interval disables the goroutine - useful for
+     * tests and for operators who prefer to run retention
+     * out-of-band via cron.
+     */
+    retentionInterval, _ := cfg.RetentionInterval()
+    if retentionInterval > 0 {
+        go runRetentionSweeper(ctx, store, retentionInterval)
     }
 
     /* cliservice for wolfci-ctl. EnqueuerFunc adapts the
@@ -415,4 +428,40 @@ func printUsage() {
  */
 func parseDurationOr(s string) (time.Duration, error) {
     return time.ParseDuration(s)
+}
+
+/* runRetentionSweeper ticks every interval and calls
+ * retention.SweepAll across every job in storage. Each
+ * removed build is logged through the standard log package
+ * (which the systemd / launchd units capture to the journal)
+ * so an operator can trace why a given build dir disappeared.
+ *
+ * The goroutine exits when ctx fires (server shutdown). It
+ * does NOT run an immediate sweep at start: a fresh server
+ * has no builds to age out yet, and waiting one tick keeps
+ * startup logs from churning when nothing needs sweeping.
+ */
+func runRetentionSweeper(ctx context.Context,
+    store *storage.Storage, interval time.Duration) {
+
+    t := time.NewTicker(interval)
+    defer t.Stop()
+    for {
+        select {
+        case <-ctx.Done():
+            return
+        case now := <-t.C:
+            removed, errs := retention.SweepAll(store, now)
+            for jobName, nums := range removed {
+                for _, n := range nums {
+                    log.Printf("retention: removed %s build #%d",
+                        jobName, n)
+                }
+            }
+            for jobName, err := range errs {
+                log.Printf("retention: sweep %q: %v",
+                    jobName, err)
+            }
+        }
+    }
 }

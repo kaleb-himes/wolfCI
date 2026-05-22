@@ -2548,15 +2548,32 @@ Decisions to lock in:
   operator sees a banner and can opt into "rebuild with
   current spec" instead.
 
-- [ ] 14.1 storage.Job gains optional Retention field. New
+- [x] 14.1 storage.Job gains optional Retention field. New
          sweeper goroutine in cmd/wolfci enforces it every 5
          minutes; each removed build dir logs to stdout for
          auditability.
-         Failing tests:
-         TestRetention_KeepsMaxBuilds (33 builds +
-         max_builds=30 -> 30 newest survive),
-         TestRetention_KeepsByAge (max_age=1h leaves no build
-         older than 1h),
+         Done: storage.Job gains *Retention (nil = keep
+         forever). New internal/retention package carries
+         SweepJob (per-job decision + rm -rf of build dirs
+         that miss every active rule) and SweepAll (loops
+         over storage.ListJobs and aggregates per-job
+         errors so one bad spec does not starve the rest).
+         The core decision lives in composeKeep, which
+         consumes pre-parsed MaxBuilds + maxAge so the
+         time.ParseDuration error path stays at the
+         SweepJob boundary; in-flight builds (no
+         result.json) are unconditionally protected so
+         the sweeper never races the executor's write-at-
+         end. ServerConfig gains RetentionSweepInterval
+         (default 5m; "0" disables the goroutine) with
+         Validate + RetentionInterval helpers matching the
+         existing DrainTimeout pattern. cmd/wolfci spawns
+         runRetentionSweeper on a ticker that calls
+         SweepAll and logs each removed build through the
+         standard log package (systemd / launchd capture
+         it). Gates (internal/retention):
+         TestRetention_KeepsMaxBuilds,
+         TestRetention_KeepsByAge,
          TestRetention_KeepsByEitherWhenBothSet,
          TestRetention_DefaultIsKeepForever.
 - [ ] 14.2 Workspace browser at /jobs/<name>/builds/<n>/ws/

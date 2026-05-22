@@ -18,8 +18,9 @@ import (
 )
 
 const (
-    defaultPluginDir            = "plugins/"
-    defaultShutdownDrainTimeout = 30 * time.Second
+    defaultPluginDir              = "plugins/"
+    defaultShutdownDrainTimeout   = 30 * time.Second
+    defaultRetentionSweepInterval = 5 * time.Minute
 )
 
 type ServerConfig struct {
@@ -67,6 +68,15 @@ type ServerConfig struct {
      * wired in.
      */
     GCEConfig string `yaml:"gce_config,omitempty"`
+
+    /* RetentionSweepInterval is how often the per-job
+     * retention sweeper runs. Parsed by time.ParseDuration;
+     * empty string means defaultRetentionSweepInterval (5m).
+     * Setting it to "0" disables the sweeper entirely (useful
+     * for tests and for operators who manage retention
+     * out-of-band via cron).
+     */
+    RetentionSweepInterval string `yaml:"retention_sweep_interval,omitempty"`
 }
 
 /* DefaultServerConfig returns a ServerConfig with the optional
@@ -145,6 +155,9 @@ func (c *ServerConfig) Validate() error {
     if _, err := c.DrainTimeout(); err != nil {
         return fmt.Errorf("shutdown_drain_timeout: %w", err)
     }
+    if _, err := c.RetentionInterval(); err != nil {
+        return fmt.Errorf("retention_sweep_interval: %w", err)
+    }
     return nil
 }
 
@@ -158,6 +171,23 @@ func (c *ServerConfig) DrainTimeout() (time.Duration, error) {
     d, err := time.ParseDuration(c.ShutdownDrainTimeout)
     if err != nil {
         return 0, fmt.Errorf("parse %q: %w", c.ShutdownDrainTimeout, err)
+    }
+    return d, nil
+}
+
+/* RetentionInterval returns the parsed retention sweep interval.
+ * Empty string -> defaultRetentionSweepInterval. A literal "0"
+ * (or any zero duration) returns zero and the caller treats
+ * that as "do not run the sweeper".
+ */
+func (c *ServerConfig) RetentionInterval() (time.Duration, error) {
+    if c.RetentionSweepInterval == "" {
+        return defaultRetentionSweepInterval, nil
+    }
+    d, err := time.ParseDuration(c.RetentionSweepInterval)
+    if err != nil {
+        return 0, fmt.Errorf("parse %q: %w",
+            c.RetentionSweepInterval, err)
     }
     return d, nil
 }

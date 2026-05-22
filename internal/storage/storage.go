@@ -81,6 +81,26 @@ type Job struct {
 	// Axis declares matrix dimensions. A build fans out into the
 	// cartesian product of all dimensions.
 	Axis []AxisDimension `yaml:"axis,omitempty"`
+
+	// Retention bounds how much build history is kept on disk.
+	// Nil means "keep every build forever"; the sweeper skips
+	// jobs with no Retention block. Either or both fields of
+	// the embedded struct may be set.
+	Retention *Retention `yaml:"retention,omitempty"`
+}
+
+// Retention is the per-job build-history retention policy.
+// MaxBuilds keeps the most-recent N completed builds; MaxAge
+// (a time.ParseDuration string like "720h") keeps anything
+// newer than that age. If both are set, EITHER condition
+// protects a build (the more lenient of the two), so an
+// operator who wants "at least 30 builds and at least 30
+// days" gets exactly that. Zero / empty fields are ignored;
+// a Retention block with both fields zero is equivalent to
+// no Retention block at all.
+type Retention struct {
+	MaxBuilds int    `yaml:"max_builds,omitempty"`
+	MaxAge    string `yaml:"max_age,omitempty"`
 }
 
 // Trigger names a single trigger source and its configuration.
