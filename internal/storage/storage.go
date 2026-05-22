@@ -87,6 +87,33 @@ type Job struct {
 	// jobs with no Retention block. Either or both fields of
 	// the embedded struct may be set.
 	Retention *Retention `yaml:"retention,omitempty"`
+
+	// Upstream lists job names that may trigger this job when
+	// they succeed. Advisory metadata - the actual fan-out is
+	// driven by the upstream job's TriggersDownstream entry
+	// for this job, not by this list. Surfacing it here lets
+	// the per-job detail page render an "Upstream Projects"
+	// section and lets operators reason about the graph from
+	// either side. Phase 15.1.
+	Upstream []string `yaml:"upstream,omitempty"`
+
+	// TriggersDownstream is the active edge of the graph: when
+	// a build of this job reaches StatusSuccess, the scheduler
+	// walks this slice and enqueues each named job, passing
+	// artifacts as declared. Phase 15.1.
+	TriggersDownstream []TriggerSpec `yaml:"triggers_downstream,omitempty"`
+}
+
+// TriggerSpec is one outgoing edge in the downstream trigger
+// graph. Name identifies the downstream job; Artifacts are
+// file paths (relative to this build's workspace) the
+// executor copies into builds/<job>/<n>/artifacts/ and the
+// downstream build sees under $WOLFCI_INPUTS/<basename>.
+// Phase 15.1 lands the field; Phase 15.3 lands the executor
+// copy and the downstream consume.
+type TriggerSpec struct {
+	Name      string   `yaml:"name"`
+	Artifacts []string `yaml:"artifacts,omitempty"`
 }
 
 // Retention is the per-job build-history retention policy.
@@ -143,12 +170,18 @@ type AxisDimension struct {
 // SaveJob writes job to its canonical location under root, holding
 // an exclusive advisory lock during the write. Intermediate
 // directories are created.
+//
+// Phase 15.1: rejects specs whose TriggersDownstream would close
+// a cycle in the trigger graph (returns ErrCycleInTriggerGraph).
 func (s *Storage) SaveJob(job *Job) error {
 	if job == nil {
 		return errors.New("storage.SaveJob: nil Job")
 	}
 	if job.Name == "" {
 		return errors.New("storage.SaveJob: Job.Name is required")
+	}
+	if err := s.validateNoCycle(job); err != nil {
+		return err
 	}
 
 	path := s.JobPath(job.Name)

@@ -2714,16 +2714,34 @@ Decisions to lock in:
   AgentService.GetArtifact RPC streaming the bytes. This
   matches the linux-builds, windows-tests use case directly.
 
-- [ ] 15.1 storage.Job gains Upstream []string and
+- [x] 15.1 storage.Job gains Upstream []string and
          TriggersDownstream []TriggerSpec fields. TriggerSpec
          is {Name string; Artifacts []string}. SaveJob runs
          the cycle check and returns ErrCycleInTriggerGraph
          on failure.
-         Failing tests:
+         Done: Job gains Upstream + TriggersDownstream
+         fields with the canonical YAML keys. The active
+         edge is TriggersDownstream; Upstream is advisory
+         metadata for the per-job page (the actual fan-
+         out walks the upstream job's spec, not the
+         downstream's Upstream list). triggergraph.go
+         carries validateNoCycle + ErrCycleInTriggerGraph.
+         The algorithm trusts the persisted graph is
+         acyclic (every prior save was validated), so the
+         only DFS pass starts at each direct downstream
+         of the new spec and asks "does this reach the
+         new spec's own name?". Self-loops fall out of
+         the same DFS without a special case. SaveJob
+         calls validateNoCycle before the flock+write so
+         a rejected spec never lands on disk. Gates:
          TestJob_TriggerGraphAcyclic_OK,
-         TestJob_TriggerGraphRejectsSelfLoop,
-         TestJob_TriggerGraphRejectsTwoNodeCycle,
-         TestJob_TriggerGraphRejectsLongerCycle.
+         TestJob_TriggerGraphRejectsSelfLoop (Saves
+         {name: self, triggers_downstream: [{name: self}]}
+         -> error),
+         TestJob_TriggerGraphRejectsTwoNodeCycle (A->B
+         OK, then B->A errors and B does not persist),
+         TestJob_TriggerGraphRejectsLongerCycle (A->B->
+         C->D OK, then D->A closes the four-node loop).
 - [ ] 15.2 BuildResult gains TriggeredBy {Job string; Build int}
          so a downstream build attributes itself to a specific
          upstream build. result.json carries it; the per-build
