@@ -32,11 +32,17 @@ const maxDetailBuilds = 100
  * template iterates over. Status is the scheduler.Status string
  * ("success", "failure", "cancelled", "error") or "running" for
  * an in-flight build whose result.json hasn't landed yet.
+ *
+ * When carries the raw mtime that produced RelativeTime; the
+ * builds-index handler needs it to apply the ?since= filter
+ * without re-parsing the formatted "5m ago" string. Templates
+ * read RelativeTime, not When.
  */
 type buildHistoryRow struct {
     Number       int
     Status       string
     RelativeTime string
+    When         time.Time
 }
 
 /* permalinks holds the "Last X build" pointers the detail page
@@ -181,6 +187,7 @@ func scanAllBuilds(root, jobName string, now time.Time) (
             Number:       r.num,
             Status:       r.status,
             RelativeTime: formatRelative(r.mtime, now),
+            When:         r.mtime,
         })
     }
     return rows, nil

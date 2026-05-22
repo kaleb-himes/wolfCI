@@ -2469,12 +2469,29 @@ Decisions to lock in before the phase starts:
          entries render "none" in muted text. Gates:
          TestJobDetail_PermalinksReflectMostRecentStatuses,
          TestJobDetail_PermalinksHandlesNoBuilds.
-- [ ] 13.3 /jobs/<name>/builds index page (paginated build
+- [x] 13.3 /jobs/<name>/builds index page (paginated build
          list, linked from the "see all" affordance on the
          detail page). 25 builds per page, ?page=N query,
          optional ?since=<rfc3339> filter.
-         Failing tests:
-         TestBuildsIndex_FirstPageReturnsNewest,
+         Done: internal/server/buildsindex.go carries
+         handleBuildsIndex. The handler reuses scanAllBuilds
+         from jobdetail.go, applies an optional RFC3339
+         ?since= cutoff (keeps rows whose mtime is >=
+         cutoff), then slices the filtered list at
+         buildsIndexPageSize=25. Prev/Next link targets are
+         pre-assembled in Go (pageQueryString) so the
+         template emits them verbatim and the active
+         ?since= filter survives pagination. Templates/
+         buildsindex.html mirrors the detail page's history
+         table for visual continuity, with a header
+         subtitle ("Page N of M, X builds total"), an
+         explicit "Clear filter" affordance when ?since= is
+         active, and a footer pagination block. Route wired
+         in handleJobRoutes for `len(parts) == 2 &&
+         parts[1] == "builds"`. buildHistoryRow gains a
+         When time.Time so the filter can compare against
+         the raw mtime without re-parsing RelativeTime.
+         Gates: TestBuildsIndex_FirstPageReturnsNewest,
          TestBuildsIndex_RespectsSinceFilter,
          TestBuildsIndex_PaginationLinks.
 - [ ] 13.4 Delete project action in the sidebar. POST

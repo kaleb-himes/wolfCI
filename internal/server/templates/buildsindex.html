@@ -1,0 +1,47 @@
+{{ define "content" }}
+<section class="panel">
+<h2>Builds: {{ .Name }}</h2>
+<p><a href="/jobs/{{ .Name }}">&larr; Back to {{ .Name }}</a></p>
+
+{{ if .Since }}
+<p class="muted">Filtered to builds since
+<code>{{ .Since }}</code>.
+<a href="/jobs/{{ .Name }}/builds">Clear filter</a></p>
+{{ end }}
+
+<p class="muted">Page {{ .Page }} of {{ .TotalPages }}
+({{ .Total }} build{{ if ne .Total 1 }}s{{ end }} total).</p>
+
+{{ if .Builds }}
+<table class="build-history">
+<thead><tr><th>S</th><th>Build</th><th>When</th></tr></thead>
+<tbody>
+{{ range .Builds }}
+<tr>
+<td>
+{{ if eq .Status "success" }}<span class="node-status ok">&#x25CF;</span>
+{{ else if eq .Status "failure" }}<span class="node-status offline">&#x2715;</span>
+{{ else if eq .Status "error" }}<span class="node-status offline">!</span>
+{{ else if eq .Status "cancelled" }}<span class="node-status na">&#x25A0;</span>
+{{ else }}<span class="node-status na">?</span>
+{{ end }}
+</td>
+<td><a href="/jobs/{{ $.Name }}/builds/{{ .Number }}">#{{ .Number }}</a>
+<span class="muted">{{ .Status }}</span></td>
+<td><span class="muted">{{ .RelativeTime }}</span></td>
+</tr>
+{{ end }}
+</tbody>
+</table>
+{{ else }}
+<p class="muted">No builds match this view.</p>
+{{ end }}
+
+<nav class="pagination">
+{{ if .PrevQuery }}<a href="{{ .PrevQuery }}">&larr; Prev</a>{{ end }}
+{{ if and .PrevQuery .NextQuery }} &middot; {{ end }}
+{{ if .NextQuery }}<a href="{{ .NextQuery }}">Next &rarr;</a>{{ end }}
+</nav>
+
+</section>
+{{ end }}
