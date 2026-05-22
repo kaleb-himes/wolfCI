@@ -36,6 +36,40 @@
 <p class="muted">No description.</p>
 {{ end }}
 
+<h3>Permalinks</h3>
+<ul class="permalinks">
+<li>Last build:
+{{ with .Permalinks.LastBuild }}
+<a href="/jobs/{{ $.Name }}/builds/{{ .Number }}">#{{ .Number }}</a>
+<span class="muted">{{ .Status }}{{ if .RelativeTime }}, {{ .RelativeTime }}{{ end }}</span>
+{{ else }}<span class="muted">none</span>{{ end }}
+</li>
+<li>Last stable build:
+{{ with .Permalinks.LastStable }}
+<a href="/jobs/{{ $.Name }}/builds/{{ .Number }}">#{{ .Number }}</a>
+{{ if .RelativeTime }}<span class="muted">{{ .RelativeTime }}</span>{{ end }}
+{{ else }}<span class="muted">none</span>{{ end }}
+</li>
+<li>Last successful build:
+{{ with .Permalinks.LastSuccessful }}
+<a href="/jobs/{{ $.Name }}/builds/{{ .Number }}">#{{ .Number }}</a>
+{{ if .RelativeTime }}<span class="muted">{{ .RelativeTime }}</span>{{ end }}
+{{ else }}<span class="muted">none</span>{{ end }}
+</li>
+<li>Last unsuccessful build:
+{{ with .Permalinks.LastUnsuccessful }}
+<a href="/jobs/{{ $.Name }}/builds/{{ .Number }}">#{{ .Number }}</a>
+<span class="muted">{{ .Status }}{{ if .RelativeTime }}, {{ .RelativeTime }}{{ end }}</span>
+{{ else }}<span class="muted">none</span>{{ end }}
+</li>
+<li>Last completed build:
+{{ with .Permalinks.LastCompleted }}
+<a href="/jobs/{{ $.Name }}/builds/{{ .Number }}">#{{ .Number }}</a>
+<span class="muted">{{ .Status }}{{ if .RelativeTime }}, {{ .RelativeTime }}{{ end }}</span>
+{{ else }}<span class="muted">none</span>{{ end }}
+</li>
+</ul>
+
 <h3>Build history</h3>
 {{ if .Builds }}
 <table class="build-history">

@@ -2443,7 +2443,7 @@ Decisions to lock in before the phase starts:
          TestJobDetail_RendersDescription,
          TestJobDetail_RendersBuildHistory_NewestFirst,
          TestJobDetail_404OnMissingJob.
-- [ ] 13.2 Permalinks panel on the detail page. Header gets
+- [x] 13.2 Permalinks panel on the detail page. Header gets
          a section listing:
            Last build (#N, <relative time>)
            Last stable build (#N or <none>)
@@ -2454,7 +2454,19 @@ Decisions to lock in before the phase starts:
          Last reattempt (initial impl treats stable ==
          successful; flake/retry semantics tighten in Phase
          14). Each link goes to /jobs/<name>/builds/<n>.
-         Failing tests:
+         Done: scanBuildHistory split into scanAllBuilds
+         (full list, no cap) + an in-handler truncation
+         step so permalinks compute against the complete
+         history while the build table stays capped at 100.
+         New computePermalinks builds the five pointers from
+         the newest-first slice in a single pass:
+         LastBuild ignores status (catches a running build),
+         LastCompleted/LastSuccessful/LastUnsuccessful skip
+         "running", LastStable aliases LastSuccessful until
+         Phase 14 introduces the rebuild-retry distinction.
+         Template renders each entry as a labelled <li> with
+         the link, status word, and relative time; missing
+         entries render "none" in muted text. Gates:
          TestJobDetail_PermalinksReflectMostRecentStatuses,
          TestJobDetail_PermalinksHandlesNoBuilds.
 - [ ] 13.3 /jobs/<name>/builds index page (paginated build

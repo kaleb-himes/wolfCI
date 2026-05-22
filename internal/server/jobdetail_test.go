@@ -272,3 +272,195 @@ func TestJobDetail_404OnMissingJob(t *testing.T) {
         t.Errorf("status = %d, want 404", resp.StatusCode)
     }
 }
+
+/* Phase 13.2 - permalinks panel above the build history. The
+ * header lists Last build, Last stable build, Last successful
+ * build, Last unsuccessful build, Last completed build. Each
+ * resolves to a /jobs/<name>/builds/<n> link or renders "none"
+ * if no build matches. "Stable" == StatusSuccess for now;
+ * Phase 14 tightens this once Rebuild Last lands and we can
+ * distinguish a successful first try from a successful retry.
+ */
+
+func TestJobDetail_PermalinksReflectMostRecentStatuses(t *testing.T) {
+    ts, jar := newAuthedUI(t)
+    defer ts.Close()
+    client := &http.Client{Jar: jar,
+        CheckRedirect: func(*http.Request, []*http.Request) error {
+            return http.ErrUseLastResponse
+        }}
+
+    st := storageFromServer(ts)
+    if err := st.SaveJob(&storage.Job{
+        Name:  "permajob",
+        Steps: []storage.Step{{Shell: "true"}},
+    }); err != nil {
+        t.Fatalf("SaveJob: %v", err)
+    }
+
+    /* Seed five builds so each permalink resolves to a
+     * different number, exercising the "most recent" rule for
+     * each category. Numbers chosen so the expected links are
+     * unambiguous when grepping the rendered body.
+     *
+     *   #1 success    (oldest)
+     *   #2 failure
+     *   #3 success    <- last stable, last successful
+     *   #4 error      <- last unsuccessful, last completed
+     *   #5 running    <- last build (no result.json yet)
+     *
+     * Mtimes are backdated 5h, 4h, ..., 1h so the newest-
+     * first ordering is deterministic.
+     */
+    seedBuild(t, st.Root(), "permajob", 1, scheduler.StatusSuccess,
+        time.Now().Add(-5*time.Hour), true)
+    seedBuild(t, st.Root(), "permajob", 2, scheduler.StatusFailure,
+        time.Now().Add(-4*time.Hour), true)
+    seedBuild(t, st.Root(), "permajob", 3, scheduler.StatusSuccess,
+        time.Now().Add(-3*time.Hour), true)
+    seedBuild(t, st.Root(), "permajob", 4, scheduler.StatusError,
+        time.Now().Add(-2*time.Hour), true)
+    /* #5 has no result.json: an in-flight build. */
+    seedBuild(t, st.Root(), "permajob", 5, "",
+        time.Now().Add(-1*time.Hour), false)
+
+    resp := mustGet(t, client, ts.URL+"/jobs/permajob")
+    body := readBody(t, resp)
+    if resp.StatusCode != http.StatusOK {
+        t.Fatalf("status = %d, want 200", resp.StatusCode)
+    }
+
+    /* The permalinks panel must label each entry and link the
+     * correct build number. We assert on substrings rather
+     * than a full HTML shape so the template can choose its
+     * own markup as long as the label + link are colocated.
+     */
+    checks := []struct {
+        label string
+        href  string
+    }{
+        {"Last build", `/jobs/permajob/builds/5`},
+        {"Last stable build", `/jobs/permajob/builds/3`},
+        {"Last successful build", `/jobs/permajob/builds/3`},
+        {"Last unsuccessful build", `/jobs/permajob/builds/4`},
+        {"Last completed build", `/jobs/permajob/builds/4`},
+    }
+    for _, c := range checks {
+        idx := strings.Index(body, c.label)
+        if idx < 0 {
+            t.Errorf("body missing label %q", c.label)
+            continue
+        }
+        /* Allow up to 200 bytes between the label and the
+         * link target; that is enough for whitespace +
+         * <span> + <a> wrappers without bleeding into the
+         * next permalink row.
+         */
+        window := body[idx:]
+        if len(window) > 200 {
+            window = window[:200]
+        }
+        if !strings.Contains(window, c.href) {
+            t.Errorf("permalink %q did not point at %q "+
+                "within 200 bytes; got: %q",
+                c.label, c.href, window)
+        }
+    }
+}
+
+func TestJobDetail_PermalinksHandlesNoBuilds(t *testing.T) {
+    ts, jar := newAuthedUI(t)
+    defer ts.Close()
+    client := &http.Client{Jar: jar,
+        CheckRedirect: func(*http.Request, []*http.Request) error {
+            return http.ErrUseLastResponse
+        }}
+
+    st := storageFromServer(ts)
+    if err := st.SaveJob(&storage.Job{
+        Name:  "freshjob",
+        Steps: []storage.Step{{Shell: "true"}},
+    }); err != nil {
+        t.Fatalf("SaveJob: %v", err)
+    }
+
+    resp := mustGet(t, client, ts.URL+"/jobs/freshjob")
+    body := readBody(t, resp)
+    if resp.StatusCode != http.StatusOK {
+        t.Fatalf("status = %d, want 200", resp.StatusCode)
+    }
+
+    /* Every permalink label still renders, but each one shows
+     * "none" instead of a link.
+     */
+    for _, label := range []string{
+        "Last build",
+        "Last stable build",
+        "Last successful build",
+        "Last unsuccessful build",
+        "Last completed build",
+    } {
+        idx := strings.Index(body, label)
+        if idx < 0 {
+            t.Errorf("body missing label %q", label)
+            continue
+        }
+        window := body[idx:]
+        if len(window) > 200 {
+            window = window[:200]
+        }
+        if !strings.Contains(window, "none") {
+            t.Errorf("permalink %q without builds did not "+
+                "render 'none'; got: %q", label, window)
+        }
+        /* Negative check: no <a href="/jobs/freshjob/builds/
+         * should appear inside the window.
+         */
+        if strings.Contains(window,
+            `href="/jobs/freshjob/builds/`) {
+            t.Errorf("permalink %q rendered a build link "+
+                "even though no builds exist; got: %q",
+                label, window)
+        }
+    }
+}
+
+/* seedBuild writes a result.json (or an empty build dir if
+ * withResult=false) under builds/<jobName>/<num>/ and force-
+ * sets the mtime so the build's ordering is deterministic in
+ * the rendered page.
+ *
+ * withResult=false simulates an in-flight build whose
+ * executor has not written result.json yet; the detail page
+ * still surfaces it as "running" in the build history and as
+ * the Last build permalink, but it should NOT count as
+ * Last completed / Last successful / Last unsuccessful.
+ */
+func seedBuild(t *testing.T, root, jobName string, num int,
+    status scheduler.Status, when time.Time, withResult bool) {
+
+    t.Helper()
+    dir := filepath.Join(root, "builds", jobName,
+        strconv.Itoa(num))
+    if err := os.MkdirAll(dir, 0o755); err != nil {
+        t.Fatalf("mkdir build %d: %v", num, err)
+    }
+    target := dir
+    if withResult {
+        data, err := json.Marshal(scheduler.BuildResult{
+            JobName: jobName,
+            Number:  num,
+            Status:  status,
+        })
+        if err != nil {
+            t.Fatalf("marshal build %d: %v", num, err)
+        }
+        target = filepath.Join(dir, "result.json")
+        if err := os.WriteFile(target, data, 0o644); err != nil {
+            t.Fatalf("write build %d: %v", num, err)
+        }
+    }
+    if err := os.Chtimes(target, when, when); err != nil {
+        t.Fatalf("chtimes build %d: %v", num, err)
+    }
+}

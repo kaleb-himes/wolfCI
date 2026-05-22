@@ -39,6 +39,33 @@ type buildHistoryRow struct {
     RelativeTime string
 }
 
+/* permalinks holds the "Last X build" pointers the detail page
+ * shows in its header. A nil pointer means "no such build yet"
+ * and the template renders "none" instead of a link.
+ *
+ *   LastBuild        - most recent build of any status, including
+ *                      an in-flight "running" build.
+ *   LastStable       - most recent successful build. Phase 14
+ *                      tightens this once Rebuild Last lands and
+ *                      we can distinguish a first-try success
+ *                      from a successful retry; until then,
+ *                      stable == successful.
+ *   LastSuccessful   - most recent build whose Status is success.
+ *   LastUnsuccessful - most recent build that completed without
+ *                      success (failure, error, cancelled). An
+ *                      in-flight "running" build does NOT count.
+ *   LastCompleted    - most recent build that has a result.json
+ *                      on disk, regardless of outcome. Excludes
+ *                      "running" entries.
+ */
+type permalinks struct {
+    LastBuild        *buildHistoryRow
+    LastStable       *buildHistoryRow
+    LastSuccessful   *buildHistoryRow
+    LastUnsuccessful *buildHistoryRow
+    LastCompleted    *buildHistoryRow
+}
+
 func (s *Server) handleJobDetail(w http.ResponseWriter, r *http.Request,
     name string) {
 
@@ -48,51 +75,61 @@ func (s *Server) handleJobDetail(w http.ResponseWriter, r *http.Request,
         return
     }
 
-    rows, truncated, err := scanBuildHistory(
-        s.opts.Storage.Root(), name, maxDetailBuilds, time.Now())
+    all, err := scanAllBuilds(
+        s.opts.Storage.Root(), name, time.Now())
     if err != nil {
         http.Error(w, "scan builds: "+err.Error(),
             http.StatusInternalServerError)
         return
+    }
+    perms := computePermalinks(all)
+
+    visible := all
+    truncated := false
+    if len(visible) > maxDetailBuilds {
+        visible = visible[:maxDetailBuilds]
+        truncated = true
     }
 
     s.render(w, "jobdetail.html", map[string]interface{}{
         "Title":       job.Name,
         "Name":        job.Name,
         "Description": job.Description,
-        "Builds":      rows,
+        "Builds":      visible,
         "Truncated":   truncated,
+        "Permalinks":  perms,
         "CanRun":      s.opts.JobRunner != nil,
     })
 }
 
-/* scanBuildHistory walks builds/<jobName>/ and returns up to
- * limit rows sorted newest-first. Reading the result.json is
- * best-effort: a directory with no result.json yet (build still
- * running, or executor crashed before writing) renders as
- * "running" rather than dropping the row.
+/* scanAllBuilds walks builds/<jobName>/ and returns every row
+ * sorted newest-first. The caller chooses how to slice the
+ * result for the visible history table (handleJobDetail caps
+ * at maxDetailBuilds) and feeds the same full slice into
+ * computePermalinks so the "Last successful build" pointer
+ * stays correct even when the table is truncated.
  *
- * Ordering: by the directory's mtime - the executor creates the
- * dir at build start and writes result.json at the end, so the
- * dir's mtime tracks the latest activity for that build. Tests
- * force-set the mtime on result.json; that updates the parent
- * dir's mtime on most filesystems, but we sort on the dir
- * itself to keep the rule explicit.
- *
- * The "truncated" return is true when there are more builds on
- * disk than fit in limit; the template renders a "see all" link
- * in that case.
+ * Reading result.json is best-effort: a directory with no
+ * result.json yet (build still running, or executor crashed
+ * before writing) renders as "running" rather than being
+ * dropped. Ordering uses the result.json mtime when present,
+ * otherwise the build dir's mtime - the executor creates the
+ * dir at build start and writes result.json at the end, so
+ * either is a useful proxy for "when this build last did
+ * something". Ties break on the higher build number so a
+ * freshly-restored backup with identical mtimes still gives
+ * a deterministic order.
  */
-func scanBuildHistory(root, jobName string, limit int,
-    now time.Time) ([]buildHistoryRow, bool, error) {
+func scanAllBuilds(root, jobName string, now time.Time) (
+    []buildHistoryRow, error) {
 
     dir := filepath.Join(root, "builds", jobName)
     entries, err := os.ReadDir(dir)
     if err != nil {
         if os.IsNotExist(err) {
-            return nil, false, nil
+            return nil, nil
         }
-        return nil, false, fmt.Errorf("read %s: %w", dir, err)
+        return nil, fmt.Errorf("read %s: %w", dir, err)
     }
 
     type rawRow struct {
@@ -124,11 +161,6 @@ func scanBuildHistory(root, jobName string, limit int,
                 }
             }
         } else if info, err := os.Stat(buildDir); err == nil {
-            /* No result.json yet: an in-flight build or one
-             * the executor never finished. Use the dir mtime so
-             * an in-flight build still sorts correctly relative
-             * to completed neighbors.
-             */
             mtime = info.ModTime()
         }
         raws = append(raws, rawRow{
@@ -136,22 +168,12 @@ func scanBuildHistory(root, jobName string, limit int,
         })
     }
 
-    /* Newest-first by mtime. Ties break on the higher build
-     * number so a freshly-restored backup with identical mtimes
-     * still gives a deterministic order.
-     */
     sort.Slice(raws, func(i, j int) bool {
         if !raws[i].mtime.Equal(raws[j].mtime) {
             return raws[i].mtime.After(raws[j].mtime)
         }
         return raws[i].num > raws[j].num
     })
-
-    truncated := false
-    if limit > 0 && len(raws) > limit {
-        raws = raws[:limit]
-        truncated = true
-    }
 
     rows := make([]buildHistoryRow, 0, len(raws))
     for _, r := range raws {
@@ -161,7 +183,50 @@ func scanBuildHistory(root, jobName string, limit int,
             RelativeTime: formatRelative(r.mtime, now),
         })
     }
-    return rows, truncated, nil
+    return rows, nil
+}
+
+/* computePermalinks scans the (newest-first) build history and
+ * returns the "Last X build" pointers the detail page header
+ * exposes. Each pointer aliases the corresponding row inside
+ * rows, so the caller must not mutate rows after the call (the
+ * template only reads). A nil pointer means "no such build
+ * yet" and the template renders "none".
+ *
+ * Rule for "stable": treat success as stable for the initial
+ * implementation. Phase 14 introduces Rebuild Last and a
+ * first-try-vs-retry distinction; at that point stable
+ * tightens to "success AND not a rebuild-last reattempt" per
+ * the PLAN.md 13.2 spec.
+ */
+func computePermalinks(rows []buildHistoryRow) permalinks {
+    var p permalinks
+    successStr := string(scheduler.StatusSuccess)
+    for i := range rows {
+        r := &rows[i]
+        if p.LastBuild == nil {
+            p.LastBuild = r
+        }
+        if r.Status == "running" {
+            continue
+        }
+        if p.LastCompleted == nil {
+            p.LastCompleted = r
+        }
+        if r.Status == successStr {
+            if p.LastSuccessful == nil {
+                p.LastSuccessful = r
+            }
+            if p.LastStable == nil {
+                p.LastStable = r
+            }
+            continue
+        }
+        if p.LastUnsuccessful == nil {
+            p.LastUnsuccessful = r
+        }
+    }
+    return p
 }
 
 /* formatRelative renders t as a short "5m ago" / "2h ago" /
