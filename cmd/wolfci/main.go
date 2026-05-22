@@ -128,6 +128,11 @@ func Run(ctx context.Context, cfg *server.ServerConfig, opts RunOptions) error {
      */
     svc := agentsvc.New(serverVersion)
     svc.SetLogSink(agentsvc.NewFileLogSink(cfg.WorkDir))
+    /* Phase 15.5: GetArtifact resolves builds/<job>/<n>/
+     * artifacts/<basename> under the same root. Without
+     * WorkDir the handler returns FailedPrecondition.
+     */
+    svc.WorkDir = cfg.WorkDir
     /* Built-in master node (Phase 12.5): registers a synthetic
      * "wolfci-master" agent and refreshes its NodeStatus every
      * 30s so the /nodes view always has a self-row. The

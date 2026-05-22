@@ -23,8 +23,9 @@ import (
 const _ = grpc.SupportPackageIsVersion7
 
 const (
-	AgentService_Register_FullMethodName = "/wolfci.v1.AgentService/Register"
-	AgentService_Connect_FullMethodName  = "/wolfci.v1.AgentService/Connect"
+	AgentService_Register_FullMethodName    = "/wolfci.v1.AgentService/Register"
+	AgentService_Connect_FullMethodName     = "/wolfci.v1.AgentService/Connect"
+	AgentService_GetArtifact_FullMethodName = "/wolfci.v1.AgentService/GetArtifact"
 )
 
 // AgentServiceClient is the client API for AgentService service.
@@ -40,6 +41,13 @@ type AgentServiceClient interface {
 	// is delivered by the side that has data; both sides are free
 	// to send at any time.
 	Connect(ctx context.Context, opts ...grpc.CallOption) (AgentService_ConnectClient, error)
+	// GetArtifact streams one artifact file from
+	// builds/<upstream_job>/<upstream_build>/artifacts/<basename>
+	// to the calling agent. Phase 15.5. The agent invokes this
+	// when running a downstream build that needs an upstream's
+	// deliverables on a different node than the one that
+	// produced them.
+	GetArtifact(ctx context.Context, in *GetArtifactRequest, opts ...grpc.CallOption) (AgentService_GetArtifactClient, error)
 }
 
 type agentServiceClient struct {
@@ -90,6 +98,38 @@ func (x *agentServiceConnectClient) Recv() (*ServerMessage, error) {
 	return m, nil
 }
 
+func (c *agentServiceClient) GetArtifact(ctx context.Context, in *GetArtifactRequest, opts ...grpc.CallOption) (AgentService_GetArtifactClient, error) {
+	stream, err := c.cc.NewStream(ctx, &AgentService_ServiceDesc.Streams[1], AgentService_GetArtifact_FullMethodName, opts...)
+	if err != nil {
+		return nil, err
+	}
+	x := &agentServiceGetArtifactClient{stream}
+	if err := x.ClientStream.SendMsg(in); err != nil {
+		return nil, err
+	}
+	if err := x.ClientStream.CloseSend(); err != nil {
+		return nil, err
+	}
+	return x, nil
+}
+
+type AgentService_GetArtifactClient interface {
+	Recv() (*ArtifactChunk, error)
+	grpc.ClientStream
+}
+
+type agentServiceGetArtifactClient struct {
+	grpc.ClientStream
+}
+
+func (x *agentServiceGetArtifactClient) Recv() (*ArtifactChunk, error) {
+	m := new(ArtifactChunk)
+	if err := x.ClientStream.RecvMsg(m); err != nil {
+		return nil, err
+	}
+	return m, nil
+}
+
 // AgentServiceServer is the server API for AgentService service.
 // All implementations must embed UnimplementedAgentServiceServer
 // for forward compatibility
@@ -103,6 +143,13 @@ type AgentServiceServer interface {
 	// is delivered by the side that has data; both sides are free
 	// to send at any time.
 	Connect(AgentService_ConnectServer) error
+	// GetArtifact streams one artifact file from
+	// builds/<upstream_job>/<upstream_build>/artifacts/<basename>
+	// to the calling agent. Phase 15.5. The agent invokes this
+	// when running a downstream build that needs an upstream's
+	// deliverables on a different node than the one that
+	// produced them.
+	GetArtifact(*GetArtifactRequest, AgentService_GetArtifactServer) error
 	mustEmbedUnimplementedAgentServiceServer()
 }
 
@@ -115,6 +162,9 @@ func (UnimplementedAgentServiceServer) Register(context.Context, *AgentInfo) (*R
 }
 func (UnimplementedAgentServiceServer) Connect(AgentService_ConnectServer) error {
 	return status.Errorf(codes.Unimplemented, "method Connect not implemented")
+}
+func (UnimplementedAgentServiceServer) GetArtifact(*GetArtifactRequest, AgentService_GetArtifactServer) error {
+	return status.Errorf(codes.Unimplemented, "method GetArtifact not implemented")
 }
 func (UnimplementedAgentServiceServer) mustEmbedUnimplementedAgentServiceServer() {}
 
@@ -173,6 +223,27 @@ func (x *agentServiceConnectServer) Recv() (*AgentMessage, error) {
 	return m, nil
 }
 
+func _AgentService_GetArtifact_Handler(srv interface{}, stream grpc.ServerStream) error {
+	m := new(GetArtifactRequest)
+	if err := stream.RecvMsg(m); err != nil {
+		return err
+	}
+	return srv.(AgentServiceServer).GetArtifact(m, &agentServiceGetArtifactServer{stream})
+}
+
+type AgentService_GetArtifactServer interface {
+	Send(*ArtifactChunk) error
+	grpc.ServerStream
+}
+
+type agentServiceGetArtifactServer struct {
+	grpc.ServerStream
+}
+
+func (x *agentServiceGetArtifactServer) Send(m *ArtifactChunk) error {
+	return x.ServerStream.SendMsg(m)
+}
+
 // AgentService_ServiceDesc is the grpc.ServiceDesc for AgentService service.
 // It's only intended for direct use with grpc.RegisterService,
 // and not to be introspected or modified (even as a copy)
@@ -191,6 +262,11 @@ var AgentService_ServiceDesc = grpc.ServiceDesc{
 			Handler:       _AgentService_Connect_Handler,
 			ServerStreams: true,
 			ClientStreams: true,
+		},
+		{
+			StreamName:    "GetArtifact",
+			Handler:       _AgentService_GetArtifact_Handler,
+			ServerStreams: true,
 		},
 	},
 	Metadata: "api/v1/agent.proto",

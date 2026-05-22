@@ -72,6 +72,14 @@ type Server struct {
 	// tests can shorten the window without sleeping for 90s.
 	StaleThreshold time.Duration
 
+	// WorkDir is the wolfCI storage root (same path passed to
+	// storage.New). GetArtifact resolves
+	// builds/<job>/<n>/artifacts/<basename> against it. Empty
+	// disables GetArtifact (the handler returns
+	// FailedPrecondition). Set by cmd/wolfci at startup.
+	// Phase 15.5.
+	WorkDir string
+
 	mu     sync.Mutex
 	agents map[string]*wolfciv1.AgentInfo
 

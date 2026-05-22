@@ -20,6 +20,14 @@ service AgentService {
   // is delivered by the side that has data; both sides are free
   // to send at any time.
   rpc Connect(stream AgentMessage) returns (stream ServerMessage);
+
+  // GetArtifact streams one artifact file from
+  // builds/<upstream_job>/<upstream_build>/artifacts/<basename>
+  // to the calling agent. Phase 15.5. The agent invokes this
+  // when running a downstream build that needs an upstream's
+  // deliverables on a different node than the one that
+  // produced them.
+  rpc GetArtifact(GetArtifactRequest) returns (stream ArtifactChunk);
 }
 
 // AgentInfo is what an agent tells the server about itself when
@@ -105,4 +113,21 @@ message NodeStatus {
 // past StaleThreshold (Phase 12.4).
 message Heartbeat {
   NodeStatus status = 1;
+}
+
+// GetArtifactRequest names the upstream build whose artifact
+// the agent wants to stream. Phase 15.5. artifact_basename
+// must be a leaf filename - the server rejects any value
+// containing "/" or "..".
+message GetArtifactRequest {
+  string upstream_job = 1;
+  int32 upstream_build = 2;
+  string artifact_basename = 3;
+}
+
+// ArtifactChunk is one chunk of the streamed file. The
+// server emits chunks of up to ~32KiB; the client reassembles
+// them into the original byte stream by concatenation.
+message ArtifactChunk {
+  bytes data = 1;
 }

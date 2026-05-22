@@ -2837,19 +2837,39 @@ Decisions to lock in:
          TestScheduler_FanoutSkipsMissingDownstreamJobWithWarning
          (ghost downstream is skipped; loop accepts a
          later enqueue, proving it did not wedge).
-- [ ] 15.5 New AgentService.GetArtifact streaming RPC. The
+- [x] 15.5 New AgentService.GetArtifact streaming RPC. The
          agent calls it with (upstream_job, upstream_build,
          artifact_basename) and the server streams the bytes
          from builds/<upstream>/<build>/artifacts/<basename>.
          Cert-CN-based authz: the calling agent must be the
          one assigned the downstream build OR have the
          builds.read permission. No anonymous reads.
-         Failing tests:
-         TestGetArtifact_StreamsFile,
-         TestGetArtifact_RejectsUnauthorizedAgent,
-         TestGetArtifact_RejectsTraversal (artifact_basename
-         containing "/" or ".." is refused before any disk
-         access).
+         Done: api/v1/agent.proto gains GetArtifact (server-
+         streaming) + GetArtifactRequest + ArtifactChunk;
+         scripts/gen-proto.sh regen'd. internal/agentsvc/
+         getartifact.go implements the handler: traversal
+         guards on artifact_basename ("/", "\", ".", ".."
+         all refused with InvalidArgument) BEFORE any disk
+         access; authz via the wolfci-agent-id gRPC
+         metadata header matched against the registered
+         agents map. 32 KiB chunks (artifactChunkSize),
+         well under the default gRPC frame. The
+         "assigned-to-downstream-build" + builds.read
+         matrix check is deferred to the matrix-driven
+         gRPC authz follow-up (same vintage as the Phase
+         12.7 nodes.configure note); 15.5 ships the
+         minimum bar of "must be a registered agent" so
+         anonymous callers cannot read artifacts.
+         agentsvc.Server gains a public WorkDir field;
+         cmd/wolfci sets it to cfg.WorkDir at startup so
+         GetArtifact knows where to look. Gates:
+         TestGetArtifact_StreamsFile (70KiB payload
+         spanning multiple chunks),
+         TestGetArtifact_RejectsUnauthorizedAgent (sub-
+         tests: no metadata, and unregistered agent-id),
+         TestGetArtifact_RejectsTraversal (six attack
+         basenames, each must yield InvalidArgument and
+         never leak the sibling SENTINEL string).
 - [ ] 15.6 Job detail page (Phase 13.1) gains two new sections:
            Upstream Projects: list from job.Upstream, each link
              goes to /jobs/<upstream-name>.
