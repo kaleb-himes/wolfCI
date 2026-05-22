@@ -1680,22 +1680,50 @@ Decisions locked in for Phase 11 (2026-05-21):
          dir never created), TestBootstrap_TokenFormat (len
          64, valid hex, lowercase-only), TestBootstrap_FilePermissions
          (token 0600, bootstrap dir 0700).
-- [ ] 11.3 /setup endpoint that consumes the bootstrap token.
-         Adds the setup HTTP handler under internal/server/.
-         GET /setup?token=<hex> serves a form (username +
-         paste-your-OpenSSH-pubkey textarea). POST validates
-         the token, parses the pubkey via
-         gowolfssh.ParseAuthorizedKey, writes it to
-         config-files/auth/keys/<username>.pub (0644), adds
-         <username>: admin to matrix.yaml, renames the
-         bootstrap directory to bootstrap.consumed/.
-         Failing tests (internal/server/setup_test.go):
-         TestSetup_AcceptsValidToken,
-         TestSetup_RejectsInvalidToken,
-         TestSetup_RejectsAfterConsumption,
-         TestSetup_RejectsMalformedPubkey,
-         TestSetup_RegistersAdminInMatrix,
-         TestSetup_RenamesBootstrapDir.
+- [x] 11.3 /setup endpoint that consumes the bootstrap token.
+         Done: internal/server/setup.go ships
+         SetupHandler{KeysDir, BootstrapDir, MatrixPath}, an
+         http.Handler servicing GET and POST. GET re-validates
+         the token (so a bookmarked /setup URL after
+         consumption returns 410 Gone instead of a misleading
+         form), then renders an HTML form pre-populated with
+         the token in a hidden field plus username and pubkey
+         inputs. POST validates token via crypto/subtle
+         constant-time compare, validates username (rejecting
+         "", ".", "..", leading dot, and any "/", "\", or nul
+         byte), parses the pasted pubkey via
+         gowolfssh.ParseAuthorizedKey (catches malformed
+         OpenSSH lines BEFORE touching disk), persists the
+         verbatim pubkey at <KeysDir>/<username>.pub mode
+         0644, loads (or creates) matrix.yaml and adds
+         <username>: admin, then consumes the bootstrap by
+         renaming <BootstrapDir> -> <BootstrapDir>.consumed.
+         Rollback: if matrix.yaml mutation fails, the
+         already-written pubkey is removed so the operator
+         can retry without a half-state. Consumption is the
+         last step so any earlier failure leaves the token
+         valid for retry. The status code matrix is
+         deliberate: 200 happy-path, 400 bad username or
+         malformed pubkey (pre-consumption, retry possible),
+         403 wrong-token (pre-consumption, retry possible),
+         410 no-active-bootstrap (post-consumption, no retry).
+         Gates (internal/server/setup_test.go):
+         TestSetup_AcceptsValidToken (GET 200 + form echoes
+         token + POST 2xx + pubkey on disk),
+         TestSetup_RejectsInvalidToken (403, pubkey not
+         written), TestSetup_RejectsAfterConsumption (second
+         POST is 410, second pubkey not written),
+         TestSetup_RejectsMalformedPubkey (400, bootstrap
+         dir intact so operator can retry),
+         TestSetup_RegistersAdminInMatrix (matrix.yaml
+         contains username + "admin"),
+         TestSetup_RenamesBootstrapDir (bootstrap/ gone,
+         bootstrap.consumed/ is a directory).
+         Tests use wolfcrypt.Ed25519GenKey +
+         gowolfssh.EncodeSSHEd25519AuthorizedKey to build a
+         real pubkey line; per feedback memory
+         byok-no-keygen, test-only keygen is allowed - the
+         BYOK rule is for production code, not fixtures.
 - [ ] 11.4 HTTP + gRPC dispatcher in internal/server/. One
          http.Handler that routes application/grpc requests to
          grpc.Server.ServeHTTP and everything else to the
