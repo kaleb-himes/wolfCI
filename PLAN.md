@@ -1655,16 +1655,31 @@ Decisions locked in for Phase 11 (2026-05-21):
          empty-file case),
          TestServerConfig_RejectsBadDuration
          ("shutdown_drain_timeout: notaduration" fails load).
-- [ ] 11.2 First-admin bootstrap mint at
+- [x] 11.2 First-admin bootstrap mint at
          internal/server/bootstrap.go. Implements the
          no-users-on-disk -> mint hex token + print setup URL
          flow described above. BYOK: wolfCI does NOT generate
          a keypair; the operator brings their own at /setup.
-         Failing tests (internal/server/bootstrap_test.go):
-         TestBootstrap_FirstStartMintsToken,
-         TestBootstrap_SkipsWhenAdminsExist,
-         TestBootstrap_TokenFormat (64 lowercase hex),
-         TestBootstrap_FilePermissions (0600 on token).
+         Done: Bootstrap{KeysDir, BootstrapDir, ListenAddr}
+         exposes Mint() (*MintResult, error). Mint scans
+         KeysDir for any *.pub; if one exists, returns
+         (nil, nil) (already bootstrapped). If none, draws
+         tokenBytes=32 from wolfcrypt.RandBytes, hex-encodes
+         to 64 lowercase chars, mkdirs BootstrapDir at mode
+         0700 (chmod again after MkdirAll in case the dir
+         already existed at a wider mode from a partial prior
+         run), writes the token to BootstrapDir/token at mode
+         0600, and returns MintResult{Token, SetupURL} where
+         SetupURL is "https://<ListenAddr>/setup?token=<hex>".
+         The caller (cmd/wolfci main, Phase 11.5) is
+         responsible for printing SetupURL to stdout.
+         Gates (internal/server/bootstrap_test.go):
+         TestBootstrap_FirstStartMintsToken (token + URL +
+         on-disk content all line up), TestBootstrap_SkipsWhenAdminsExist
+         (existing alice.pub means nil result + bootstrap
+         dir never created), TestBootstrap_TokenFormat (len
+         64, valid hex, lowercase-only), TestBootstrap_FilePermissions
+         (token 0600, bootstrap dir 0700).
 - [ ] 11.3 /setup endpoint that consumes the bootstrap token.
          Adds the setup HTTP handler under internal/server/.
          GET /setup?token=<hex> serves a form (username +
