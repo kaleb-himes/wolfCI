@@ -68,4 +68,32 @@ if ! grep -qF '10' "$DOC"; then
     fail "$DOC does not reference the 10-minute path claim"
 fi
 
+# Phase 11 reality check: cmd/wolfci requires either --config or
+# the positional <addr> <cert> <key> quick mode. The doc has to
+# show the operator how to invoke the server.
+if ! grep -qF -- '--config' "$DOC"; then
+    fail "$DOC missing --config invocation (cmd/wolfci no longer runs with no args)"
+fi
+if ! grep -qF 'server.yaml' "$DOC"; then
+    fail "$DOC missing server.yaml config example"
+fi
+
+# Phase 11 bootstrap is BYOK at /setup, not the older /bootstrap
+# URL. The doc has to send the operator to the right place and
+# spell out that they bring their own SSH pubkey.
+if ! grep -qF '/setup' "$DOC"; then
+    fail "$DOC missing /setup URL (Phase 11 first-admin path)"
+fi
+if ! grep -qE 'paste|bring your own|BYOK' "$DOC"; then
+    fail "$DOC missing the BYOK rule (operator pastes their own pubkey at /setup)"
+fi
+
+# Day-2 user management lives in SECURITY.md per PLAN.md 11.7.
+# GETTING-STARTED ends the 10-minute path; ongoing user mgmt
+# (add/remove admins, role matrix updates) belongs in the
+# security doc, not here. The doc must point readers there.
+if ! grep -qF 'SECURITY.md' "$DOC"; then
+    fail "$DOC missing pointer to docs/SECURITY.md for day-2 user management"
+fi
+
 echo "test-getting-started.sh: PASS"

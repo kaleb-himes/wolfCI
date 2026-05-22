@@ -18,8 +18,11 @@ Group=wolfci
 WorkingDirectory=/var/lib/wolfci
 
 # Installed by scripts/build.sh into build/bin/<goos>-<goarch>/wolfci;
-# operators copy the binary to /usr/local/bin/.
-ExecStart=/usr/local/bin/wolfci
+# operators copy the binary to /usr/local/bin/. The --config flag
+# points at the on-disk server.yaml (see docs/GETTING-STARTED.md
+# for the schema and a minimal example); cmd/wolfci refuses to
+# start without either --config or the positional quick-mode args.
+ExecStart=/usr/local/bin/wolfci --config /etc/wolfci/server.yaml
 
 # Restart on unexpected exit. RestartSec is generous so a crash loop
 # does not hammer the system; tune in a drop-in override if needed.

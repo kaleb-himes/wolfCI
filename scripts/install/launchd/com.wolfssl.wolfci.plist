@@ -8,6 +8,8 @@
     <key>ProgramArguments</key>
     <array>
         <string>/usr/local/bin/wolfci</string>
+        <string>--config</string>
+        <string>/usr/local/etc/wolfci/server.yaml</string>
     </array>
 
     <key>WorkingDirectory</key>

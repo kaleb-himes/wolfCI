@@ -21,14 +21,15 @@ Format conventions:
 
 ## Current Phase
 
-Phase 11 - cmd/wolfci wiring (placeholder)
+Phase 12 - Nodes view UX parity
 
 (Phase completion log. Phase 0 was completed in the initial
 planning turn. Phase 1 completed in iteration 4, Phase 2 in
 iteration 5, Phase 3 in iteration 8, Phase 4 in iteration 10,
 Phase 5 in iteration 21, Phase 6 in iteration 25, Phase 7 in
 iteration 28, Phase 8 in iteration 32, Phase 9 in iteration 37,
-Phase 10 in iteration 49 of the slash-loop run.)
+Phase 10 in iteration 49, Phase 11 in iteration 51 of the
+slash-loop run.)
 
 ## Phase 0 - Bootstrap
 
@@ -1841,13 +1842,34 @@ Decisions locked in for Phase 11 (2026-05-21):
          Cancelled), TestRun_GracefulShutdownTimeoutClosesAnyway
          (hanging executor, 300ms drain budget, Run exits
          between 300ms and 2s post-cancel).
-- [ ] 11.7 docs/GETTING-STARTED.md update: rewrite the operator
+- [x] 11.7 docs/GETTING-STARTED.md update: rewrite the operator
          walkthrough to match the actual cmd/wolfci flow
          (config-files/server.yaml example, first-admin
          bootstrap, /setup consumption, day-2 user management
          pointer to docs/SECURITY.md). The existing
          scripts/test-getting-started.sh gate stays green by
          construction.
+         Done: GETTING-STARTED.md grew a "4. Author server.yaml"
+         step (minimal Linux layout + the systemd/launchd paths
+         the unit files reference; quick-mode kept as the laptop
+         path); "Bootstrap the first admin" rewritten around
+         BYOK (server prints /setup?token=... to stdout;
+         operator pastes their own ~/.ssh/id_*.pub; setup
+         writes <username>.pub, appends to matrix.yaml, renames
+         bootstrap/ to bootstrap.consumed/) replacing the old
+         "server generates a keypair" prose; a "Day-2 user
+         management" section points to docs/SECURITY.md for
+         everything past the first admin. The systemd unit's
+         ExecStart now passes --config /etc/wolfci/server.yaml
+         and the launchd plist's ProgramArguments adds
+         --config /usr/local/etc/wolfci/server.yaml so both
+         service templates work with the cmd/wolfci flag-or-
+         positional CLI from Phase 11.5.
+         Gate: scripts/test-getting-started.sh grew five new
+         assertions (--config, server.yaml, /setup,
+         paste|BYOK, docs/SECURITY.md pointer) on top of the
+         existing eleven tokens; the rewrite turns the gate
+         green by construction.
 
 ## Phase 12 - Nodes view UX parity
 
