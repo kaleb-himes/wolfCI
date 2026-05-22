@@ -21,11 +21,7 @@ Format conventions:
 
 ## Current Phase
 
-Backlog only - every numbered phase (0..15) is complete. The
-next /loop iteration should promote a Backlog item into a new
-numbered phase (with sub-tasks and gating tests) before doing
-any work; the loop's "next unchecked task" walk has nothing
-to pick otherwise.
+Phase 16 - Jenkins-parity UI refresh.
 
 (Phase completion log. Phase 0 was completed in the initial
 planning turn. Phase 1 completed in iteration 4, Phase 2 in
@@ -2949,6 +2945,78 @@ Decisions to lock in:
          go test -run; wired into scripts/test.sh.
 
 Phase 15 complete; Current Phase advances to Phase 16.
+
+## Phase 16 - Jenkins-parity UI refresh
+
+User ask 2026-05-22 (Jenkins screenshot annotated by the
+project owner): "make ours look like jenkins". The per-job
+page today renders the actions, permalinks, and build
+history as a vertical scroll inside one big panel. Jenkins
+splits the same information across two stacked left panels
+(Actions on top, Builds below) and one right column with
+the header + upstream + permalinks. Phase 16 brings wolfCI
+to that visual parity.
+
+Decisions to lock in:
+
+- Dark theme is the DEFAULT. The light variant is exposed
+  as a toggle button literally labeled "stupid white view
+  that nobody wants" (operator's wording, kept verbatim).
+- Theme persistence via localStorage; an inline <head>
+  script reads it before the first paint so there is no
+  flash-of-wrong-theme on reload.
+- Layout via CSS grid (page-grid with two columns) +
+  internal flex. Below a small min-width the grid
+  collapses to single-column so the page reads on a
+  laptop in split-screen.
+- Build history moves out of the main column and into a
+  second left-column panel, grouped by date bucket
+  ("Today" / "Yesterday" / "YYYY-MM-DD") for navigability.
+
+- [x] 16.1 Dark-by-default theme + "stupid white view that
+         nobody wants" toggle; jobdetail.html restructured
+         into the two-column Jenkins-parity layout (left:
+         Actions panel then Builds panel; right: header
+         with status icon + Edit-description button, then
+         Upstream Projects, then Permalinks). The build
+         history left-panel groups rows by date bucket.
+         Padding + alignment via CSS grid + media query so
+         the page reads at 800px and at 1920px.
+         Done: base.html now sets data-theme="dark" on
+         <html> by default; an inline <head> script reads
+         localStorage("wolfci-theme") before first paint
+         so a reload never flashes the wrong theme. A
+         header-bar button toggles between dark and light;
+         label is "stupid white view that nobody wants"
+         (operator's verbatim phrasing) when in dark mode
+         and "Back to the sane dark theme" when in light.
+         Choice persists to localStorage. app.css is a
+         full rewrite: CSS variables for both themes,
+         page-grid (260px + 1fr) with media-query collapse
+         at 880px, panel + actions-panel + builds-panel +
+         job-header styles to mirror the Jenkins shape.
+         jobdetail.html restructured: left-column carries
+         actions-panel (Build Now / Configure / Rebuild
+         Last / Workspace / Rename inline form / Delete
+         Project) then builds-panel (filter input + per-
+         date-bucket groups); right-column carries
+         job-header (status pill + name + Edit-description
+         link + description) then Upstream/Downstream/
+         Sibling/Permalinks panels. groupBuildsByDate
+         buckets buildHistoryRow into Today / Yesterday /
+         YYYY-MM-DD groups for the builds panel. Gates:
+         TestTheme_DefaultIsDark,
+         TestTheme_LightToggleHasVerbatimName,
+         TestJobDetail_BuildsPanelInLeftColumn (asserts
+         the structural CSS-class markers AND that the
+         builds-panel offset sits between left-column and
+         right-column),
+         TestJobDetail_BuildsGroupedByDate (seeds builds
+         today / yesterday / week-ago and asserts the
+         three corresponding labels appear).
+
+Phase 16 complete; Current Phase remains Phase 16 for any
+follow-up polish iterations.
 
 ## Backlog (not in main flow)
 

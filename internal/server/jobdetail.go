@@ -46,6 +46,65 @@ type buildHistoryRow struct {
     When         time.Time
 }
 
+/* buildGroup is one "Today" / "Yesterday" / "2026-05-15"
+ * bucket for the Jenkins-parity builds panel (Phase 16). The
+ * template iterates these so the panel reads chronologically
+ * without forcing the operator to count timestamps in their
+ * head.
+ */
+type buildGroup struct {
+    Label string
+    Rows  []buildHistoryRow
+}
+
+/* groupBuildsByDate buckets rows (newest-first) into per-day
+ * groups. The two most recent buckets get the friendly labels
+ * "Today" and "Yesterday"; older buckets carry the ISO date
+ * (YYYY-MM-DD) which is unambiguous across timezones and
+ * easy to grep. Rows whose When is zero (no result.json and
+ * no dir mtime - extremely unlikely) fall into a single
+ * "Undated" bucket at the end.
+ */
+func groupBuildsByDate(rows []buildHistoryRow,
+    now time.Time) []buildGroup {
+
+    today := dayKey(now)
+    yesterday := dayKey(now.AddDate(0, 0, -1))
+
+    var groups []buildGroup
+    indexByKey := map[string]int{}
+    for _, r := range rows {
+        var key, label string
+        if r.When.IsZero() {
+            key = "undated"
+            label = "Undated"
+        } else {
+            key = dayKey(r.When)
+            switch key {
+            case today:
+                label = "Today"
+            case yesterday:
+                label = "Yesterday"
+            default:
+                label = key
+            }
+        }
+        if idx, ok := indexByKey[key]; ok {
+            groups[idx].Rows = append(groups[idx].Rows, r)
+            continue
+        }
+        indexByKey[key] = len(groups)
+        groups = append(groups, buildGroup{
+            Label: label, Rows: []buildHistoryRow{r},
+        })
+    }
+    return groups
+}
+
+func dayKey(t time.Time) string {
+    return t.Format("2006-01-02")
+}
+
 /* permalinks holds the "Last X build" pointers the detail page
  * shows in its header. A nil pointer means "no such build yet"
  * and the template renders "none" instead of a link.
@@ -109,11 +168,14 @@ func (s *Server) handleJobDetail(w http.ResponseWriter, r *http.Request,
         links = computeTriggerLinks(name, jobs)
     }
 
+    groups := groupBuildsByDate(visible, time.Now())
+
     s.render(w, "jobdetail.html", map[string]interface{}{
         "Title":       job.Name,
         "Name":        job.Name,
         "Description": job.Description,
         "Builds":      visible,
+        "BuildGroups": groups,
         "Truncated":   truncated,
         "Permalinks":  perms,
         "Upstream":    links.Upstream,

@@ -1,8 +1,9 @@
 {{ define "content" }}
-<section class="panel job-detail">
-<div class="job-detail-grid">
+<div class="page-grid">
 
-<aside class="job-sidebar">
+<aside class="left-column">
+
+<section class="panel actions-panel">
 <h3>Actions</h3>
 <ul class="sidebar-actions">
 <li>
@@ -16,11 +17,6 @@
 </li>
 <li><a href="/jobs/{{ .Name }}/edit"><button type="button">Configure</button></a></li>
 <li>
-<form method="POST" action="/jobs/{{ .Name }}/delete" class="delete-form">
-<button type="submit" class="danger">Delete</button>
-</form>
-</li>
-<li>
 {{ if and .CanRun .Permalinks.LastBuild }}
 <form method="POST" action="/jobs/{{ .Name }}/rebuild" class="rebuild-form">
 <button type="submit">Rebuild Last</button>
@@ -30,59 +26,119 @@
 {{ end }}
 </li>
 <li>
-<form method="POST" action="/jobs/{{ .Name }}/rename" class="rename-form">
-<input type="text" name="new_name" placeholder="new name" required>
-<button type="submit">Rename</button>
-</form>
-</li>
-<li>
 {{ if .Permalinks.LastBuild }}
 <a href="/jobs/{{ .Name }}/builds/{{ .Permalinks.LastBuild.Number }}/ws/"><button type="button">Workspace</button></a>
 {{ else }}
 <button type="button" disabled title="No previous build">Workspace</button>
 {{ end }}
 </li>
+<li>
+<form method="POST" action="/jobs/{{ .Name }}/rename" class="rename-form">
+<input type="text" name="new_name" placeholder="new name" required>
+<button type="submit">Rename</button>
+</form>
+</li>
+<li>
+<form method="POST" action="/jobs/{{ .Name }}/delete" class="delete-form">
+<button type="submit" class="danger">Delete Project</button>
+</form>
+</li>
 </ul>
+</section>
+
+<section class="panel builds-panel">
+<h3>Builds</h3>
+<input type="text" class="builds-filter" placeholder="Filter" aria-label="Filter builds">
+{{ if .BuildGroups }}
+{{ range .BuildGroups }}
+<div class="builds-group">
+<h4>{{ .Label }}</h4>
+<ul>
+{{ range .Rows }}
+<li>
+{{ if eq .Status "success" }}<span class="node-status ok">&#x25CF;</span>
+{{ else if eq .Status "failure" }}<span class="node-status offline">&#x2715;</span>
+{{ else if eq .Status "error" }}<span class="node-status offline">!</span>
+{{ else if eq .Status "cancelled" }}<span class="node-status na">&#x25A0;</span>
+{{ else }}<span class="node-status na">?</span>
+{{ end }}
+<a href="/jobs/{{ $.Name }}/builds/{{ .Number }}">#{{ .Number }}</a>
+<span class="build-time">{{ .RelativeTime }}</span>
+</li>
+{{ end }}
+</ul>
+</div>
+{{ end }}
+{{ if .Truncated }}
+<p class="muted">Showing the 100 most-recent builds.
+<a href="/jobs/{{ .Name }}/builds">See all builds &rarr;</a></p>
+{{ end }}
+{{ else }}
+<p class="muted">No builds yet.</p>
+{{ end }}
+</section>
+
 </aside>
 
-<div class="job-main">
-<h2>{{ .Name }}</h2>
-<p><a href="/jobs">&larr; Back to jobs</a></p>
+<main class="right-column">
 
+<section class="panel job-header">
+<div class="title-row">
+{{ with .Permalinks.LastBuild }}
+{{ if eq .Status "success" }}<span class="status-pill success" title="last build succeeded">&#x2713;</span>
+{{ else if eq .Status "failure" }}<span class="status-pill failure" title="last build failed">&#x2715;</span>
+{{ else if eq .Status "error" }}<span class="status-pill error" title="last build errored">!</span>
+{{ else if eq .Status "cancelled" }}<span class="status-pill cancelled" title="last build cancelled">&#x25A0;</span>
+{{ else if eq .Status "running" }}<span class="status-pill running" title="build in flight">&#x25EF;</span>
+{{ else }}<span class="status-pill none" title="no builds yet">&#x25CB;</span>
+{{ end }}
+{{ else }}
+<span class="status-pill none" title="no builds yet">&#x25CB;</span>
+{{ end }}
+<h2>{{ .Name }}</h2>
+<a href="/jobs/{{ .Name }}/edit" class="edit-description-btn">Edit description</a>
+</div>
 {{ if .Description }}
 <p class="job-description">{{ .Description }}</p>
 {{ else }}
-<p class="muted">No description.</p>
+<p class="job-description muted">No description.</p>
 {{ end }}
+</section>
 
-{{ if or .Upstream .Downstream .Siblings }}
-<h3>Trigger graph</h3>
 {{ if .Upstream }}
-<h4>Upstream Projects</h4>
+<section class="panel">
+<h3>Upstream Projects</h3>
 <ul class="trigger-list">
 {{ range .Upstream }}
 <li><a href="/jobs/{{ . }}">{{ . }}</a></li>
 {{ end }}
 </ul>
+</section>
 {{ end }}
+
 {{ if .Downstream }}
-<h4>Downstream Projects</h4>
+<section class="panel">
+<h3>Downstream Projects</h3>
 <ul class="trigger-list">
 {{ range .Downstream }}
 <li><a href="/jobs/{{ . }}">{{ . }}</a></li>
 {{ end }}
 </ul>
+</section>
 {{ end }}
+
 {{ if .Siblings }}
-<h4>Sibling Projects</h4>
+<section class="panel">
+<h3>Sibling Projects</h3>
 <ul class="trigger-list">
 {{ range .Siblings }}
 <li><a href="/jobs/{{ . }}">{{ . }}</a></li>
 {{ end }}
 </ul>
-{{ end }}
+</section>
 {{ end }}
 
+<section class="panel">
 <h3>Permalinks</h3>
 <ul class="permalinks">
 <li>Last build:
@@ -116,38 +172,9 @@
 {{ else }}<span class="muted">none</span>{{ end }}
 </li>
 </ul>
-
-<h3>Build history</h3>
-{{ if .Builds }}
-<table class="build-history">
-<thead><tr><th>S</th><th>Build</th><th>When</th></tr></thead>
-<tbody>
-{{ range .Builds }}
-<tr>
-<td>
-{{ if eq .Status "success" }}<span class="node-status ok">&#x25CF;</span>
-{{ else if eq .Status "failure" }}<span class="node-status offline">&#x2715;</span>
-{{ else if eq .Status "error" }}<span class="node-status offline">!</span>
-{{ else if eq .Status "cancelled" }}<span class="node-status na">&#x25A0;</span>
-{{ else }}<span class="node-status na">?</span>
-{{ end }}
-</td>
-<td><a href="/jobs/{{ $.Name }}/builds/{{ .Number }}">#{{ .Number }}</a>
-<span class="muted">{{ .Status }}</span></td>
-<td><span class="muted">{{ .RelativeTime }}</span></td>
-</tr>
-{{ end }}
-</tbody>
-</table>
-{{ if .Truncated }}
-<p class="muted">Showing the 100 most-recent builds.
-<a href="/jobs/{{ .Name }}/builds">See all builds &rarr;</a></p>
-{{ end }}
-{{ else }}
-<p class="muted">No builds yet. Use <strong>Build Now</strong> to enqueue the first one.</p>
-{{ end }}
-</div>
-
-</div>
 </section>
+
+</main>
+
+</div>
 {{ end }}

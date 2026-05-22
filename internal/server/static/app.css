@@ -1,145 +1,337 @@
 /* wolfCI hand-written CSS. Single file embedded into the
-   server binary; loaded by every page. Keep it small and
-   readable. No utility-class soup. */
+   server binary; loaded by every page. Phase 16 introduces
+   the dark theme + Jenkins-parity two-column layout. */
+
+/* Theme variables. Dark is the default and lives on :root so
+   a fresh load before the inline script runs already paints
+   dark. The light theme is the "stupid white view that nobody
+   wants" toggle; it overrides the same variables under a
+   selector that matches the toggle's data-theme="light". */
 
 :root {
+    --bg: #1a1a1a;
+    --panel: #262626;
+    --panel-alt: #2e2e2e;
+    --text: #e8e8e8;
+    --muted: #9aa0a6;
+    --border: #353535;
+    --border-strong: #4a4a4a;
+    --accent: #4a8aff;
+    --accent-fg: #ffffff;
+    --link: #6db3ff;
+    --link-visited: #b58aff;
+    --danger: #ff6464;
+    --success: #34d058;
+    --warn: #f0b429;
+    --topbar-bg: #0e0e0e;
+    --topbar-fg: #f5f5f5;
+}
+
+html[data-theme="light"] {
     --bg: #f7f7f7;
     --panel: #ffffff;
+    --panel-alt: #f1f3f5;
     --text: #1c1c1c;
     --muted: #6a6a6a;
+    --border: #d8d8d8;
+    --border-strong: #b8b8b8;
     --accent: #2055a6;
     --accent-fg: #ffffff;
-    --border: #d8d8d8;
+    --link: #0066cc;
+    --link-visited: #6b46c1;
     --danger: #b03030;
+    --success: #2a8a2a;
+    --warn: #b87a00;
+    --topbar-bg: #2055a6;
+    --topbar-fg: #ffffff;
 }
 
 * { box-sizing: border-box; }
 
+html, body { height: 100%; }
+
 body {
     margin: 0;
-    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", sans-serif;
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI",
+                 Roboto, "Helvetica Neue", sans-serif;
     background: var(--bg);
     color: var(--text);
 }
 
-header {
-    background: var(--accent);
-    color: var(--accent-fg);
-    padding: 12px 24px;
-}
+a { color: var(--link); }
+a:visited { color: var(--link-visited); }
 
-header h1 {
+/* Top bar */
+
+.topbar {
+    background: var(--topbar-bg);
+    color: var(--topbar-fg);
+    border-bottom: 1px solid var(--border);
+}
+.topbar-inner {
+    max-width: 1600px;
+    margin: 0 auto;
+    padding: 10px 24px;
+    display: flex;
+    align-items: center;
+    gap: 24px;
+}
+.topbar-logo {
     margin: 0;
     font-size: 18px;
-    font-weight: 600;
-    display: inline-block;
-    margin-right: 24px;
+    font-weight: 700;
 }
-
-nav.topnav {
-    display: inline-block;
+.topnav {
+    display: flex;
+    gap: 20px;
 }
-
-nav.topnav a {
-    color: var(--accent-fg);
+.topnav a {
+    color: var(--topbar-fg);
     text-decoration: none;
-    margin-right: 18px;
     font-weight: 500;
+    font-size: 14px;
 }
-
-nav.topnav a:hover { text-decoration: underline; }
-
-.logout-form {
-    display: inline-block;
-    margin: 0;
+.topnav a:hover { text-decoration: underline; }
+.topbar-right {
+    margin-left: auto;
+    display: flex;
+    align-items: center;
+    gap: 12px;
 }
+.theme-toggle {
+    background: transparent;
+    color: var(--topbar-fg);
+    border: 1px solid rgba(255,255,255,0.25);
+    padding: 6px 12px;
+    border-radius: 4px;
+    font-size: 12px;
+    cursor: pointer;
+    font-family: inherit;
+}
+.theme-toggle:hover { background: rgba(255,255,255,0.08); }
 
+.logout-form { display: inline-block; margin: 0; }
 .link-button {
     background: transparent;
-    color: var(--accent-fg);
+    color: var(--topbar-fg);
     border: 0;
     padding: 0;
     cursor: pointer;
     font-weight: 500;
     font-size: 14px;
+    font-family: inherit;
 }
-
 .link-button:hover { text-decoration: underline; }
 
-.status-connected {
-    color: #2a8a2a;
-    font-weight: 600;
+/* Page wrap + grid */
+
+.main-wrap {
+    max-width: 1600px;
+    margin: 0 auto;
+    padding: 16px 24px 24px;
 }
 
-/* Phase 12 Nodes view status badge. A single-character icon
- * in the S column tells the operator at a glance whether each
- * agent is live, gone dark, or hasn't checked in yet.
- */
-.node-status {
-    display: inline-block;
-    width: 1.2em;
-    text-align: center;
-    font-weight: 700;
+.page-grid {
+    display: grid;
+    grid-template-columns: 260px 1fr;
+    gap: 16px;
+    align-items: start;
 }
-.node-status.ok      { color: #2a8a2a; }
-.node-status.offline { color: #b00020; }
-.node-status.na      { color: #888;    }
-.node-master         { background: #f6faff; }
 
-main {
-    max-width: 960px;
-    margin: 24px auto;
-    padding: 0 16px;
+@media (max-width: 880px) {
+    .page-grid { grid-template-columns: 1fr; }
 }
+
+.left-column,
+.right-column {
+    display: flex;
+    flex-direction: column;
+    gap: 16px;
+    min-width: 0;
+}
+
+/* Panels */
 
 .panel {
     background: var(--panel);
     border: 1px solid var(--border);
     border-radius: 6px;
-    padding: 24px;
-    margin-bottom: 16px;
+    padding: 16px 20px;
 }
 
-h2 {
+.panel h2 {
     margin-top: 0;
     font-size: 20px;
-}
-
-label {
-    display: block;
-    margin-bottom: 4px;
     font-weight: 600;
 }
+.panel h3 {
+    margin-top: 0;
+    font-size: 14px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    color: var(--muted);
+}
+.panel h4 {
+    margin: 12px 0 6px;
+    font-size: 12px;
+    font-weight: 600;
+    color: var(--muted);
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+}
 
-input[type="text"], input[type="password"] {
+/* Actions panel (left column, top) */
+
+.actions-panel ul.sidebar-actions {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+}
+.actions-panel li { margin: 0; }
+.actions-panel form { margin: 0; }
+.actions-panel button,
+.actions-panel a > button,
+.actions-panel input[type="text"] {
     width: 100%;
-    padding: 8px 10px;
-    margin-bottom: 12px;
+    text-align: left;
+    padding: 8px 12px;
+    background: var(--panel-alt);
+    color: var(--text);
     border: 1px solid var(--border);
     border-radius: 4px;
-    font-size: 14px;
+    font-size: 13px;
+    cursor: pointer;
+    font-family: inherit;
 }
-
-button {
+.actions-panel button:hover:not(:disabled) {
     background: var(--accent);
     color: var(--accent-fg);
-    border: 0;
-    padding: 8px 16px;
-    border-radius: 4px;
-    cursor: pointer;
-    font-size: 14px;
+    border-color: var(--accent);
+}
+.actions-panel button:disabled {
+    color: var(--muted);
+    cursor: not-allowed;
+}
+.actions-panel .rename-form {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+}
+.actions-panel button.danger:hover {
+    background: var(--danger);
+    color: var(--accent-fg);
+    border-color: var(--danger);
 }
 
-button:hover { filter: brightness(1.08); }
+/* Builds panel (left column, bottom) */
 
-.error {
-    background: #fbeaea;
-    color: var(--danger);
-    border: 1px solid var(--danger);
-    padding: 8px 12px;
+.builds-panel .builds-filter {
+    width: 100%;
+    margin: 8px 0 12px;
+    padding: 6px 10px;
+    border: 1px solid var(--border);
     border-radius: 4px;
-    margin-bottom: 12px;
+    background: var(--panel-alt);
+    color: var(--text);
+    font-size: 13px;
+    font-family: inherit;
 }
+
+.builds-group {
+    margin-top: 8px;
+}
+.builds-group ul {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+}
+.builds-group li {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 6px 4px;
+    border-bottom: 1px solid var(--border);
+    font-size: 13px;
+}
+.builds-group li:last-child { border-bottom: 0; }
+.builds-group a {
+    color: var(--link);
+    text-decoration: none;
+    font-weight: 600;
+}
+.builds-group a:hover { text-decoration: underline; }
+.builds-group .build-time {
+    margin-left: auto;
+    color: var(--muted);
+    font-size: 12px;
+}
+
+/* Job header (right column, top) */
+
+.job-header .title-row {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+}
+.job-header .title-row h2 { flex: 1; margin: 0; }
+.job-header .edit-description-btn {
+    background: var(--panel-alt);
+    border: 1px solid var(--border);
+    padding: 6px 12px;
+    border-radius: 4px;
+    color: var(--text);
+    text-decoration: none;
+    font-size: 12px;
+}
+.job-header .edit-description-btn:hover {
+    border-color: var(--accent);
+    color: var(--accent);
+}
+.job-description {
+    margin: 10px 0 0;
+    color: var(--text);
+    line-height: 1.45;
+}
+
+/* Status icon next to the job title. */
+.status-pill {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 22px;
+    height: 22px;
+    border-radius: 50%;
+    color: var(--accent-fg);
+    font-weight: 700;
+    font-size: 13px;
+}
+.status-pill.success { background: var(--success); }
+.status-pill.failure { background: var(--danger); }
+.status-pill.error   { background: var(--danger); }
+.status-pill.cancelled { background: var(--muted); }
+.status-pill.running { background: var(--warn); }
+.status-pill.none { background: var(--border-strong); color: var(--text); }
+
+/* Permalinks + trigger graph + simple lists in main column */
+
+ul.permalinks,
+ul.trigger-list {
+    list-style: disc;
+    margin: 6px 0 0 20px;
+    padding: 0;
+    color: var(--text);
+}
+ul.permalinks li,
+ul.trigger-list li {
+    margin: 4px 0;
+}
+
+/* Old per-page-table styles preserved for /jobs index, /nodes,
+   build-history, etc. Tightened for the dark surface. */
 
 table {
     width: 100%;
@@ -152,12 +344,75 @@ th, td {
     border-bottom: 1px solid var(--border);
 }
 
-th { color: var(--muted); font-weight: 600; font-size: 13px; }
+th {
+    color: var(--muted);
+    font-weight: 600;
+    font-size: 12px;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+}
 
 .muted { color: var(--muted); }
 
+label {
+    display: block;
+    margin-bottom: 4px;
+    font-weight: 600;
+}
+
+input[type="text"], input[type="password"], textarea {
+    width: 100%;
+    padding: 8px 10px;
+    margin-bottom: 12px;
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    font-size: 14px;
+    background: var(--panel-alt);
+    color: var(--text);
+    font-family: inherit;
+}
+
+button {
+    background: var(--accent);
+    color: var(--accent-fg);
+    border: 0;
+    padding: 8px 16px;
+    border-radius: 4px;
+    cursor: pointer;
+    font-size: 14px;
+    font-family: inherit;
+}
+button:hover { filter: brightness(1.08); }
+button:disabled {
+    background: var(--panel-alt);
+    color: var(--muted);
+    cursor: not-allowed;
+}
+
+.error {
+    background: rgba(255,100,100,0.12);
+    color: var(--danger);
+    border: 1px solid var(--danger);
+    padding: 8px 12px;
+    border-radius: 4px;
+    margin-bottom: 12px;
+}
+
+/* Status badge on /nodes - kept from Phase 12. */
+.node-status {
+    display: inline-block;
+    width: 1.2em;
+    text-align: center;
+    font-weight: 700;
+}
+.node-status.ok      { color: var(--success); }
+.node-status.offline { color: var(--danger); }
+.node-status.na      { color: var(--muted); }
+.node-master         { background: rgba(74,138,255,0.08); }
+
+/* Log viewer (per-build live log) */
 pre.log {
-    background: #111;
+    background: #0a0a0a;
     color: #e6e6e6;
     padding: 16px;
     border-radius: 6px;
@@ -165,6 +420,29 @@ pre.log {
     font-size: 12.5px;
     line-height: 1.45;
     overflow-x: auto;
+    white-space: pre-wrap;
+    word-break: break-word;
+    border: 1px solid var(--border);
+}
+
+/* Trigger badge on /jobs index */
+.trigger-badge {
+    font-size: 12px;
+    margin-left: 6px;
+}
+
+/* Workspace preview */
+.workspace-preview {
+    font-family: "SFMono-Regular", Menlo, Consolas, monospace;
+    font-size: 12.5px;
+}
+.workspace-preview td.lineno {
+    width: 3em;
+    text-align: right;
+    user-select: none;
+}
+.workspace-preview pre {
+    margin: 0;
     white-space: pre-wrap;
     word-break: break-word;
 }

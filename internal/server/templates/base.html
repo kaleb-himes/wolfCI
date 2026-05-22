@@ -1,22 +1,64 @@
 {{ define "base" }}<!DOCTYPE html>
-<html lang="en">
+<html lang="en" data-theme="dark">
 <head>
 <meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
 <title>{{ .Title }} - wolfCI</title>
 <link rel="stylesheet" href="/static/app.css">
+<script>
+/* Phase 16: read the persisted theme choice BEFORE the
+ * first paint so a page reload does not flash the wrong
+ * theme. Default to dark; the only other value is "light"
+ * (the "stupid white view that nobody wants").
+ */
+(function () {
+  try {
+    var t = localStorage.getItem("wolfci-theme");
+    if (t === "light" || t === "dark") {
+      document.documentElement.setAttribute("data-theme", t);
+    }
+  } catch (e) { /* localStorage may be unavailable; default dark stays. */ }
+})();
+</script>
 </head>
 <body>
-<header>
-<h1>wolfCI</h1>
+<header class="topbar">
+<div class="topbar-inner">
+<h1 class="topbar-logo">wolfCI</h1>
 <nav class="topnav">
 <a href="/jobs">Jobs</a>
 <a href="/nodes">Nodes</a>
-<form method="POST" action="/logout" class="logout-form"><button type="submit" class="link-button">Sign out</button></form>
 </nav>
+<div class="topbar-right">
+<button type="button" id="theme-toggle" class="theme-toggle" data-light-label="stupid white view that nobody wants" data-dark-label="Back to the sane dark theme">stupid white view that nobody wants</button>
+<form method="POST" action="/logout" class="logout-form"><button type="submit" class="link-button">Sign out</button></form>
+</div>
+</nav>
+</div>
 </header>
-<main>
+<main class="main-wrap">
 {{ template "content" . }}
 </main>
+<script>
+(function () {
+  var btn = document.getElementById("theme-toggle");
+  if (!btn) return;
+  function setLabel() {
+    var cur = document.documentElement.getAttribute("data-theme") || "dark";
+    btn.textContent = cur === "dark"
+      ? btn.getAttribute("data-light-label")
+      : btn.getAttribute("data-dark-label");
+  }
+  setLabel();
+  btn.addEventListener("click", function () {
+    var cur = document.documentElement.getAttribute("data-theme") || "dark";
+    var next = cur === "dark" ? "light" : "dark";
+    document.documentElement.setAttribute("data-theme", next);
+    try { localStorage.setItem("wolfci-theme", next); } catch (e) {}
+    setLabel();
+  });
+})();
+</script>
 </body>
 </html>
 {{ end }}
