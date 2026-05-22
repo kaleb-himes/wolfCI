@@ -190,12 +190,34 @@ func (s *Server) handleJobRoutes(w http.ResponseWriter, r *http.Request) {
 			}
 			s.handleBuildsIndex(w, r, name)
 		case len(parts) == 3 && parts[1] == "builds":
-			num, err := strconv.Atoi(parts[2])
+			/* parts[2] may be just "<n>" (live-log page) or
+			 * "<n>/ws[/...]" (workspace browser). Split on
+			 * the first slash to tell them apart.
+			 */
+			tail := parts[2]
+			slash := strings.IndexByte(tail, '/')
+			numStr := tail
+			sub := ""
+			if slash >= 0 {
+				numStr = tail[:slash]
+				sub = tail[slash+1:]
+			}
+			num, err := strconv.Atoi(numStr)
 			if err != nil || num < 1 {
 				http.Error(w, "invalid build number", http.StatusBadRequest)
 				return
 			}
-			s.handleBuildLogPage(w, r, name, num)
+			switch {
+			case sub == "":
+				s.handleBuildLogPage(w, r, name, num)
+			case sub == "ws" || sub == "ws/":
+				s.handleWorkspace(w, r, name, num, "")
+			case strings.HasPrefix(sub, "ws/"):
+				s.handleWorkspace(w, r, name, num,
+					strings.TrimPrefix(sub, "ws/"))
+			default:
+				http.NotFound(w, r)
+			}
 		default:
 			http.NotFound(w, r)
 		}

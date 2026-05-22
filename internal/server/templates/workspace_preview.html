@@ -1,0 +1,19 @@
+{{ define "content" }}
+<section class="panel">
+<h2>{{ .SubPath }}</h2>
+<p><a href="{{ .Parent }}">&larr; Up</a>
+&middot; <a href="{{ .BuildURL }}">Back to build #{{ .BuildNum }}</a></p>
+
+<table class="workspace-preview">
+<tbody>
+{{ range .Lines }}
+<tr>
+<td class="lineno"><span class="muted">{{ .N }}</span></td>
+<td class="codecell"><pre>{{ .Text }}</pre></td>
+</tr>
+{{ end }}
+</tbody>
+</table>
+
+</section>
+{{ end }}

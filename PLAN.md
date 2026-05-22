@@ -2576,17 +2576,40 @@ Decisions to lock in:
          TestRetention_KeepsByAge,
          TestRetention_KeepsByEitherWhenBothSet,
          TestRetention_DefaultIsKeepForever.
-- [ ] 14.2 Workspace browser at /jobs/<name>/builds/<n>/ws/
+- [x] 14.2 Workspace browser at /jobs/<name>/builds/<n>/ws/
          and /jobs/<name>/builds/<n>/ws/<path>. Server-side
          tree walk with path-traversal guards (no "..", no
          absolute paths, normalize before stat). Text preview
          under 256KiB; download link with Content-Type sniff
          for everything else.
-         Failing tests:
+         Done: handleWorkspace in workspace.go dispatches
+         dir-listing vs file-serve. Two layers of traversal
+         defense: (1) reject "/" prefix or ".." segments
+         before any filesystem call; (2) after
+         filepath.Abs(root) + filepath.Abs(target), require
+         absTarget == absRoot or absTarget starts with
+         absRoot+separator (catches URL-encoded ".." and
+         out-pointing symlinks). path.Clean folds "//" and
+         trailing slashes without reintroducing ".."
+         (already rejected). File response: read first 512
+         bytes once for http.DetectContentType, stream raw
+         with the sniffed type when size > 256KiB OR the
+         type isn't text-like (text/*, application/json,
+         application/xml, application/javascript);
+         otherwise render a line-numbered preview.
+         workspace.html renders the listing (dirs first,
+         alphabetized; size in bytes), workspace_preview.
+         html the inline file view. Route wired in
+         handleJobRoutes for `ws[/<sub>]` after the
+         existing `builds/<n>` live-log case, sharing the
+         build-number parse. Gates:
          TestWorkspace_ListsImmediateChildren,
-         TestWorkspace_RejectsPathTraversal,
+         TestWorkspace_RejectsPathTraversal (sentinel-
+         leak check via follow-redirects so the mux's
+         path-clean 301 does not false-positive),
          TestWorkspace_RendersTextPreviewBelowThreshold,
-         TestWorkspace_DownloadsBinaryWithSniff.
+         TestWorkspace_DownloadsBinaryWithSniff (PNG
+         header -> Content-Type: image/*).
 - [ ] 14.3 Each Enqueue snapshots the current job spec into
          builds/<job>/<n>/spec.yaml. Rebuild Last (POST
          /jobs/<name>/rebuild) loads the snapshot of the most

@@ -1,0 +1,30 @@
+{{ define "content" }}
+<section class="panel">
+<h2>Workspace: {{ .JobName }} #{{ .BuildNum }}</h2>
+<p><a href="{{ .BuildURL }}">&larr; Back to build</a></p>
+
+{{ if .SubPath }}
+<p class="muted">Path: <code>{{ .SubPath }}</code>
+&middot; <a href="{{ .Parent }}">..</a></p>
+{{ else }}
+<p class="muted">Root of the workspace.</p>
+{{ end }}
+
+{{ if .Entries }}
+<table class="workspace-listing">
+<thead><tr><th>Name</th><th>Size</th></tr></thead>
+<tbody>
+{{ range .Entries }}
+<tr>
+<td><a href="{{ .Href }}">{{ .Name }}{{ if .IsDir }}/{{ end }}</a></td>
+<td>{{ if .IsDir }}<span class="muted">&mdash;</span>{{ else }}{{ .Size }}{{ end }}</td>
+</tr>
+{{ end }}
+</tbody>
+</table>
+{{ else }}
+<p class="muted">Empty directory.</p>
+{{ end }}
+
+</section>
+{{ end }}
