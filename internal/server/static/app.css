@@ -71,6 +71,21 @@ nav.topnav a:hover { text-decoration: underline; }
     font-weight: 600;
 }
 
+/* Phase 12 Nodes view status badge. A single-character icon
+ * in the S column tells the operator at a glance whether each
+ * agent is live, gone dark, or hasn't checked in yet.
+ */
+.node-status {
+    display: inline-block;
+    width: 1.2em;
+    text-align: center;
+    font-weight: 700;
+}
+.node-status.ok      { color: #2a8a2a; }
+.node-status.offline { color: #b00020; }
+.node-status.na      { color: #888;    }
+.node-master         { background: #f6faff; }
+
 main {
     max-width: 960px;
     margin: 24px auto;

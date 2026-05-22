@@ -2,15 +2,37 @@
 <section class="panel">
 <h2>Nodes</h2>
 {{ if .Nodes }}
-<table>
-<thead><tr><th>Agent ID</th><th>Status</th><th>Labels</th><th>Executors</th></tr></thead>
+<table class="nodes">
+<thead><tr>
+<th>S</th>
+<th>Name</th>
+<th>Architecture</th>
+<th>Clock difference</th>
+<th>Free disk</th>
+<th>Free swap</th>
+<th>Free temp</th>
+<th>Go version</th>
+<th>Response time</th>
+<th>Agent version</th>
+</tr></thead>
 <tbody>
 {{ range .Nodes }}
 <tr{{ if .IsMaster }} class="node-master"{{ end }}>
+<td>
+{{ if eq .Status "ok" }}<span class="node-status ok" title="connected">&#x25CF;</span>
+{{ else if eq .Status "offline" }}<span class="node-status offline" title="offline">&#x2715;</span>
+{{ else }}<span class="node-status na" title="no heartbeat yet">?</span>
+{{ end }}
+</td>
 <td><strong>{{ .DisplayName }}</strong>{{ if .IsMaster }} <span class="muted">(self)</span>{{ end }}</td>
-<td>{{ if .Connected }}<span class="status-connected">connected</span>{{ else }}<span class="muted">offline</span>{{ end }}</td>
-<td>{{ range .Labels }}<code>{{ . }}</code> {{ end }}</td>
-<td>{{ .Executors }}</td>
+<td>{{ or .Architecture "&mdash;" }}</td>
+<td>{{ or .ClockDiff "&mdash;" }}</td>
+<td>{{ or .FreeDisk "&mdash;" }}</td>
+<td>{{ or .FreeSwap "&mdash;" }}</td>
+<td>{{ or .FreeTemp "&mdash;" }}</td>
+<td>{{ or .GoVersion "&mdash;" }}</td>
+<td>{{ or .ResponseTime "&mdash;" }}</td>
+<td>{{ or .AgentVersion "&mdash;" }}</td>
 </tr>
 {{ end }}
 </tbody>

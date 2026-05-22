@@ -194,33 +194,13 @@ func (s *Server) handleNodes(w http.ResponseWriter, r *http.Request) {
 	for _, a := range connected {
 		connectedSet[a.AgentId] = true
 	}
-	type nodeRow struct {
-		AgentID     string
-		DisplayName string
-		Labels      []string
-		Executors   int32
-		Connected   bool
-		IsMaster    bool
-	}
 	rows := make([]nodeRow, 0, len(registered))
 	for _, a := range registered {
-		row := nodeRow{
-			AgentID:     a.AgentId,
-			DisplayName: a.AgentId,
-			Labels:      a.Labels,
-			Executors:   a.Executors,
-			Connected:   connectedSet[a.AgentId],
-		}
-		if a.AgentId == agentsvc.BuiltInNodeAgentID {
-			row.DisplayName = agentsvc.BuiltInNodeDisplayName
-			row.IsMaster = true
-		}
-		rows = append(rows, row)
+		rows = append(rows, buildNodeRow(s.opts.AgentSvc, a, connectedSet))
 	}
 	/* Master row first, then everything else in registry order.
 	 * The registry order is non-deterministic (map iteration);
-	 * stable.SortStable would be overkill here since the only
-	 * cross-row ordering rule is "master first".
+	 * "master first" is the only cross-row ordering rule.
 	 */
 	sort.SliceStable(rows, func(i, j int) bool {
 		if rows[i].IsMaster != rows[j].IsMaster {
@@ -232,6 +212,138 @@ func (s *Server) handleNodes(w http.ResponseWriter, r *http.Request) {
 		"Title": "Nodes",
 		"Nodes": rows,
 	})
+}
+
+/* nodeRow is the per-row view model the /nodes template renders.
+ * One per registered agent. Empty-string columns mean "metric
+ * unavailable" and render as an em-dash in the template.
+ */
+type nodeRow struct {
+	AgentID      string
+	DisplayName  string
+	IsMaster     bool
+
+	/* Status is "ok" (connected, fresh heartbeat), "offline"
+	 * (registered but heartbeat is stale or never arrived), or
+	 * "na" (no heartbeat ever recorded - pre-first-beat state
+	 * that should be visually distinct from a true offline).
+	 */
+	Status string
+
+	Architecture string
+	ClockDiff    string
+	FreeDisk     string
+	FreeSwap     string
+	FreeTemp     string
+	GoVersion    string
+	ResponseTime string
+	AgentVersion string
+}
+
+/* buildNodeRow fills a nodeRow for one registered agent. Reads
+ * LastHeartbeat off the AgentSvc to populate the per-snapshot
+ * columns; missing data renders as an em-dash via the template's
+ * "or" pipeline rather than a literal "0" that could read as a
+ * legitimate metric value.
+ */
+func buildNodeRow(svc *agentsvc.Server, a *wolfciv1.AgentInfo,
+	connectedSet map[string]bool) nodeRow {
+
+	row := nodeRow{
+		AgentID:     a.AgentId,
+		DisplayName: a.AgentId,
+	}
+	if a.AgentId == agentsvc.BuiltInNodeAgentID {
+		row.DisplayName = agentsvc.BuiltInNodeDisplayName
+		row.IsMaster = true
+	}
+
+	var status *wolfciv1.NodeStatus
+	var received time.Time
+	var hasHeartbeat bool
+	if svc != nil {
+		status, received, hasHeartbeat = svc.LastHeartbeat(a.AgentId)
+	}
+
+	switch {
+	case !hasHeartbeat:
+		row.Status = "na"
+	case connectedSet[a.AgentId]:
+		row.Status = "ok"
+	default:
+		row.Status = "offline"
+	}
+
+	if status != nil {
+		row.Architecture = status.Architecture
+		row.GoVersion = status.GoVersion
+		row.AgentVersion = status.AgentVersion
+		row.FreeDisk = humanBytes(status.FreeDiskBytes)
+		row.FreeSwap = humanBytes(status.FreeSwapBytes)
+		row.FreeTemp = humanBytes(status.FreeTempBytes)
+		row.ClockDiff = formatClockDiff(status.WallClockUnixMicros,
+			received)
+	}
+	if row.IsMaster {
+		/* Master heartbeat is in-process; no round-trip, no
+		 * clock skew.
+		 */
+		row.ClockDiff = "in sync"
+		row.ResponseTime = "0ms"
+	}
+	/* Non-master ResponseTime stays empty; the heartbeat protocol
+	 * is one-way today, so a real round-trip latency requires
+	 * the Phase 12-decisions ping/ack extension that has not
+	 * landed yet. The template renders "" as an em-dash so the
+	 * column reads as "metric not available" rather than 0ms.
+	 */
+	return row
+}
+
+/* humanBytes formats n as a binary-prefix byte count, e.g.
+ *   512        -> "512 B"
+ *   2048       -> "2.0 KiB"
+ *   1500000000 -> "1.4 GiB"
+ * Zero renders as an empty string so the template's missing-
+ * metric path applies; a true zero free-bytes value is
+ * indistinguishable from "metric unread" at the snapshot layer.
+ */
+func humanBytes(n int64) string {
+	if n <= 0 {
+		return ""
+	}
+	const unit = 1024
+	if n < unit {
+		return fmt.Sprintf("%d B", n)
+	}
+	div, exp := int64(unit), 0
+	for cur := n / unit; cur >= unit; cur /= unit {
+		div *= unit
+		exp++
+	}
+	suffix := "KMGTPE"[exp]
+	return fmt.Sprintf("%.1f %ciB", float64(n)/float64(div), suffix)
+}
+
+/* formatClockDiff computes the agent's wall clock minus the
+ * server's receive time and renders it as a signed millisecond
+ * value. |diff| < 2s renders as "in sync"; an unset (zero)
+ * agent-side timestamp renders as an empty string so the
+ * template falls through to the em-dash.
+ */
+func formatClockDiff(agentMicros int64, serverReceived time.Time) string {
+	if agentMicros == 0 || serverReceived.IsZero() {
+		return ""
+	}
+	diff := time.UnixMicro(agentMicros).Sub(serverReceived)
+	ms := diff.Milliseconds()
+	if ms > -2000 && ms < 2000 {
+		return "in sync"
+	}
+	if ms >= 0 {
+		return fmt.Sprintf("+%dms", ms)
+	}
+	return fmt.Sprintf("%dms", ms)
 }
 
 // handleJobRun enqueues the named job and redirects to the live

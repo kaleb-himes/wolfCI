@@ -2171,7 +2171,7 @@ Decisions to lock in before the phase starts:
          with both a master and a remote node-alpha, then
          asserts the body's "wolfCI Master Node" substring
          appears before "node-alpha".
-- [ ] 12.6 /nodes UI rewrite. Replace
+- [x] 12.6 /nodes UI rewrite. Replace
          internal/server/templates/nodes.html with the columns:
            S (status icon: green dot connected, red X offline,
               grey question N/A pre-first-heartbeat)
@@ -2188,10 +2188,57 @@ Decisions to lock in before the phase starts:
          The status icon column uses the Phase 12 status badge
          in internal/server/static/app.css (new entries:
          .node-status.ok, .node-status.offline, .node-status.na).
-         Gates: TestUI_NodesPageColumnsPresent (asserts every
-         <th> header text appears once),
-         TestUI_NodesPage_MasterRowRendersDisplayName,
-         TestUI_NodesPage_OfflineAgentRendersOfflineBadge.
+         Done: handleNodes now delegates per-row construction
+         to buildNodeRow, which reads LastHeartbeat for the
+         per-snapshot columns. Status resolves to "ok" (fresh
+         heartbeat + in ConnectedAgents), "offline" (heartbeat
+         on file but stale), or "na" (no heartbeat ever
+         recorded - distinct from offline so operators can
+         tell pre-first-beat from gone-dark). Empty-string
+         metric columns render as &mdash; via the template's
+         {{ or .Foo "&mdash;" }} pipeline so a missing reading
+         reads as "unavailable" rather than literal 0.
+         humanBytes formats FreeDisk/Swap/Temp with binary
+         KiB/MiB/GiB suffixes; a zero or negative input
+         returns "" to dodge the "0 B" ambiguity.
+         formatClockDiff computes
+         (agent_wall_micros - server_received) and renders the
+         result as "+12ms" / "-5ms"; |diff| < 2s collapses
+         to "in sync" to keep the column readable on NTP-
+         synced fleets. Master row hard-codes "in sync" and
+         "0ms" because the heartbeat is in-process (no skew,
+         no round-trip).
+         ResponseTime stays empty for remote agents because
+         the heartbeat protocol is one-way today; a true RTT
+         needs the Phase-12-decisions ping/ack extension that
+         has not landed yet. The em-dash convention covers it.
+         nodes.html rewritten with the ten-column header set
+         and a tbody that maps every nodeRow field to a cell.
+         Master rows get class="node-master"; the S column
+         renders one of three Unicode glyphs wrapped in
+         .node-status.{ok,offline,na}.
+         internal/server/static/app.css gained
+         .node-status.ok (green), .node-status.offline (red),
+         .node-status.na (grey), and a .node-master
+         background tint so the self-row stands out.
+         Phase 6.5's TestUI_NodesPage was updated in place:
+         the old asserts on labels/executor-count are gone
+         (those columns moved to Phase 12.7's detail page),
+         replaced with "node-status na" badge presence for an
+         agent that has never sent a heartbeat.
+         Gates (internal/server/nodes_test.go):
+         TestUI_NodesPageColumnsPresent (every >S<, >Name<,
+         >Architecture<, >Clock difference<, >Free disk<,
+         >Free swap<, >Free temp<, >Go version<,
+         >Response time<, >Agent version< header text appears
+         exactly once),
+         TestUI_NodesPage_MasterRowRendersDisplayName (body
+         contains "wolfCI Master Node" for the wolfci-master
+         row),
+         TestUI_NodesPage_OfflineAgentRendersOfflineBadge
+         (StaleThreshold=10ms; record a heartbeat then sleep
+         40ms; the body shows "node-status offline" for that
+         agent).
 - [ ] 12.7 Per-node detail page at /nodes/<agent-id>. Shows the
          full NodeStatus + the agent's recent build history (last
          N completed builds dispatched to this node, from
