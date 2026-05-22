@@ -1560,7 +1560,7 @@ before the phase started):
 
 Phase 10 complete. "## Current Phase" advances to Phase 11.
 
-## Phase 11 - cmd/wolfci wiring (placeholder)
+## Phase 11 - cmd/wolfci wiring
 
 Backlog promotion of the "wire scheduler.Scheduler into cmd/wolfci
 bootstrap" item. cmd/wolfci is currently the Phase 1.5 hello-world
@@ -1570,20 +1570,116 @@ cliservice + plugin host + server (web UI) + first-admin
 bootstrap-token flow into one main, against the wolfCrypt-backed
 auth stack Phase 10 just landed.
 
-Decisions still open (will lock in before the phase starts):
+Decisions locked in for Phase 11 (2026-05-21):
 
-- Config file format for server bootstrap
-  (config-files/server.yaml: listen addr, cert paths, working
-  dir, optional GCE config path, optional plugin dir override).
-- Whether to serve the web UI and the gRPC services on the same
-  port via cmunixmu/cmux-style multiplexing, or on two distinct
-  ports.
-- Signal handling: SIGINT/SIGTERM -> graceful drain of in-flight
-  builds, then close listeners.
-- First-admin bootstrap: token format, expiry, persistence,
-  invalidation on consumption.
+- Config file format: YAML 1.2 at config-files/server.yaml,
+  parsed via gopkg.in/yaml.v3 (already a project dep). Matches
+  every other config file in the tree (jobs/<name>/job.yaml,
+  config-files/auth/config.yaml, config-files/auth/matrix.yaml).
+  Required keys: listen_addr, cert, key, ca_cert, work_dir.
+  Optional keys: shutdown_drain_timeout (default "30s"),
+  plugin_dir (default plugins/), gce_config (default ""; when
+  set, the GCE provisioner from internal/nodes/gce is wired in).
+- One HTTPS listener on listen_addr serves both the web UI and
+  the gRPC services. Multiplex inside a single net/http.Server
+  by Content-Type: application/grpc routes to
+  grpc.Server.ServeHTTP, everything else routes to the UI
+  handler. Both are HTTP/2 (ALPN h2 negotiated by wolfSSL via
+  --enable-alpn). Rationale for not using the cmux library:
+  cmux's TCP-layer sniffing fires BEFORE TLS handshake, which
+  is wrong for our model (the TLS handshake is owned by
+  internal/tlsutil, not by cmux), and HTTP-layer routing
+  through net/http.Server is simpler and uses primitives we
+  already trust.
+- Signal handling: SIGINT and SIGTERM both cancel the root
+  context. The dispatcher's Shutdown method waits for in-flight
+  builds to drain up to shutdown_drain_timeout (default 30s),
+  then closes the listener. Builds whose context is cancelled
+  by the drain receive a Cancel exit-code from the scheduler
+  per existing Phase 5 semantics.
+- First-admin bootstrap: on first server start with no users on
+  disk under config-files/auth/keys/, the bootstrap routine:
+    1. Generates an Ed25519 keypair via
+       wolfcrypt.Ed25519GenKey; writes the OpenSSH-format
+       private key to config-files/auth/bootstrap/wolfci_admin
+       (mode 0600) and the matching public key to
+       config-files/auth/bootstrap/wolfci_admin.pub (mode 0644).
+    2. Generates a 32-byte token via wolfcrypt.RandBytes,
+       hex-encodes it (64 lowercase hex chars), writes it to
+       config-files/auth/bootstrap/token (mode 0600), and prints
+       the URL https://<listen_addr>/setup?token=<hex> to stdout.
+    3. Waits for the operator to POST username + the bootstrap
+       public key (which they already have at .pub) to /setup
+       with the token. Setup writes
+       config-files/auth/keys/<username>.pub, adds <username>:
+       admin under users: in matrix.yaml, and renames the
+       bootstrap directory to bootstrap.consumed/ (mode 0700)
+       so the operator can audit what happened without a stray
+       valid token sitting on disk.
+  Token does NOT expire by wall-clock; it expires on first
+  successful consumption. This is deliberate: a fresh wolfCI
+  install often sits idle between provisioning and the
+  operator's first login. An expiry adds a footgun (wrong-clock
+  hosts, paused VMs) without raising the bar against an
+  attacker who has filesystem read on config-files/auth/.
 
-Task list lands when Phase 11 starts.
+- [ ] 11.1 ServerConfig type + YAML loader at
+         internal/server/serverconfig.go.
+         Failing tests (internal/server/serverconfig_test.go):
+         TestServerConfig_Roundtrip,
+         TestServerConfig_Defaults,
+         TestServerConfig_RejectsMissingRequiredFields,
+         TestServerConfig_RejectsBadDuration.
+- [ ] 11.2 First-admin bootstrap mint at
+         internal/server/bootstrap.go. Implements the
+         no-users-on-disk -> mint Ed25519 keypair + token +
+         setup URL flow described above.
+         Failing tests (internal/server/bootstrap_test.go):
+         TestBootstrap_FirstStartMintsTokenAndKey,
+         TestBootstrap_SkipsWhenAdminsExist,
+         TestBootstrap_TokenFormat (64-hex sentinel),
+         TestBootstrap_FilePermissions (0600 on private key
+         and token; 0644 on .pub).
+- [ ] 11.3 /setup endpoint that consumes the bootstrap token.
+         Adds the setup HTTP handler under internal/server/.
+         Failing tests (internal/server/setup_test.go):
+         TestSetup_AcceptsValidToken,
+         TestSetup_RejectsInvalidToken,
+         TestSetup_RejectsAfterConsumption,
+         TestSetup_RegistersAdminInMatrix,
+         TestSetup_RenamesBootstrapDir.
+- [ ] 11.4 HTTP + gRPC dispatcher in internal/server/. One
+         http.Handler that routes application/grpc requests to
+         grpc.Server.ServeHTTP and everything else to the
+         existing UI mux. Wolfssl ALPN already advertises h2.
+         Failing tests (internal/server/dispatcher_test.go):
+         TestDispatcher_RoutesGRPCContentType,
+         TestDispatcher_RoutesUIPath,
+         TestDispatcher_404OnUnknownUIPath.
+- [ ] 11.5 cmd/wolfci main rewires to use the dispatcher and
+         the bootstrap flow. Reads config-files/server.yaml,
+         constructs storage + scheduler + agentsvc + cliservice
+         + plugin host + server.UI, calls bootstrap if needed,
+         starts the dispatcher on cfg.ListenAddr via
+         tlsutil.NewListener, blocks until ctx done.
+         Failing tests (cmd/wolfci/main_test.go extension):
+         TestMain_StartsDispatcher_UIRouteReachable,
+         TestMain_StartsDispatcher_GRPCRouteReachable.
+- [ ] 11.6 Graceful shutdown: SIGINT/SIGTERM -> cancel root ctx
+         -> drain in-flight builds up to
+         cfg.ShutdownDrainTimeout -> close listener.
+         Failing tests:
+         TestMain_GracefulShutdownDrainsBuilds (start, dispatch
+         a fake long-running build, SIGTERM, assert exit within
+         drain timeout and build's ctx was cancelled),
+         TestMain_GracefulShutdownTimeoutClosesAnyway.
+- [ ] 11.7 docs/GETTING-STARTED.md update: rewrite the operator
+         walkthrough to match the actual cmd/wolfci flow
+         (config-files/server.yaml example, first-admin
+         bootstrap, /setup consumption, day-2 user management
+         pointer to docs/SECURITY.md). The existing
+         scripts/test-getting-started.sh gate stays green by
+         construction.
 
 ## Backlog (not in main flow)
 
