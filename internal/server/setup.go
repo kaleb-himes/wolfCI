@@ -181,6 +181,16 @@ func (h *SetupHandler) handleSubmit(w http.ResponseWriter, r *http.Request) {
     }
 
     keyPath := filepath.Join(h.KeysDir, username+".pub")
+    /* MkdirAll covers the fresh-install case where the operator
+     * never hand-created auth/keys/. authz.Matrix.Save and
+     * auth.PasswordStore.SetPassword self-create their roots; the
+     * pubkey write path is the only one that needed it.
+     */
+    if err := os.MkdirAll(h.KeysDir, 0o755); err != nil {
+        http.Error(w, "mkdir keys: "+err.Error(),
+            http.StatusInternalServerError)
+        return
+    }
     /* Persist with a trailing newline; OpenSSH's
      * authorized_keys parser is forgiving but the convention is
      * one key per line, line-terminated.

@@ -298,3 +298,27 @@ func TestSetup_RejectsEmptyPassword(t *testing.T) {
         t.Errorf("status = %d, want 400", rec.Code)
     }
 }
+
+func TestSetup_CreatesKeysDirIfMissing(t *testing.T) {
+    /* Quick-mode regression: in cmd/wolfci's positional CLI, the
+     * bootstrap routine creates auth/bootstrap/ but auth/keys/ is
+     * never pre-created. /setup must MkdirAll the keys dir on
+     * demand.
+     */
+    f := newSetupFixture(t)
+    if err := os.RemoveAll(f.keysDir); err != nil {
+        t.Fatalf("RemoveAll keysDir: %v", err)
+    }
+    /* Sanity: keys dir is genuinely gone. */
+    if _, err := os.Stat(f.keysDir); !os.IsNotExist(err) {
+        t.Fatalf("keysDir exists after RemoveAll: %v", err)
+    }
+
+    rec := f.postForm(t, f.token, "alice", f.pubKeyLine)
+    if rec.Code >= 400 {
+        t.Fatalf("POST status = %d, body=%q", rec.Code, rec.Body.String())
+    }
+    if _, err := os.Stat(filepath.Join(f.keysDir, "alice.pub")); err != nil {
+        t.Errorf("alice.pub not created in auto-mkdir keys dir: %v", err)
+    }
+}
