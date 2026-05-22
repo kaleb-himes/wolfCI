@@ -146,7 +146,7 @@ func (s *Server) handleJobRoutes(w http.ResponseWriter, r *http.Request) {
 		}
 	default:
 		parts := strings.SplitN(rest, "/", 3)
-		if len(parts) < 2 {
+		if len(parts) == 0 || parts[0] == "" {
 			http.NotFound(w, r)
 			return
 		}
@@ -156,6 +156,12 @@ func (s *Server) handleJobRoutes(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		switch {
+		case len(parts) == 1:
+			if r.Method != http.MethodGet {
+				http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+				return
+			}
+			s.handleJobDetail(w, r, name)
 		case len(parts) == 2 && parts[1] == "edit":
 			switch r.Method {
 			case http.MethodGet:

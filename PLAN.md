@@ -2416,7 +2416,7 @@ Decisions to lock in before the phase starts:
   pulling in a markdown parser before we have an opinion on
   which one (CommonMark via gomarkdown is the likely choice).
 
-- [ ] 13.1 Add /jobs/<name> (GET) to handleJobRoutes. Loads the
+- [x] 13.1 Add /jobs/<name> (GET) to handleJobRoutes. Loads the
          Job, scans the builds directory for that job, renders
          a new templates/jobdetail.html with:
            - sidebar (Build Now form, Configure link, Delete
@@ -2425,7 +2425,20 @@ Decisions to lock in before the phase starts:
            - <h2>{{ .Name }}</h2> + description block
            - build history panel: list of build numbers +
              status icons + relative timestamps, last 100
-         Failing tests (internal/server/jobdetail_test.go):
+         Done: internal/server/jobdetail.go carries the handler
+         + scanBuildHistory; templates/jobdetail.html renders
+         the sidebar + description + history; handleJobRoutes
+         dispatches GET /jobs/<name> to it. The pre-existing
+         `len(parts) < 2 -> 404` guard in handleJobRoutes
+         dropped to a `parts[0] == "" -> 404` so a bare name
+         falls through to the new case. Sidebar Build Now is
+         gated on opts.JobRunner != nil so it stays hidden in
+         deployments that have no runner wired; the test
+         (newAuthedUIWithRunner) covers the wired case.
+         Build-history sort: newest-first by result.json
+         mtime, tie-broken on build number; an in-flight
+         build (no result.json yet) renders as "running" with
+         the build dir's mtime. Gates:
          TestJobDetail_Returns200WithSidebar,
          TestJobDetail_RendersDescription,
          TestJobDetail_RendersBuildHistory_NewestFirst,

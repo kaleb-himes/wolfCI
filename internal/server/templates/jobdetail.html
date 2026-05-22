@@ -1,0 +1,72 @@
+{{ define "content" }}
+<section class="panel job-detail">
+<div class="job-detail-grid">
+
+<aside class="job-sidebar">
+<h3>Actions</h3>
+<ul class="sidebar-actions">
+<li>
+{{ if .CanRun }}
+<form method="POST" action="/jobs/{{ .Name }}/run" class="run-form">
+<button type="submit">Build Now</button>
+</form>
+{{ else }}
+<button type="button" disabled title="No job runner is wired">Build Now</button>
+{{ end }}
+</li>
+<li><a href="/jobs/{{ .Name }}/edit"><button type="button">Configure</button></a></li>
+<li>
+<form method="POST" action="/jobs/{{ .Name }}/delete" class="delete-form">
+<button type="submit" class="danger">Delete</button>
+</form>
+</li>
+<li><button type="button" disabled title="Phase 14">Rebuild Last</button></li>
+<li><button type="button" disabled title="Phase 14">Rename</button></li>
+<li><button type="button" disabled title="Phase 14">Workspace</button></li>
+</ul>
+</aside>
+
+<div class="job-main">
+<h2>{{ .Name }}</h2>
+<p><a href="/jobs">&larr; Back to jobs</a></p>
+
+{{ if .Description }}
+<p class="job-description">{{ .Description }}</p>
+{{ else }}
+<p class="muted">No description.</p>
+{{ end }}
+
+<h3>Build history</h3>
+{{ if .Builds }}
+<table class="build-history">
+<thead><tr><th>S</th><th>Build</th><th>When</th></tr></thead>
+<tbody>
+{{ range .Builds }}
+<tr>
+<td>
+{{ if eq .Status "success" }}<span class="node-status ok">&#x25CF;</span>
+{{ else if eq .Status "failure" }}<span class="node-status offline">&#x2715;</span>
+{{ else if eq .Status "error" }}<span class="node-status offline">!</span>
+{{ else if eq .Status "cancelled" }}<span class="node-status na">&#x25A0;</span>
+{{ else }}<span class="node-status na">?</span>
+{{ end }}
+</td>
+<td><a href="/jobs/{{ $.Name }}/builds/{{ .Number }}">#{{ .Number }}</a>
+<span class="muted">{{ .Status }}</span></td>
+<td><span class="muted">{{ .RelativeTime }}</span></td>
+</tr>
+{{ end }}
+</tbody>
+</table>
+{{ if .Truncated }}
+<p class="muted">Showing the 100 most-recent builds.
+<a href="/jobs/{{ .Name }}/builds">See all builds &rarr;</a></p>
+{{ end }}
+{{ else }}
+<p class="muted">No builds yet. Use <strong>Build Now</strong> to enqueue the first one.</p>
+{{ end }}
+</div>
+
+</div>
+</section>
+{{ end }}
