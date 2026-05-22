@@ -44,6 +44,13 @@ type ServerConfig struct {
     /* WorkDir is the storage root (jobs/, builds/, ...). */
     WorkDir string `yaml:"work_dir"`
 
+    /* AuthDir is the auth root (keys/, passwords/, matrix.yaml,
+     * config.yaml, bootstrap/). Required: the bootstrap and
+     * /setup paths need to know where to write the first-admin
+     * pubkey and the matrix entry.
+     */
+    AuthDir string `yaml:"auth_dir"`
+
     /* ShutdownDrainTimeout is parsed by time.ParseDuration. Empty
      * string means defaultShutdownDrainTimeout (30s). Use
      * DrainTimeout() to get a typed time.Duration.
@@ -131,6 +138,9 @@ func (c *ServerConfig) Validate() error {
     }
     if c.WorkDir == "" {
         return errors.New("work_dir is required")
+    }
+    if c.AuthDir == "" {
+        return errors.New("auth_dir is required")
     }
     if _, err := c.DrainTimeout(); err != nil {
         return fmt.Errorf("shutdown_drain_timeout: %w", err)

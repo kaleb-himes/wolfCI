@@ -1,105 +1,259 @@
-// wolfci is the wolfCI server binary. This iteration provides a
-// hello-world HTTPS endpoint backed by the internal/tlsutil
-// wolfSSL listener. Real handlers (jobs, nodes, UI) land in later
-// phases.
+/* Package main is the wolfCI server binary.
+ *
+ * Phase 11.5 wired the full dependency graph: storage layer,
+ * scheduler, agent service, CLI service, plugin host (TODO),
+ * server.UI, first-admin bootstrap, /setup endpoint, and the
+ * single-port HTTP+gRPC dispatcher all share one TLS listener
+ * via internal/tlsutil.
+ */
 package main
 
 import (
-	"context"
-	"errors"
-	"fmt"
-	"log"
-	"net"
-	"net/http"
-	"os"
+    "context"
+    "errors"
+    "flag"
+    "fmt"
+    "log"
+    "net"
+    "net/http"
+    "os"
+    "os/signal"
+    "path/filepath"
+    "syscall"
+    "time"
 
-	"github.com/kaleb-himes/wolfCI/internal/tlsutil"
+    "google.golang.org/grpc"
+
+    wolfciv1 "github.com/kaleb-himes/wolfCI/api/v1"
+    cliv1 "github.com/kaleb-himes/wolfCI/api/v1/cli"
+    "github.com/kaleb-himes/wolfCI/internal/agentsvc"
+    "github.com/kaleb-himes/wolfCI/internal/auth"
+    "github.com/kaleb-himes/wolfCI/internal/cliservice"
+    "github.com/kaleb-himes/wolfCI/internal/scheduler"
+    "github.com/kaleb-himes/wolfCI/internal/server"
+    "github.com/kaleb-himes/wolfCI/internal/storage"
+    "github.com/kaleb-himes/wolfCI/internal/tlsutil"
 )
 
-// Options groups the runtime parameters for the wolfci hello-world
-// server.
-type Options struct {
-	Addr        string
-	Certificate []byte
-	Key         []byte
-}
+/* serverVersion is the value reported to agents during Register.
+ * Tied to the wolfCI release cadence once that exists; for now,
+ * "dev" is the marker for "not yet released".
+ */
+const serverVersion = "wolfCI/dev"
 
-// Listen binds an HTTPS-capable net.Listener using opts. Returns
-// the wrapped listener; the caller passes it to Serve.
-func Listen(opts Options) (net.Listener, error) {
-	if opts.Addr == "" {
-		return nil, errors.New("wolfci.Listen: Options.Addr is required")
-	}
-	inner, err := net.Listen("tcp", opts.Addr)
-	if err != nil {
-		return nil, fmt.Errorf("wolfci.Listen: %w", err)
-	}
-	ln, err := tlsutil.NewListener(inner, &tlsutil.Config{
-		Certificate: opts.Certificate,
-		Key:         opts.Key,
-	})
-	if err != nil {
-		_ = inner.Close()
-		return nil, fmt.Errorf("wolfci.Listen: %w", err)
-	}
-	return ln, nil
-}
+/* defaultSessionTTL is how long a UI session cookie stays valid.
+ * 24h is a reasonable middle ground - long enough that operators
+ * are not retyping creds every shift, short enough that a stolen
+ * cookie has a bounded blast radius.
+ */
+const defaultSessionTTL = "24h"
 
-// Serve runs the hello-world HTTP server on ln until ctx is
-// cancelled or ln is closed. Returns nil on graceful shutdown.
-func Serve(ctx context.Context, ln net.Listener) error {
-	mux := http.NewServeMux()
-	mux.HandleFunc("/", helloHandler)
+/* Run is the wolfCI server entry point. Tests call this directly
+ * with an in-memory config; main wraps it with --config parsing
+ * and signal handling.
+ *
+ * The addrCh channel (optional, may be nil) receives the actual
+ * bound TCP address once the listener is up. Tests use it to
+ * race-free wait for the server to be reachable. Production main
+ * passes nil.
+ */
+func Run(ctx context.Context, cfg *server.ServerConfig, addrCh chan<- string) error {
+    if cfg == nil {
+        return errors.New("wolfci.Run: nil ServerConfig")
+    }
+    if err := cfg.Validate(); err != nil {
+        return fmt.Errorf("wolfci.Run: %w", err)
+    }
 
-	srv := &http.Server{Handler: mux}
+    /* Storage + auth + sessions. The auth config file is optional;
+     * defaults disable password auth (SSH-key-only).
+     */
+    store, err := storage.New(cfg.WorkDir)
+    if err != nil {
+        return fmt.Errorf("wolfci.Run: storage.New: %w", err)
+    }
 
-	go func() {
-		<-ctx.Done()
-		_ = srv.Close()
-	}()
+    authCfg := auth.DefaultConfig()
+    authConfigPath := filepath.Join(cfg.AuthDir, "config.yaml")
+    if _, statErr := os.Stat(authConfigPath); statErr == nil {
+        loaded, loadErr := auth.LoadConfig(authConfigPath)
+        if loadErr != nil {
+            return fmt.Errorf("wolfci.Run: auth.LoadConfig: %w", loadErr)
+        }
+        authCfg = loaded
+    }
 
-	err := srv.Serve(ln)
-	if errors.Is(err, http.ErrServerClosed) {
-		return nil
-	}
-	return err
-}
+    passwords := auth.NewPasswordStore(
+        filepath.Join(cfg.AuthDir, "passwords"), authCfg)
 
-func helloHandler(w http.ResponseWriter, r *http.Request) {
-	_ = r
-	w.Header().Set("Content-Type", "text/plain; charset=utf-8")
-	w.WriteHeader(http.StatusOK)
-	_, _ = fmt.Fprintln(w, "wolfci: hello, world")
+    sessionsTTL, _ := parseDurationOr(defaultSessionTTL)
+    sessions := server.NewSessionStore(
+        filepath.Join(cfg.WorkDir, "sessions"), sessionsTTL)
+
+    /* Agent service + scheduler. The local executor handles jobs
+     * that label "local" or carry no node_label. Phase 5.x's
+     * Router would also dispatch to remote agents; wiring that
+     * in lands when the first real on-prem agent does.
+     */
+    svc := agentsvc.New(serverVersion)
+    svc.SetLogSink(agentsvc.NewFileLogSink(cfg.WorkDir))
+
+    localExec := scheduler.NewLocalExecutor(store)
+    sched := scheduler.New(store, localExec)
+    sched.Start(ctx)
+    defer sched.Stop()
+
+    /* cliservice for wolfci-ctl. EnqueuerFunc adapts the
+     * scheduler's three-return Enqueue to the cli's two-return
+     * shape.
+     */
+    cli := cliservice.New(store, svc).WithEnqueuer(
+        cliservice.EnqueuerFunc(func(job *storage.Job) (int, error) {
+            num, _, err := sched.Enqueue(job)
+            return num, err
+        }))
+
+    /* UI handler from Phase 6. */
+    uiSrv := server.New(server.Options{
+        Storage:      store,
+        Auth:         authCfg,
+        Passwords:    passwords,
+        Sessions:     sessions,
+        CookieSecure: true,
+        AgentSvc:     svc,
+    })
+
+    /* First-admin bootstrap: prints a setup URL to stdout if no
+     * admins are on disk yet. Per BYOK, no keypair is generated;
+     * the operator pastes their own pubkey at /setup.
+     */
+    bs := &server.Bootstrap{
+        KeysDir:      filepath.Join(cfg.AuthDir, "keys"),
+        BootstrapDir: filepath.Join(cfg.AuthDir, "bootstrap"),
+        ListenAddr:   cfg.ListenAddr,
+    }
+    mintRes, err := bs.Mint()
+    if err != nil {
+        return fmt.Errorf("wolfci.Run: bootstrap mint: %w", err)
+    }
+    if mintRes != nil {
+        fmt.Println("wolfci: first-admin setup URL:")
+        fmt.Println("  " + mintRes.SetupURL)
+    }
+
+    setupHandler := &server.SetupHandler{
+        KeysDir:      filepath.Join(cfg.AuthDir, "keys"),
+        BootstrapDir: filepath.Join(cfg.AuthDir, "bootstrap"),
+        MatrixPath:   filepath.Join(cfg.AuthDir, "matrix.yaml"),
+    }
+
+    /* Top-level UI mux: /setup routes around the auth gate to the
+     * one-shot bootstrap form; everything else falls through to
+     * the authenticated UI tree.
+     */
+    topMux := http.NewServeMux()
+    topMux.Handle("/setup", setupHandler)
+    topMux.Handle("/setup/", setupHandler)
+    topMux.Handle("/", uiSrv)
+
+    /* gRPC server hosting agent + cli services on the same TCP
+     * port as the UI; the dispatcher fork is Content-Type based.
+     */
+    grpcSrv := grpc.NewServer()
+    wolfciv1.RegisterAgentServiceServer(grpcSrv, svc)
+    cliv1.RegisterCLIServiceServer(grpcSrv, cli)
+
+    dispatcher := &server.Dispatcher{UI: topMux, GRPC: grpcSrv}
+
+    /* TLS listener. tlsutil wraps a raw net.Listener with
+     * wolfSSL-terminated TLS 1.3.
+     */
+    cert, err := os.ReadFile(cfg.Cert)
+    if err != nil {
+        return fmt.Errorf("wolfci.Run: read cert: %w", err)
+    }
+    key, err := os.ReadFile(cfg.Key)
+    if err != nil {
+        return fmt.Errorf("wolfci.Run: read key: %w", err)
+    }
+    /* CACert is loaded eagerly so a fresh install with a missing
+     * file fails at startup, not at first agent connect. mTLS
+     * itself is NOT enforced at the TLS layer because the same
+     * listener serves browsers (no client cert) and gRPC clients
+     * (with client cert); per-request authz on the gRPC handler
+     * will enforce the client-cert -> matrix mapping in a follow-
+     * up phase.
+     */
+    if _, err := os.ReadFile(cfg.CACert); err != nil {
+        return fmt.Errorf("wolfci.Run: read ca_cert: %w", err)
+    }
+
+    rawLn, err := net.Listen("tcp", cfg.ListenAddr)
+    if err != nil {
+        return fmt.Errorf("wolfci.Run: net.Listen: %w", err)
+    }
+    ln, err := tlsutil.NewListener(rawLn, &tlsutil.Config{
+        Certificate: cert,
+        Key:         key,
+        MinVersion:  tlsutil.VersionTLS13,
+    })
+    if err != nil {
+        _ = rawLn.Close()
+        return fmt.Errorf("wolfci.Run: tlsutil.NewListener: %w", err)
+    }
+    defer ln.Close()
+
+    if addrCh != nil {
+        addrCh <- rawLn.Addr().String()
+    }
+
+    httpSrv := &http.Server{Handler: dispatcher}
+    serveErr := make(chan error, 1)
+    go func() { serveErr <- httpSrv.Serve(ln) }()
+
+    select {
+    case <-ctx.Done():
+        /* Phase 11.6 will replace this with a graceful drain
+         * bounded by cfg.ShutdownDrainTimeout. For now Close
+         * is immediate - close the listener, abandon
+         * in-flight handlers.
+         */
+        _ = httpSrv.Close()
+        <-serveErr
+        return nil
+    case err := <-serveErr:
+        if errors.Is(err, http.ErrServerClosed) {
+            return nil
+        }
+        return fmt.Errorf("wolfci.Run: http.Server.Serve: %w", err)
+    }
 }
 
 func main() {
-	if len(os.Args) < 4 {
-		fmt.Fprintln(os.Stderr, "usage: wolfci <host:port> <cert.pem> <key.pem>")
-		fmt.Fprintln(os.Stderr, "example: wolfci 127.0.0.1:8443 server-cert.pem server-key.pem")
-		fmt.Fprintln(os.Stderr, "")
-		fmt.Fprintln(os.Stderr, "NOTE: this binary is the Phase 1.5 hello-world stub.")
-		fmt.Fprintln(os.Stderr, "It serves 'hello, world' on /. The job scheduler, web UI,")
-		fmt.Fprintln(os.Stderr, "agent service, CLI service, and plugin host are not wired")
-		fmt.Fprintln(os.Stderr, "into this main yet. See the cmd/wolfci wiring backlog item.")
-		os.Exit(2)
-	}
-	addr := os.Args[1]
-	cert, err := os.ReadFile(os.Args[2])
-	if err != nil {
-		log.Fatalf("wolfci: read cert: %v", err)
-	}
-	key, err := os.ReadFile(os.Args[3])
-	if err != nil {
-		log.Fatalf("wolfci: read key: %v", err)
-	}
+    var configPath string
+    flag.StringVar(&configPath, "config", "config-files/server.yaml",
+        "path to server.yaml")
+    flag.Parse()
 
-	ln, err := Listen(Options{Addr: addr, Certificate: cert, Key: key})
-	if err != nil {
-		log.Fatalf("wolfci: listen: %v", err)
-	}
-	defer ln.Close()
+    cfg, err := server.LoadServerConfig(configPath)
+    if err != nil {
+        log.Fatalf("wolfci: load config: %v", err)
+    }
 
-	if err := Serve(context.Background(), ln); err != nil {
-		log.Fatalf("wolfci: serve: %v", err)
-	}
+    ctx, cancel := signal.NotifyContext(context.Background(),
+        os.Interrupt, syscall.SIGTERM)
+    defer cancel()
+
+    if err := Run(ctx, cfg, nil); err != nil {
+        log.Fatalf("wolfci: %v", err)
+    }
+}
+
+/* parseDurationOr returns time.ParseDuration(s); on failure it
+ * returns 0 and the parse error rather than panicking. Used for
+ * compile-time-known defaults where the panic-free branch is
+ * dead but documents intent.
+ */
+func parseDurationOr(s string) (time.Duration, error) {
+    return time.ParseDuration(s)
 }

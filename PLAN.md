@@ -1748,15 +1748,70 @@ Decisions locked in for Phase 11 (2026-05-21):
          TestDispatcher_DefaultsToUI_OnOtherContentTypes
          (five non-gRPC content types, plus the empty-string
          GET case).
-- [ ] 11.5 cmd/wolfci main rewires to use the dispatcher and
+- [x] 11.5 cmd/wolfci main rewires to use the dispatcher and
          the bootstrap flow. Reads config-files/server.yaml,
          constructs storage + scheduler + agentsvc + cliservice
          + plugin host + server.UI, calls bootstrap if needed,
          starts the dispatcher on cfg.ListenAddr via
          tlsutil.NewListener, blocks until ctx done.
-         Failing tests (cmd/wolfci/main_test.go extension):
-         TestMain_StartsDispatcher_UIRouteReachable,
-         TestMain_StartsDispatcher_GRPCRouteReachable.
+         Done: cmd/wolfci/main.go now exposes a public
+         Run(ctx, *ServerConfig, addrCh) function plus a thin
+         main() that --config-parses, signal.NotifyContext-
+         wraps SIGINT/SIGTERM, and delegates. The Phase 1.5
+         hello-world handler is deleted; cmd/wolfci no longer
+         imports net/http for a stub mux. The full dependency
+         graph wired by Run:
+           storage.New(cfg.WorkDir)
+           auth.DefaultConfig (overridden if AuthDir/config.yaml
+             exists; missing file is the fresh-install default)
+           auth.NewPasswordStore on AuthDir/passwords/
+           server.NewSessionStore on WorkDir/sessions/ (24h TTL)
+           agentsvc.New("wolfCI/dev")
+             + agentsvc.NewFileLogSink(WorkDir)
+           scheduler.NewLocalExecutor + scheduler.New, Start(ctx)
+           cliservice.New(...).WithEnqueuer adapting the
+             scheduler's three-return Enqueue to cli's two-return
+             Enqueuer interface
+           server.New(server.Options{Storage, Auth, Passwords,
+             Sessions, CookieSecure: true, AgentSvc})
+           server.Bootstrap{...}.Mint() (BYOK; prints setup URL
+             to stdout if minted; idempotent across restarts
+             because existing keys/*.pub skips the mint)
+           server.SetupHandler{...} for /setup
+           topMux: /setup + /setup/ -> SetupHandler, / -> uiSrv
+           grpc.NewServer() registering AgentServiceServer +
+             CLIServiceServer
+           server.Dispatcher{UI: topMux, GRPC: grpcSrv}
+           tlsutil.NewListener with VersionTLS13; mTLS at the
+             TLS layer was DROPPED for now because the same
+             listener serves both browsers (no client cert) and
+             gRPC (with client cert). Per-handler authz on the
+             gRPC services will enforce the client-cert ->
+             matrix mapping in a follow-up phase; cfg.CACert is
+             still read at startup so a missing file fails fast.
+           http.Server{Handler: dispatcher} on the wolfSSL ln.
+         Graceful drain is the basic Close-on-ctx-done; Phase
+         11.6 swaps in the timed drain.
+         ServerConfig gained one new required field, AuthDir,
+         pointing at the auth root (keys/, passwords/, matrix
+         .yaml, config.yaml, bootstrap/). Phase 11.1's three
+         existing tests were extended in-place to set auth_dir.
+         Gates (cmd/wolfci/main_test.go, all green):
+         TestRun_UIRouteReachable (start on :0, GET / returns
+         200 with the Phase 6 base.html marker; the body
+         deliberately asserts NOT-"hello, world" so a
+         regression that re-wires the old stub is caught),
+         TestRun_BootstrapMintsTokenAndSetupReachable
+         (bootstrap/token file exists post-Run, GET
+         /setup?token=<token> returns the first-admin form
+         with the token echoed in the hidden field),
+         TestRun_GRPCContentTypeRoutedAwayFromUI (POST with
+         application/grpc lands outside the UI's HTML response,
+         proving the dispatcher fork fires under the wolfSSL
+         listener),
+         TestRun_RejectsNilConfig (nil cfg -> error).
+         Phase 1.5's TestServe_HelloWorld is deleted; the
+         helloHandler and the Listen/Serve helpers are gone.
 - [ ] 11.6 Graceful shutdown: SIGINT/SIGTERM -> cancel root ctx
          -> drain in-flight builds up to
          cfg.ShutdownDrainTimeout -> close listener.

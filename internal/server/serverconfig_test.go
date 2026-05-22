@@ -22,6 +22,7 @@ func TestServerConfig_Roundtrip(t *testing.T) {
         Key:                  "/etc/wolfci/server.key",
         CACert:               "/etc/wolfci/ca.crt",
         WorkDir:              "/var/lib/wolfci",
+        AuthDir:              "/etc/wolfci/auth",
         ShutdownDrainTimeout: "45s",
         PluginDir:            "/etc/wolfci/plugins",
         GCEConfig:            "/etc/wolfci/gce.yaml",
@@ -48,7 +49,8 @@ func TestServerConfig_Defaults(t *testing.T) {
         "cert: /c\n" +
         "key: /k\n" +
         "ca_cert: /ca\n" +
-        "work_dir: /w\n"
+        "work_dir: /w\n" +
+        "auth_dir: /a\n"
     if err := os.WriteFile(path, []byte(yaml), 0o644); err != nil {
         t.Fatalf("WriteFile: %v", err)
     }
@@ -78,6 +80,7 @@ func TestServerConfig_RejectsMissingRequiredFields(t *testing.T) {
         "key":         "/k",
         "ca_cert":     "/ca",
         "work_dir":    "/w",
+        "auth_dir":    "/a",
     }
     /* Each required key is removed in turn; the loader must
      * reject the result.
@@ -122,6 +125,7 @@ func TestServerConfig_RejectsBadDuration(t *testing.T) {
         "key: /k\n" +
         "ca_cert: /ca\n" +
         "work_dir: /w\n" +
+        "auth_dir: /a\n" +
         "shutdown_drain_timeout: notaduration\n"
     if err := os.WriteFile(path, []byte(yaml), 0o644); err != nil {
         t.Fatalf("WriteFile: %v", err)
