@@ -1597,31 +1597,36 @@ Decisions locked in for Phase 11 (2026-05-21):
   then closes the listener. Builds whose context is cancelled
   by the drain receive a Cancel exit-code from the scheduler
   per existing Phase 5 semantics.
-- First-admin bootstrap: on first server start with no users on
-  disk under config-files/auth/keys/, the bootstrap routine:
-    1. Generates an Ed25519 keypair via
-       wolfcrypt.Ed25519GenKey; writes the OpenSSH-format
-       private key to config-files/auth/bootstrap/wolfci_admin
-       (mode 0600) and the matching public key to
-       config-files/auth/bootstrap/wolfci_admin.pub (mode 0644).
-    2. Generates a 32-byte token via wolfcrypt.RandBytes,
+- First-admin bootstrap: BYOK ("bring your own key"). wolfCI
+  never generates user-facing SSH keypairs (project owner
+  directive 2026-05-21: every user's pubkey comes from the
+  operator or an admin, never from wolfCI's keygen). On first
+  server start with no users on disk under
+  config-files/auth/keys/, the bootstrap routine:
+    1. Generates a 32-byte token via wolfcrypt.RandBytes,
        hex-encodes it (64 lowercase hex chars), writes it to
        config-files/auth/bootstrap/token (mode 0600), and prints
        the URL https://<listen_addr>/setup?token=<hex> to stdout.
-    3. Waits for the operator to POST username + the bootstrap
-       public key (which they already have at .pub) to /setup
-       with the token. Setup writes
-       config-files/auth/keys/<username>.pub, adds <username>:
-       admin under users: in matrix.yaml, and renames the
-       bootstrap directory to bootstrap.consumed/ (mode 0700)
-       so the operator can audit what happened without a stray
-       valid token sitting on disk.
+    2. Waits for the operator to POST username + their OWN
+       OpenSSH public key (the operator already has an SSH
+       keypair, e.g. ~/.ssh/<name>_ed25519{,.pub}; they paste
+       the .pub content into the form) to /setup with the
+       token. Setup parses the pubkey via
+       gowolfssh.ParseAuthorizedKey to validate format, writes
+       it verbatim to config-files/auth/keys/<username>.pub
+       (mode 0644), adds <username>: admin under users: in
+       matrix.yaml, and renames the bootstrap directory to
+       bootstrap.consumed/ (mode 0700) so the operator can
+       audit what happened without a stray valid token sitting
+       on disk.
   Token does NOT expire by wall-clock; it expires on first
   successful consumption. This is deliberate: a fresh wolfCI
   install often sits idle between provisioning and the
   operator's first login. An expiry adds a footgun (wrong-clock
   hosts, paused VMs) without raising the bar against an
   attacker who has filesystem read on config-files/auth/.
+  No OpenSSH private-key encoder is needed in go-wolfssl;
+  wolfCI never writes a private key for a user.
 
 - [x] 11.1 ServerConfig type + YAML loader at
          internal/server/serverconfig.go.
@@ -1652,20 +1657,28 @@ Decisions locked in for Phase 11 (2026-05-21):
          ("shutdown_drain_timeout: notaduration" fails load).
 - [ ] 11.2 First-admin bootstrap mint at
          internal/server/bootstrap.go. Implements the
-         no-users-on-disk -> mint Ed25519 keypair + token +
-         setup URL flow described above.
+         no-users-on-disk -> mint hex token + print setup URL
+         flow described above. BYOK: wolfCI does NOT generate
+         a keypair; the operator brings their own at /setup.
          Failing tests (internal/server/bootstrap_test.go):
-         TestBootstrap_FirstStartMintsTokenAndKey,
+         TestBootstrap_FirstStartMintsToken,
          TestBootstrap_SkipsWhenAdminsExist,
-         TestBootstrap_TokenFormat (64-hex sentinel),
-         TestBootstrap_FilePermissions (0600 on private key
-         and token; 0644 on .pub).
+         TestBootstrap_TokenFormat (64 lowercase hex),
+         TestBootstrap_FilePermissions (0600 on token).
 - [ ] 11.3 /setup endpoint that consumes the bootstrap token.
          Adds the setup HTTP handler under internal/server/.
+         GET /setup?token=<hex> serves a form (username +
+         paste-your-OpenSSH-pubkey textarea). POST validates
+         the token, parses the pubkey via
+         gowolfssh.ParseAuthorizedKey, writes it to
+         config-files/auth/keys/<username>.pub (0644), adds
+         <username>: admin to matrix.yaml, renames the
+         bootstrap directory to bootstrap.consumed/.
          Failing tests (internal/server/setup_test.go):
          TestSetup_AcceptsValidToken,
          TestSetup_RejectsInvalidToken,
          TestSetup_RejectsAfterConsumption,
+         TestSetup_RejectsMalformedPubkey,
          TestSetup_RegistersAdminInMatrix,
          TestSetup_RenamesBootstrapDir.
 - [ ] 11.4 HTTP + gRPC dispatcher in internal/server/. One
