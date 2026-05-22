@@ -8,6 +8,7 @@ import (
 	"net"
 	"os"
 	"sync"
+	"time"
 
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials/insecure"
@@ -15,10 +16,18 @@ import (
 
 	wolfciv1 "github.com/kaleb-himes/wolfCI/api/v1"
 	"github.com/kaleb-himes/wolfCI/internal/agentsvc"
+	"github.com/kaleb-himes/wolfCI/internal/nodeinfo"
 	"github.com/kaleb-himes/wolfCI/internal/scheduler"
 	"github.com/kaleb-himes/wolfCI/internal/storage"
 	"github.com/kaleb-himes/wolfCI/internal/tlsutil"
 )
+
+// defaultAgentVersion is the value Client reports in
+// NodeStatus.agent_version when nothing else has been set. Phase
+// 12.8 will inject a build-stamped version via -ldflags into
+// cmd/wolfci-agent's main, which calls Client.SetVersion to
+// override this default.
+const defaultAgentVersion = "dev"
 
 // Client is the agent-side runtime. It dials the wolfCI server
 // via wolfSSL mTLS, registers, opens the Connect stream, and
@@ -31,6 +40,12 @@ type Client struct {
 	store *storage.Storage
 
 	streamMu sync.Mutex // gRPC server-stream Send is single-threaded
+
+	// version is reported in NodeStatus.agent_version on every
+	// heartbeat. Defaults to "dev"; cmd/wolfci-agent's main
+	// overrides it via SetVersion with the -ldflags-injected
+	// build stamp (Phase 12.8).
+	version string
 }
 
 // NewClient constructs a Client. The work dir from cfg becomes
@@ -49,7 +64,22 @@ func NewClient(cfg *Config) (*Client, error) {
 	if err := os.MkdirAll(cfg.WorkDir, 0o755); err != nil {
 		return nil, fmt.Errorf("agent.NewClient: mkdir work_dir: %w", err)
 	}
-	return &Client{cfg: cfg, store: store}, nil
+	return &Client{
+		cfg:     cfg,
+		store:   store,
+		version: defaultAgentVersion,
+	}, nil
+}
+
+// SetVersion overrides the agent_version string reported on
+// every NodeStatus heartbeat. cmd/wolfci-agent's main calls this
+// with the -ldflags-injected build stamp (Phase 12.8); tests
+// typically leave the default "dev".
+func (c *Client) SetVersion(v string) {
+	if v == "" {
+		return
+	}
+	c.version = v
 }
 
 // Run dials the server, registers, opens the Connect stream,
@@ -84,7 +114,66 @@ func (c *Client) Run(ctx context.Context) error {
 		return fmt.Errorf("agent.Run: Connect: %w", err)
 	}
 
+	/* Heartbeat emitter (PLAN.md 12.3). The goroutine sends a
+	 * NodeStatus snapshot on stream.Send under the same
+	 * streamMu the assignment-completion path uses; gRPC client
+	 * streams are not concurrency-safe for Send. The first
+	 * heartbeat fires immediately so the server stamps a
+	 * fresh "last seen" before the first ticker interval
+	 * elapses; subsequent beats happen on the ticker.
+	 */
+	go c.heartbeatLoop(ctx, stream)
+
 	return c.processStream(ctx, stream)
+}
+
+// heartbeatLoop runs until ctx is cancelled, emitting a NodeStatus
+// Heartbeat on stream every HeartbeatTickInterval. It tolerates a
+// failing internal/nodeinfo read (unsupported GOOS, missing
+// /proc, ...) by sending the partial snapshot the package
+// returned alongside the error - the server still sees the
+// agent's wall clock and "I am alive" signal.
+func (c *Client) heartbeatLoop(ctx context.Context, stream wolfciv1.AgentService_ConnectClient) {
+	interval, _ := c.cfg.HeartbeatTickInterval()
+	c.sendHeartbeat(stream)
+	ticker := time.NewTicker(interval)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			c.sendHeartbeat(stream)
+		}
+	}
+}
+
+// sendHeartbeat takes a fresh nodeinfo.Snapshot (rooted at the
+// agent's work directory so FreeDiskBytes statfs's the wolfCI
+// build partition) and ships it inside an AgentMessage_Heartbeat.
+// Send errors are swallowed because the server-side stream
+// teardown reaches processStream first via stream.Recv returning
+// io.EOF; a Send race with that teardown is expected, not an
+// error worth surfacing.
+func (c *Client) sendHeartbeat(stream wolfciv1.AgentService_ConnectClient) {
+	snap, _ := nodeinfo.Take(c.cfg.WorkDir)
+	status := &wolfciv1.NodeStatus{
+		Architecture:        snap.Architecture,
+		GoVersion:           snap.GoVersion,
+		FreeDiskBytes:       snap.FreeDiskBytes,
+		FreeSwapBytes:       snap.FreeSwapBytes,
+		FreeTempBytes:       snap.FreeTempBytes,
+		HostUptimeSeconds:   int64(snap.HostUptime / time.Second),
+		WallClockUnixMicros: snap.Now.UnixMicro(),
+		AgentVersion:        c.version,
+	}
+	c.streamMu.Lock()
+	defer c.streamMu.Unlock()
+	_ = stream.Send(&wolfciv1.AgentMessage{
+		Body: &wolfciv1.AgentMessage_Heartbeat{
+			Heartbeat: &wolfciv1.Heartbeat{Status: status},
+		},
+	})
 }
 
 func (c *Client) dial(ctx context.Context) (*grpc.ClientConn, error) {

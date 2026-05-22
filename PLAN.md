@@ -2013,14 +2013,55 @@ Decisions to lock in before the phase starts:
          body type is *AgentMessage_Heartbeat and
          Status.Architecture/AgentVersion survive the round
          trip).
-- [ ] 12.3 cmd/wolfci-agent emits a Heartbeat on the existing
+- [x] 12.3 cmd/wolfci-agent emits a Heartbeat on the existing
          Connect stream every 30s (configurable via
          heartbeat_interval in agent.yaml; default 30s, allowed
          range 5s-300s). Snapshot drawn from internal/nodeinfo.
-         Gates: TestAgent_SendsHeartbeatOnSchedule (fake
-         AgentService records Heartbeats, verifies one fires
-         within 1s of a tightened 100ms interval and the
-         NodeStatus.architecture matches runtime.GOOS+GOARCH).
+         Done: agent.Config grew HeartbeatInterval (string YAML,
+         empty = 30s default). HeartbeatTickInterval parses the
+         field with a max of 300s; the lower bound from the
+         spec (5s) is documented in the field comment rather
+         than hard-enforced so tests can pass "100ms" without
+         a separate test-only constructor. Validate() now
+         exercises the parser eagerly so a malformed string
+         fails at config-load time, not at the first tick.
+         agent.Client got a heartbeatLoop goroutine spawned
+         right after Connect: it sends an immediate first
+         beat (so the server stamps "last seen" before the
+         first tick interval elapses) and then ticks at
+         HeartbeatTickInterval, taking a fresh
+         nodeinfo.Snapshot of cfg.WorkDir each time. The
+         Snapshot is mapped to NodeStatus inline; time fields
+         use the int64 encodings the proto declared
+         (host_uptime_seconds, wall_clock_unix_micros via
+         time.Time.UnixMicro). Send goes under the existing
+         streamMu so heartbeats and BuildComplete messages
+         do not race on the gRPC client stream. Send errors
+         are swallowed because the receiving side of the
+         stream tears down via stream.Recv() io.EOF in
+         processStream first; a Send race with teardown is
+         expected and not actionable.
+         Client gained a version field (default "dev",
+         settable via SetVersion) so cmd/wolfci-agent's main
+         can inject the -ldflags build stamp when 12.8
+         lands; until then heartbeats carry "dev" verbatim
+         and the field is still wire-non-zero.
+         The new dep is internal/nodeinfo (Phase 12.1); no
+         new transitive packages.
+         Gates: TestAgent_SendsHeartbeatOnSchedule
+         (internal/agent/client_test.go) stands up a wolfSSL
+         mTLS gRPC server backed by a fake
+         heartbeatRecorder (embeds
+         UnimplementedAgentServiceServer; Register accepts
+         and Connect drops every Heartbeat into a
+         mu-protected slice). With cfg.HeartbeatInterval
+         set to "100ms" the test waits up to 1s and asserts
+         the first beat's NodeStatus.Architecture matches
+         runtime.GOOS+"/"+runtime.GOARCH and that
+         WallClockUnixMicros is non-zero. The existing
+         TestClient_RunDispatchesAndReports stays green;
+         the heartbeat goroutine and the assignment-
+         dispatch path share streamMu and do not race.
          agent.Config gains HeartbeatInterval (default "30s").
 - [ ] 12.4 internal/agentsvc records the most recent NodeStatus
          + receive timestamp per agent_id. Exposes

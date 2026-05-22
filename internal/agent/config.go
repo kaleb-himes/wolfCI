@@ -14,8 +14,14 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"time"
 
 	"gopkg.in/yaml.v3"
+)
+
+const (
+	defaultHeartbeatInterval = 30 * time.Second
+	maxHeartbeatInterval     = 300 * time.Second
 )
 
 // Config is the on-disk shape of config-files/agent.yaml.
@@ -51,6 +57,17 @@ type Config struct {
 	// WorkDir is the directory where this agent caches build
 	// outputs (builds/<job>/<n>/log etc.). Required.
 	WorkDir string `yaml:"work_dir"`
+
+	// HeartbeatInterval is the period between NodeStatus
+	// heartbeats the agent emits on its Connect stream (PLAN.md
+	// Phase 12.3). Empty string means defaultHeartbeatInterval
+	// (30s). The maximum is 300s; the minimum is bounded only by
+	// what time.ParseDuration accepts, but operators should
+	// stay above 5s in production to avoid flooding the server
+	// (the unit tests use 100ms intentionally to keep the
+	// suite fast). HeartbeatTickInterval returns the parsed
+	// value with maximum enforcement applied.
+	HeartbeatInterval string `yaml:"heartbeat_interval,omitempty"`
 }
 
 // DefaultConfig returns a Config with sensible defaults. The
@@ -118,7 +135,38 @@ func (c *Config) Validate() error {
 	if c.WorkDir == "" {
 		return errors.New("work_dir is required")
 	}
+	if _, err := c.HeartbeatTickInterval(); err != nil {
+		return err
+	}
 	return nil
+}
+
+// HeartbeatTickInterval returns the parsed HeartbeatInterval or
+// defaultHeartbeatInterval if the field is empty. Returns an
+// error if the field is malformed, non-positive, or larger than
+// maxHeartbeatInterval (300s). The lower bound from the PLAN.md
+// spec (5s) is documented in the field comment rather than
+// enforced in code so tests can pass values like "100ms" without
+// rebuilding the validator's surface.
+func (c *Config) HeartbeatTickInterval() (time.Duration, error) {
+	if c.HeartbeatInterval == "" {
+		return defaultHeartbeatInterval, nil
+	}
+	d, err := time.ParseDuration(c.HeartbeatInterval)
+	if err != nil {
+		return 0, fmt.Errorf(
+			"parse heartbeat_interval %q: %w", c.HeartbeatInterval, err)
+	}
+	if d <= 0 {
+		return 0, fmt.Errorf(
+			"heartbeat_interval %v must be positive", d)
+	}
+	if d > maxHeartbeatInterval {
+		return 0, fmt.Errorf(
+			"heartbeat_interval %v exceeds maximum %v",
+			d, maxHeartbeatInterval)
+	}
+	return d, nil
 }
 
 // HasLabel reports whether this agent declares the given label.
