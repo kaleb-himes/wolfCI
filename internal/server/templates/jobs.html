@@ -4,7 +4,7 @@
 <p><a href="/jobs/new"><button type="button">New job</button></a></p>
 {{ if .Jobs }}
 <table>
-<thead><tr><th>Name</th><th>Description</th><th>Node label</th><th>Steps</th><th></th></tr></thead>
+<thead><tr><th>Name</th><th>Description</th><th>Node label</th><th>Steps</th><th></th><th></th></tr></thead>
 <tbody>
 {{ range .Jobs }}
 <tr>
@@ -12,6 +12,7 @@
 <td>{{ .Description }}</td>
 <td>{{ if .NodeLabel }}<code>{{ .NodeLabel }}</code>{{ else }}<span class="muted">any</span>{{ end }}</td>
 <td>{{ len .Steps }}</td>
+<td>{{ if $.CanRun }}<form method="POST" action="/jobs/{{ .Name }}/run" class="run-form"><button type="submit">Run</button></form>{{ end }}</td>
 <td><a href="/jobs/{{ .Name }}/edit">edit</a></td>
 </tr>
 {{ end }}

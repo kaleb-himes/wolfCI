@@ -113,7 +113,11 @@ func Run(ctx context.Context, cfg *server.ServerConfig, addrCh chan<- string) er
             return num, err
         }))
 
-    /* UI handler from Phase 6. */
+    /* UI handler from Phase 6. The JobRunner adapter wraps the
+     * scheduler's three-return Enqueue (build number, completion
+     * channel, error) into the two-return shape the UI's Run
+     * button needs.
+     */
     uiSrv := server.New(server.Options{
         Storage:      store,
         Auth:         authCfg,
@@ -121,6 +125,10 @@ func Run(ctx context.Context, cfg *server.ServerConfig, addrCh chan<- string) er
         Sessions:     sessions,
         CookieSecure: true,
         AgentSvc:     svc,
+        JobRunner: server.JobRunnerFunc(func(job *storage.Job) (int, error) {
+            num, _, err := sched.Enqueue(job)
+            return num, err
+        }),
     })
 
     /* First-admin bootstrap: prints a setup URL to stdout if no

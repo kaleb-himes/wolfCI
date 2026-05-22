@@ -70,7 +70,27 @@ type Options struct {
 	// page lists agents from this registry. Optional; when nil
 	// the /nodes page renders as empty.
 	AgentSvc *agentsvc.Server
+
+	// JobRunner enqueues a job into the scheduler. The Run button
+	// on /jobs and the per-job page POST /jobs/<name>/run, which
+	// calls Enqueue and redirects to /jobs/<name>/builds/<n>.
+	// Optional; when nil the Run button is hidden and the POST
+	// endpoint returns 501.
+	JobRunner JobRunner
 }
+
+// JobRunner is the surface server needs from the scheduler to wire
+// the Run button. cmd/wolfci adapts scheduler.Scheduler.Enqueue to
+// this shape; tests can substitute a fake.
+type JobRunner interface {
+	Enqueue(job *storage.Job) (buildNumber int, err error)
+}
+
+// JobRunnerFunc adapts a function into a JobRunner.
+type JobRunnerFunc func(job *storage.Job) (int, error)
+
+// Enqueue satisfies JobRunner.
+func (f JobRunnerFunc) Enqueue(job *storage.Job) (int, error) { return f(job) }
 
 // Server is the wolfCI HTTP handler tree. It satisfies
 // http.Handler.
@@ -143,6 +163,12 @@ func (s *Server) handleJobRoutes(w http.ResponseWriter, r *http.Request) {
 			default:
 				http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 			}
+		case len(parts) == 2 && parts[1] == "run":
+			if r.Method != http.MethodPost {
+				http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+				return
+			}
+			s.handleJobRun(w, r, name)
 		case len(parts) == 3 && parts[1] == "builds":
 			num, err := strconv.Atoi(parts[2])
 			if err != nil || num < 1 {
@@ -186,6 +212,28 @@ func (s *Server) handleNodes(w http.ResponseWriter, r *http.Request) {
 		"Title": "Nodes",
 		"Nodes": rows,
 	})
+}
+
+// handleJobRun enqueues the named job and redirects to the live
+// build log page. The Run button on jobs.html POSTs here.
+func (s *Server) handleJobRun(w http.ResponseWriter, r *http.Request, name string) {
+	if s.opts.JobRunner == nil {
+		http.Error(w, "job runner not configured", http.StatusNotImplemented)
+		return
+	}
+	job, err := s.opts.Storage.LoadJob(name)
+	if err != nil {
+		http.Error(w, "load job: "+err.Error(), http.StatusNotFound)
+		return
+	}
+	num, err := s.opts.JobRunner.Enqueue(job)
+	if err != nil {
+		http.Error(w, "enqueue: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
+	http.Redirect(w, r,
+		fmt.Sprintf("/jobs/%s/builds/%d", name, num),
+		http.StatusSeeOther)
 }
 
 // handleBuildLogPage renders the live-tailing page for a
@@ -379,8 +427,9 @@ func (s *Server) handleJobs(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	s.render(w, "jobs.html", map[string]interface{}{
-		"Title": "Jobs",
-		"Jobs":  jobs,
+		"Title":  "Jobs",
+		"Jobs":   jobs,
+		"CanRun": s.opts.JobRunner != nil,
 	})
 }
 
