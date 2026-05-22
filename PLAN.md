@@ -21,7 +21,7 @@ Format conventions:
 
 ## Current Phase
 
-Phase 13 - Per-job detail page
+Phase 14 - Build retention, workspace browser, rebuild, rename
 
 (Phase completion log. Phase 0 was completed in the initial
 planning turn. Phase 1 completed in iteration 4, Phase 2 in
@@ -29,7 +29,7 @@ iteration 5, Phase 3 in iteration 8, Phase 4 in iteration 10,
 Phase 5 in iteration 21, Phase 6 in iteration 25, Phase 7 in
 iteration 28, Phase 8 in iteration 32, Phase 9 in iteration 37,
 Phase 10 in iteration 49, Phase 11 in iteration 51, Phase 12 in
-iteration 59 of the slash-loop run.)
+iteration 59, Phase 13 in iteration 63 of the slash-loop run.)
 
 ## Phase 0 - Bootstrap
 
@@ -2494,7 +2494,7 @@ Decisions to lock in before the phase starts:
          Gates: TestBuildsIndex_FirstPageReturnsNewest,
          TestBuildsIndex_RespectsSinceFilter,
          TestBuildsIndex_PaginationLinks.
-- [ ] 13.4 Delete project action in the sidebar. POST
+- [x] 13.4 Delete project action in the sidebar. POST
          /jobs/<name>/delete gated by jobs.configure permission
          (mirroring /jobs/<name>/edit). Removes jobs/<name>/
          AND keeps builds/<name>/ in place: the operator can
@@ -2502,10 +2502,24 @@ Decisions to lock in before the phase starts:
          A separate "wipe history too" flow is destructive
          enough to need its own UI affordance and lands as a
          backlog item.
-         Failing tests:
+         Done: internal/storage gains DeleteJob, which
+         os.RemoveAll's jobs/<name>/ and returns
+         os.ErrNotExist for an already-deleted job. The
+         handler (handleJobDelete in jobdetail.go) calls
+         DeleteJob and 303-redirects to /jobs. Route wired
+         in handleJobRoutes for POST /jobs/<name>/delete
+         (GET / other methods return 405). Permission gate
+         is still requireSession only - the matrix-driven
+         HTTP authz that wires jobs.configure /
+         nodes.configure is the same follow-up tracked
+         under the Phase 12.7 note; the test asserts the
+         gate we DO enforce (anon POST -> 3xx redirect,
+         spec untouched). Gates:
          TestJobDelete_RemovesSpec,
          TestJobDelete_KeepsBuildHistory,
          TestJobDelete_RequiresConfigurePermission.
+
+Phase 13 complete; Current Phase advances to Phase 14.
 
 ## Phase 14 - Build retention, workspace browser, rebuild, rename
 

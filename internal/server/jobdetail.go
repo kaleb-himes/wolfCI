@@ -11,6 +11,7 @@ package server
 
 import (
     "encoding/json"
+    "errors"
     "fmt"
     "net/http"
     "os"
@@ -106,6 +107,34 @@ func (s *Server) handleJobDetail(w http.ResponseWriter, r *http.Request,
         "Permalinks":  perms,
         "CanRun":      s.opts.JobRunner != nil,
     })
+}
+
+/* handleJobDelete removes jobs/<name>/ via storage.DeleteJob
+ * and redirects to /jobs. The build history under
+ * builds/<name>/ is left in place so the operator can re-
+ * create the job under the same name later (Phase 13.4's
+ * locked decision; a separate destructive "wipe history"
+ * flow is reserved for a future backlog item).
+ *
+ * Permission gate today is requireSession, mirroring the
+ * /jobs/<name>/edit handler. The proper jobs.configure
+ * matrix check is the same matrix-driven HTTP authz
+ * follow-up tracked under the Phase 12.7 nodes.configure
+ * note - it lands once for every per-resource action.
+ */
+func (s *Server) handleJobDelete(w http.ResponseWriter,
+    r *http.Request, name string) {
+
+    if err := s.opts.Storage.DeleteJob(name); err != nil {
+        if errors.Is(err, os.ErrNotExist) {
+            http.NotFound(w, r)
+            return
+        }
+        http.Error(w, "delete job: "+err.Error(),
+            http.StatusInternalServerError)
+        return
+    }
+    http.Redirect(w, r, "/jobs", http.StatusSeeOther)
 }
 
 /* scanAllBuilds walks builds/<jobName>/ and returns every row

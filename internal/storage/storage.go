@@ -193,6 +193,33 @@ func (s *Storage) ListJobs() ([]*Job, error) {
 	return out, nil
 }
 
+// DeleteJob removes the named job's spec directory
+// (jobs/<name>/) including any sibling files inside it. It
+// does NOT touch builds/<name>/: the operator can re-create
+// the job under the same name and the history is still on
+// disk. A separate "wipe history too" affordance is reserved
+// for a destructive UI flow.
+//
+// Returns os.ErrNotExist if jobs/<name>/ is already gone, so
+// callers can distinguish "already deleted" from a real I/O
+// failure.
+func (s *Storage) DeleteJob(name string) error {
+	if name == "" {
+		return errors.New("storage.DeleteJob: name is required")
+	}
+	jobDir := filepath.Join(s.root, "jobs", name)
+	if _, err := os.Stat(jobDir); err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return os.ErrNotExist
+		}
+		return fmt.Errorf("storage.DeleteJob: stat: %w", err)
+	}
+	if err := os.RemoveAll(jobDir); err != nil {
+		return fmt.Errorf("storage.DeleteJob: remove: %w", err)
+	}
+	return nil
+}
+
 // LoadJob reads and decodes the named job from disk, taking a
 // shared lock for the duration of the read.
 func (s *Storage) LoadJob(name string) (*Job, error) {
