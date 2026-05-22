@@ -1812,14 +1812,35 @@ Decisions locked in for Phase 11 (2026-05-21):
          TestRun_RejectsNilConfig (nil cfg -> error).
          Phase 1.5's TestServe_HelloWorld is deleted; the
          helloHandler and the Listen/Serve helpers are gone.
-- [ ] 11.6 Graceful shutdown: SIGINT/SIGTERM -> cancel root ctx
+- [x] 11.6 Graceful shutdown: SIGINT/SIGTERM -> cancel root ctx
          -> drain in-flight builds up to
          cfg.ShutdownDrainTimeout -> close listener.
-         Failing tests:
-         TestMain_GracefulShutdownDrainsBuilds (start, dispatch
-         a fake long-running build, SIGTERM, assert exit within
-         drain timeout and build's ctx was cancelled),
-         TestMain_GracefulShutdownTimeoutClosesAnyway.
+         Done: scheduler.Scheduler grew a Drain(d time.Duration)
+         method that wraps Stop in a goroutine and returns
+         context.DeadlineExceeded if the in-flight build does
+         not finish within the budget. Run() in cmd/wolfci
+         now (a) replaces the immediate httpSrv.Close() in the
+         ctx.Done branch with sched.Drain(cfg.DrainTimeout())
+         followed by httpSrv.Shutdown with the remaining budget,
+         force-closing if Shutdown also exceeds the deadline;
+         and (b) replaces the unconditional defer sched.Stop()
+         with a bounded defer sched.Drain(1*time.Second) safety
+         net so an executor that ignores ctx cannot wedge any
+         error-return path. Run's signature changed from
+         Run(ctx, cfg, addrCh) to Run(ctx, cfg, RunOptions) so
+         tests can inject a cancel-ignoring Executor and observe
+         the live *scheduler.Scheduler; production main passes
+         a zero-value RunOptions. Three test sites updated.
+         Gates: internal/scheduler/scheduler_test.go +
+         TestScheduler_DrainCompletesCleanly,
+         TestScheduler_DrainTimesOut (cooperating + hanging
+         executor variants on the scheduler unit);
+         cmd/wolfci/main_test.go +
+         TestRun_GracefulShutdownDrainsBuilds (300ms enqueue,
+         cancel, exit within 1.5s of 2s budget, build status =
+         Cancelled), TestRun_GracefulShutdownTimeoutClosesAnyway
+         (hanging executor, 300ms drain budget, Run exits
+         between 300ms and 2s post-cancel).
 - [ ] 11.7 docs/GETTING-STARTED.md update: rewrite the operator
          walkthrough to match the actual cmd/wolfci flow
          (config-files/server.yaml example, first-admin

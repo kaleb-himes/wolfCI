@@ -2,6 +2,7 @@ package scheduler_test
 
 import (
 	"context"
+	"errors"
 	"reflect"
 	"sync"
 	"testing"
@@ -151,6 +152,102 @@ func TestScheduler_BuildNumberPersistsAcrossSchedulers(t *testing.T) {
 	second.Stop()
 	if num2 != 2 {
 		t.Errorf("second scheduler: build = %d, want 2 (counter must persist)", num2)
+	}
+}
+
+// TestScheduler_DrainCompletesCleanly gates PLAN.md task 11.6.
+// Scheduler.Drain stops the dispatch loop and waits up to d for
+// the in-flight build to finish. When the executor respects ctx
+// cancellation, Drain returns nil well within the budget.
+func TestScheduler_DrainCompletesCleanly(t *testing.T) {
+	store := mustStore(t)
+
+	releaseExec := make(chan struct{})
+	exec := &fakeExecutor{
+		execFn: func(ctx context.Context, _ *storage.Job, _ int) scheduler.BuildResult {
+			// Hold until ctx cancels, then return Cancelled. This
+			// mirrors how LocalExecutor exits when exec.CommandContext
+			// kills its sh subprocess on shutdown.
+			close(releaseExec)
+			<-ctx.Done()
+			return scheduler.BuildResult{Status: scheduler.StatusCancelled}
+		},
+	}
+	s := scheduler.New(store, exec)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	s.Start(ctx)
+
+	job := &storage.Job{Name: "drain-clean", Steps: []storage.Step{{Shell: "true"}}}
+	if _, _, err := s.Enqueue(job); err != nil {
+		t.Fatalf("Enqueue: %v", err)
+	}
+
+	// Wait until the executor has picked up the build so Drain
+	// actually drains something, not just an idle scheduler.
+	select {
+	case <-releaseExec:
+	case <-time.After(2 * time.Second):
+		t.Fatal("executor did not start within 2s")
+	}
+
+	start := time.Now()
+	if err := s.Drain(2 * time.Second); err != nil {
+		t.Errorf("Drain returned %v, want nil (clean drain)", err)
+	}
+	elapsed := time.Since(start)
+	if elapsed > 1500*time.Millisecond {
+		t.Errorf("Drain took %v; should return well under the 2s budget", elapsed)
+	}
+}
+
+// TestScheduler_DrainTimesOut gates the timeout-anyway path: if
+// the in-flight executor refuses to respond to ctx, Drain returns
+// context.DeadlineExceeded after the budget. The caller is then
+// free to abandon the leaked goroutine and force-close the rest
+// of the server.
+func TestScheduler_DrainTimesOut(t *testing.T) {
+	store := mustStore(t)
+
+	releaseExec := make(chan struct{})
+	hangForever := make(chan struct{})
+	exec := &fakeExecutor{
+		execFn: func(_ context.Context, _ *storage.Job, _ int) scheduler.BuildResult {
+			close(releaseExec)
+			<-hangForever
+			return scheduler.BuildResult{Status: scheduler.StatusSuccess}
+		},
+	}
+	s := scheduler.New(store, exec)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	// Let the test goroutine leak out gracefully at the end.
+	defer close(hangForever)
+	s.Start(ctx)
+
+	job := &storage.Job{Name: "drain-hang", Steps: []storage.Step{{Shell: "true"}}}
+	if _, _, err := s.Enqueue(job); err != nil {
+		t.Fatalf("Enqueue: %v", err)
+	}
+	select {
+	case <-releaseExec:
+	case <-time.After(2 * time.Second):
+		t.Fatal("executor did not start within 2s")
+	}
+
+	start := time.Now()
+	err := s.Drain(200 * time.Millisecond)
+	elapsed := time.Since(start)
+	if err == nil {
+		t.Error("Drain returned nil; want context.DeadlineExceeded against a hanging executor")
+	} else if !errors.Is(err, context.DeadlineExceeded) {
+		t.Errorf("Drain err = %v, want context.DeadlineExceeded", err)
+	}
+	if elapsed < 200*time.Millisecond {
+		t.Errorf("Drain returned in %v before the 200ms budget", elapsed)
+	}
+	if elapsed > 800*time.Millisecond {
+		t.Errorf("Drain took %v; should return shortly after the 200ms budget", elapsed)
 	}
 }
 

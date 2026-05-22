@@ -48,16 +48,46 @@ const serverVersion = "wolfCI/dev"
  */
 const defaultSessionTTL = "24h"
 
+/* RunOptions is the optional plumbing surface for callers of Run.
+ * Production main passes a zero value; tests use it for race-free
+ * observation of the bound address, access to the live scheduler
+ * (so a long-running build can be enqueued before signalling
+ * shutdown), and Executor injection (so a non-cancellable build
+ * can exercise the drain-timeout-anyway path).
+ */
+type RunOptions struct {
+    /* AddrCh, if non-nil, receives rawLn.Addr().String() as soon
+     * as the TLS listener is bound. Tests use it to know exactly
+     * when to start firing HTTP requests instead of polling.
+     */
+    AddrCh chan<- string
+
+    /* SchedulerCh, if non-nil, receives the live
+     * *scheduler.Scheduler immediately after sched.Start. Tests
+     * use it to enqueue a known long-running job before sending
+     * the shutdown signal so the drain semantics are exercised
+     * end-to-end.
+     */
+    SchedulerCh chan<- *scheduler.Scheduler
+
+    /* Executor, if non-nil, replaces the default LocalExecutor.
+     * Tests use it to install an executor that ignores ctx
+     * cancellation, which is the only way to make Run's drain
+     * timeout actually fire (LocalExecutor + exec.CommandContext
+     * would otherwise kill the subprocess via SIGKILL well
+     * inside the drain budget).
+     */
+    Executor scheduler.Executor
+}
+
 /* Run is the wolfCI server entry point. Tests call this directly
  * with an in-memory config; main wraps it with --config parsing
  * and signal handling.
  *
- * The addrCh channel (optional, may be nil) receives the actual
- * bound TCP address once the listener is up. Tests use it to
- * race-free wait for the server to be reachable. Production main
- * passes nil.
+ * opts carries optional test hooks; production main passes a
+ * zero-value RunOptions.
  */
-func Run(ctx context.Context, cfg *server.ServerConfig, addrCh chan<- string) error {
+func Run(ctx context.Context, cfg *server.ServerConfig, opts RunOptions) error {
     if cfg == nil {
         return errors.New("wolfci.Run: nil ServerConfig")
     }
@@ -98,10 +128,24 @@ func Run(ctx context.Context, cfg *server.ServerConfig, addrCh chan<- string) er
     svc := agentsvc.New(serverVersion)
     svc.SetLogSink(agentsvc.NewFileLogSink(cfg.WorkDir))
 
-    localExec := scheduler.NewLocalExecutor(store)
-    sched := scheduler.New(store, localExec)
+    var exec scheduler.Executor = scheduler.NewLocalExecutor(store)
+    if opts.Executor != nil {
+        exec = opts.Executor
+    }
+    sched := scheduler.New(store, exec)
     sched.Start(ctx)
-    defer sched.Stop()
+    /* Safety net: bound the worst case (a hung executor) so any
+     * error-return path can never wedge function exit. The
+     * ctx.Done success branch already drains within
+     * cfg.ShutdownDrainTimeout; idle paths return instantly via
+     * the same call.
+     */
+    defer func() {
+        _ = sched.Drain(time.Second)
+    }()
+    if opts.SchedulerCh != nil {
+        opts.SchedulerCh <- sched
+    }
 
     /* cliservice for wolfci-ctl. EnqueuerFunc adapts the
      * scheduler's three-return Enqueue to the cli's two-return
@@ -214,8 +258,8 @@ func Run(ctx context.Context, cfg *server.ServerConfig, addrCh chan<- string) er
     }
     defer ln.Close()
 
-    if addrCh != nil {
-        addrCh <- rawLn.Addr().String()
+    if opts.AddrCh != nil {
+        opts.AddrCh <- rawLn.Addr().String()
     }
 
     httpSrv := &http.Server{Handler: dispatcher}
@@ -235,12 +279,38 @@ func Run(ctx context.Context, cfg *server.ServerConfig, addrCh chan<- string) er
 
     select {
     case <-ctx.Done():
-        /* Phase 11.6 will replace this with a graceful drain
-         * bounded by cfg.ShutdownDrainTimeout. For now Close
-         * is immediate - close the listener, abandon
-         * in-flight handlers.
+        /* Graceful shutdown (PLAN.md 11.6). cfg.DrainTimeout()
+         * bounds how long we wait for the in-flight build (via
+         * sched.Drain) AND for in-flight HTTP requests (via
+         * httpSrv.Shutdown). Both run within the same time
+         * budget: scheduler first because builds dominate the
+         * shutdown latency, then Shutdown for what remains.
+         * Drain budget is consumed by whichever phase needs it;
+         * if a phase exceeds its share, we force-close and
+         * accept the abrupt termination. Production executors
+         * (LocalExecutor + exec.CommandContext) cancel via
+         * SIGKILL so the scheduler returns fast and the HTTP
+         * phase gets most of the budget.
          */
-        _ = httpSrv.Close()
+        drainTimeout, _ := cfg.DrainTimeout()
+        deadline := time.Now().Add(drainTimeout)
+
+        _ = sched.Drain(drainTimeout)
+
+        remaining := time.Until(deadline)
+        if remaining < 0 {
+            remaining = 0
+        }
+        shutCtx, shutCancel := context.WithTimeout(
+            context.Background(), remaining)
+        if err := httpSrv.Shutdown(shutCtx); err != nil {
+            /* Shutdown returned ctx.DeadlineExceeded or some
+             * other error; force-close so the serve goroutine
+             * returns.
+             */
+            _ = httpSrv.Close()
+        }
+        shutCancel()
         <-serveErr
         return nil
     case err := <-serveErr:
@@ -267,7 +337,7 @@ func main() {
         os.Interrupt, syscall.SIGTERM)
     defer cancel()
 
-    if err := Run(ctx, cfg, nil); err != nil {
+    if err := Run(ctx, cfg, RunOptions{}); err != nil {
         log.Fatalf("wolfci: %v", err)
     }
 }

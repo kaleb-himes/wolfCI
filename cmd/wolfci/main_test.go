@@ -20,7 +20,9 @@ import (
     "testing"
     "time"
 
+    "github.com/kaleb-himes/wolfCI/internal/scheduler"
     "github.com/kaleb-himes/wolfCI/internal/server"
+    "github.com/kaleb-himes/wolfCI/internal/storage"
     "github.com/kaleb-himes/wolfCI/internal/testcerts"
 )
 
@@ -86,7 +88,7 @@ func startRun(t *testing.T, f *runFixture) (string, context.CancelFunc) {
     addrCh := make(chan string, 1)
     errCh := make(chan error, 1)
     go func() {
-        errCh <- Run(ctx, f.cfg, addrCh)
+        errCh <- Run(ctx, f.cfg, RunOptions{AddrCh: addrCh})
     }()
 
     select {
@@ -225,8 +227,255 @@ func TestRun_GRPCContentTypeRoutedAwayFromUI(t *testing.T) {
 }
 
 func TestRun_RejectsNilConfig(t *testing.T) {
-    if err := Run(context.Background(), nil, nil); err == nil {
+    if err := Run(context.Background(), nil, RunOptions{}); err == nil {
         t.Error("Run(nil) returned nil, want error")
+    }
+}
+
+/* TestRun_GracefulShutdownDrainsBuilds gates PLAN.md 11.6. With
+ * an executor that respects ctx cancellation (the default
+ * LocalExecutor and any well-behaved test double do), shutdown
+ * cancels the build, waits for it to settle, and returns well
+ * within cfg.ShutdownDrainTimeout. The build's recorded status
+ * is Cancelled so callers (UI, gRPC) see the proper outcome.
+ */
+func TestRun_GracefulShutdownDrainsBuilds(t *testing.T) {
+    f := newRunFixture(t)
+    /* Tight drain budget so the test does not stall the suite.
+     * 2s is plenty for the cooperating-executor path; the
+     * graceful drain itself completes in milliseconds.
+     */
+    f.cfg.ShutdownDrainTimeout = "2s"
+
+    ctx, cancel := context.WithCancel(context.Background())
+    defer cancel()
+
+    /* Cooperating executor: holds until ctx fires, then returns
+     * Cancelled. Mirrors the LocalExecutor's SIGKILL behavior
+     * without depending on a real /bin/sh subprocess (which
+     * keeps the test hermetic and fast).
+     */
+    started := make(chan struct{})
+    exec := &cancelRespectingExec{started: started}
+
+    addrCh := make(chan string, 1)
+    schedCh := make(chan *scheduler.Scheduler, 1)
+    errCh := make(chan error, 1)
+    go func() {
+        errCh <- Run(ctx, f.cfg, RunOptions{
+            AddrCh:      addrCh,
+            SchedulerCh: schedCh,
+            Executor:    exec,
+        })
+    }()
+
+    select {
+    case <-addrCh:
+    case err := <-errCh:
+        t.Fatalf("Run exited before binding: %v", err)
+    case <-time.After(5 * time.Second):
+        cancel()
+        t.Fatal("Run did not bind within 5s")
+    }
+
+    var sched *scheduler.Scheduler
+    select {
+    case sched = <-schedCh:
+    case <-time.After(2 * time.Second):
+        cancel()
+        t.Fatal("Run did not expose scheduler within 2s")
+    }
+
+    job := &storage.Job{
+        Name:  "shutdown-drain-test",
+        Steps: []storage.Step{{Shell: "true"}},
+    }
+    _, done, err := sched.Enqueue(job)
+    if err != nil {
+        cancel()
+        t.Fatalf("Enqueue: %v", err)
+    }
+
+    /* Wait for the dispatcher to dequeue and the executor to
+     * actually start so the shutdown sequence has a real
+     * in-flight build to drain.
+     */
+    select {
+    case <-started:
+    case <-time.After(2 * time.Second):
+        cancel()
+        t.Fatal("executor did not start within 2s")
+    }
+
+    startedAt := time.Now()
+    cancel()
+
+    var runErr error
+    select {
+    case runErr = <-errCh:
+    case <-time.After(5 * time.Second):
+        t.Fatal("Run did not exit within 5s of cancel")
+    }
+    elapsed := time.Since(startedAt)
+    if runErr != nil {
+        t.Errorf("Run returned %v, want nil", runErr)
+    }
+    /* The cooperating executor returns immediately on ctx cancel
+     * so total shutdown should be well under the 2s budget;
+     * 1.5s leaves headroom for slow CI machines.
+     */
+    if elapsed > 1500*time.Millisecond {
+        t.Errorf("Run took %v to shut down; drain budget was 2s", elapsed)
+    }
+
+    select {
+    case res := <-done:
+        if res.Status != scheduler.StatusCancelled {
+            t.Errorf("build status = %s, want %s",
+                res.Status, scheduler.StatusCancelled)
+        }
+    case <-time.After(time.Second):
+        t.Error("build done channel had no result; build was not cancelled cleanly")
+    }
+}
+
+/* TestRun_GracefulShutdownTimeoutClosesAnyway proves the second
+ * half of 11.6: even if the in-flight executor ignores ctx
+ * entirely, Run still returns shortly after the drain budget
+ * elapses. The HTTP listener and gRPC server are closed
+ * regardless; the hung dispatcher goroutine is leaked
+ * deliberately (production LocalExecutor never reaches this
+ * path because exec.CommandContext kills via SIGKILL).
+ */
+func TestRun_GracefulShutdownTimeoutClosesAnyway(t *testing.T) {
+    f := newRunFixture(t)
+    /* 300ms keeps the test fast. The drain phase should account
+     * for the entire elapsed shutdown because the executor
+     * refuses to return.
+     */
+    f.cfg.ShutdownDrainTimeout = "300ms"
+
+    ctx, cancel := context.WithCancel(context.Background())
+    defer cancel()
+
+    started := make(chan struct{})
+    release := make(chan struct{})
+    defer close(release) /* let the leaked goroutine exit at test end */
+
+    exec := &hangingExec{started: started, release: release}
+
+    addrCh := make(chan string, 1)
+    schedCh := make(chan *scheduler.Scheduler, 1)
+    errCh := make(chan error, 1)
+    go func() {
+        errCh <- Run(ctx, f.cfg, RunOptions{
+            AddrCh:      addrCh,
+            SchedulerCh: schedCh,
+            Executor:    exec,
+        })
+    }()
+
+    select {
+    case <-addrCh:
+    case err := <-errCh:
+        t.Fatalf("Run exited before binding: %v", err)
+    case <-time.After(5 * time.Second):
+        cancel()
+        t.Fatal("Run did not bind within 5s")
+    }
+
+    var sched *scheduler.Scheduler
+    select {
+    case sched = <-schedCh:
+    case <-time.After(2 * time.Second):
+        cancel()
+        t.Fatal("Run did not expose scheduler within 2s")
+    }
+
+    job := &storage.Job{
+        Name:  "shutdown-timeout-test",
+        Steps: []storage.Step{{Shell: "true"}},
+    }
+    if _, _, err := sched.Enqueue(job); err != nil {
+        cancel()
+        t.Fatalf("Enqueue: %v", err)
+    }
+    select {
+    case <-started:
+    case <-time.After(2 * time.Second):
+        cancel()
+        t.Fatal("hanging executor did not start within 2s")
+    }
+
+    startedAt := time.Now()
+    cancel()
+
+    var runErr error
+    select {
+    case runErr = <-errCh:
+    case <-time.After(5 * time.Second):
+        t.Fatal("Run did not exit within 5s of cancel; drain timeout did not force close")
+    }
+    elapsed := time.Since(startedAt)
+    if runErr != nil {
+        t.Errorf("Run returned %v, want nil", runErr)
+    }
+    if elapsed < 300*time.Millisecond {
+        t.Errorf("Run returned in %v before the 300ms drain budget", elapsed)
+    }
+    /* Allow generous headroom on top of the drain budget for
+     * httpSrv.Shutdown/Close to settle on slow CI.
+     */
+    if elapsed > 2*time.Second {
+        t.Errorf("Run took %v to shut down with a 300ms drain budget", elapsed)
+    }
+}
+
+/* cancelRespectingExec is the cooperating executor for the
+ * happy-path drain test. It signals start, blocks on ctx, and
+ * reports Cancelled when ctx fires.
+ */
+type cancelRespectingExec struct {
+    started   chan struct{}
+    startOnce bool
+}
+
+func (e *cancelRespectingExec) Execute(ctx context.Context,
+    job *storage.Job, num int) scheduler.BuildResult {
+    if !e.startOnce {
+        e.startOnce = true
+        close(e.started)
+    }
+    <-ctx.Done()
+    return scheduler.BuildResult{
+        JobName: job.Name,
+        Number:  num,
+        Status:  scheduler.StatusCancelled,
+    }
+}
+
+/* hangingExec ignores ctx entirely. Used to prove Run's drain
+ * timeout actually fires; the dispatcher goroutine running this
+ * executor is intentionally leaked for the duration of the test
+ * (release closes at test end to let it exit cleanly).
+ */
+type hangingExec struct {
+    started   chan struct{}
+    startOnce bool
+    release   chan struct{}
+}
+
+func (e *hangingExec) Execute(_ context.Context,
+    job *storage.Job, num int) scheduler.BuildResult {
+    if !e.startOnce {
+        e.startOnce = true
+        close(e.started)
+    }
+    <-e.release
+    return scheduler.BuildResult{
+        JobName: job.Name,
+        Number:  num,
+        Status:  scheduler.StatusError,
     }
 }
 

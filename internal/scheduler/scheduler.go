@@ -24,6 +24,7 @@ import (
 	"strings"
 	"sync"
 	"syscall"
+	"time"
 
 	"github.com/kaleb-himes/wolfCI/internal/storage"
 )
@@ -109,6 +110,29 @@ func (s *Scheduler) Start(ctx context.Context) {
 		<-s.bgCtx.Done()
 		s.Stop()
 	}()
+}
+
+// Drain signals the dispatch loop to exit and waits up to d for
+// the in-flight build (and any state cleanup) to finish.
+// Returns nil if the scheduler stopped within the budget, or
+// context.DeadlineExceeded if the timeout fired first. Callers
+// that see DeadlineExceeded should treat the dispatch goroutine
+// as leaked and proceed to force-close the rest of the server;
+// production executors (LocalExecutor + exec.CommandContext)
+// respect ctx cancellation via SIGKILL and never hit this path.
+// Drain is idempotent with Stop().
+func (s *Scheduler) Drain(d time.Duration) error {
+	done := make(chan struct{})
+	go func() {
+		s.Stop()
+		close(done)
+	}()
+	select {
+	case <-done:
+		return nil
+	case <-time.After(d):
+		return context.DeadlineExceeded
+	}
 }
 
 // Stop signals the dispatch loop to exit and blocks until it
