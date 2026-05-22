@@ -1,0 +1,34 @@
+# examples/jobs/windows-test.yaml - the windows side of the
+# multi-platform pipeline. Consumes the upstream tarball
+# via $WOLFCI_INPUTS and runs validation against it.
+#
+# Drop into jobs/windows-test/job.yaml alongside
+# linux-bundle. When linux-bundle succeeds, the scheduler
+# enqueues this job with WOLFCI_INPUTS=<absolute path to the
+# upstream's artifacts dir>, so the step can read the file
+# the upstream produced.
+
+name: windows-test
+description: |
+  Consume the tarball linux-bundle produced and validate it.
+  Demonstrates the downstream half of the Phase 15 graph.
+
+node_label: windows
+
+upstream:
+  - linux-bundle
+
+steps:
+  - name: locate-bundle
+    shell: |
+      if [ -z "$WOLFCI_INPUTS" ]; then
+        echo "WOLFCI_INPUTS not set; run me via the trigger" >&2
+        exit 1
+      fi
+      ls -l "$WOLFCI_INPUTS/bundle.tar.gz"
+  - name: validate
+    shell: |
+      grep -q "wolfCI bundle" "$WOLFCI_INPUTS/bundle.tar.gz"
+
+retention:
+  max_builds: 30

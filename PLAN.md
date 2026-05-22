@@ -21,7 +21,11 @@ Format conventions:
 
 ## Current Phase
 
-Phase 15 - Upstream / downstream jobs + artifacts
+Backlog only - every numbered phase (0..15) is complete. The
+next /loop iteration should promote a Backlog item into a new
+numbered phase (with sub-tasks and gating tests) before doing
+any work; the loop's "next unchecked task" walk has nothing
+to pick otherwise.
 
 (Phase completion log. Phase 0 was completed in the initial
 planning turn. Phase 1 completed in iteration 4, Phase 2 in
@@ -30,7 +34,7 @@ Phase 5 in iteration 21, Phase 6 in iteration 25, Phase 7 in
 iteration 28, Phase 8 in iteration 32, Phase 9 in iteration 37,
 Phase 10 in iteration 49, Phase 11 in iteration 51, Phase 12 in
 iteration 59, Phase 13 in iteration 63, Phase 14 in iteration
-67 of the slash-loop run.)
+67, Phase 15 in iteration 73 of the slash-loop run.)
 
 ## Phase 0 - Bootstrap
 
@@ -2916,7 +2920,7 @@ Decisions to lock in:
          TestJobsIndex_BadgesShowTriggerCounts (A triggers
          [B, C] -> A's row shows "2 out", B and C each
          show "1 in").
-- [ ] 15.7 End-to-end example under examples/jobs/. Ships
+- [x] 15.7 End-to-end example under examples/jobs/. Ships
          linux-bundle.yaml (builds a tarball, declares
          triggers_downstream: [windows-test] with artifacts:
          [dist/bundle.tar.gz]) and windows-test.yaml (declares
@@ -2928,6 +2932,23 @@ Decisions to lock in:
          the trigger graph is acyclic, and the schemas match
          storage.Job after marshal + unmarshal. Wired into
          scripts/test.sh.
+         Done: examples/jobs/linux-bundle.yaml +
+         windows-test.yaml ship the canonical pair. The
+         validator lives in internal/storage/examples_test.go
+         (TestExamples_AllSpecsRoundTripAndPersist) and walks
+         every *.yaml under examples/jobs/ via a
+         runtime.Caller-derived absolute path so it works
+         regardless of cwd. Each spec is parsed, re-marshaled,
+         re-parsed, deeply compared against the first parse
+         (catches type-confusion bugs), and then SaveJob'd to
+         a t.TempDir storage so the Phase 15.1 cycle check
+         fires across the example set as a whole. The gate
+         asserts >= 2 specs are validated so the test fails
+         loud if someone deletes one example by accident.
+         scripts/test-examples.sh runs just that test via
+         go test -run; wired into scripts/test.sh.
+
+Phase 15 complete; Current Phase advances to Phase 16.
 
 ## Backlog (not in main flow)
 

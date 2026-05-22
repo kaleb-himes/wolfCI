@@ -14,6 +14,7 @@
 #   - scripts/test-readme.sh             README.md final-pass gate
 #   - scripts/test-security.sh           docs/SECURITY.md gate
 #   - scripts/test-go-wolfssl.sh         vendored go-wolfssl submodule
+#   - scripts/test-examples.sh           examples/jobs/*.yaml round-trip
 #
 # Intentionally NOT included:
 #   - scripts/test-build-wolfssl.sh: full wolfSSL build (minutes).
@@ -61,5 +62,6 @@ scripts/test-architecture.sh
 scripts/test-readme.sh
 scripts/test-security.sh
 scripts/test-go-wolfssl.sh
+scripts/test-examples.sh
 
 echo "scripts/test.sh: all fast checks passed."

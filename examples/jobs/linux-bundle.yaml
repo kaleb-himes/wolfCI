@@ -1,0 +1,33 @@
+# examples/jobs/linux-bundle.yaml - the linux side of the
+# multi-platform pipeline. Builds a tarball in the workspace
+# and declares that windows-test should run next, with the
+# tarball passed through as an artifact.
+#
+# Drop into jobs/linux-bundle/job.yaml on a wolfCI server
+# along with jobs/windows-test/job.yaml (the companion spec)
+# and click Build Now on linux-bundle. Phase 15.3's executor
+# copies dist/bundle.tar.gz into builds/linux-bundle/<n>/
+# artifacts/ on success; Phase 15.4's scheduler fans out to
+# windows-test with WOLFCI_INPUTS pointing at that dir.
+
+name: linux-bundle
+description: |
+  Build a linux-side tarball and hand it off to windows-test.
+  Demonstrates the Phase 15 trigger graph + artifact passing.
+
+node_label: linux
+
+steps:
+  - name: build
+    shell: |
+      mkdir -p dist
+      echo "wolfCI bundle built at $(date -u +%Y-%m-%dT%H:%M:%SZ)" > \
+        dist/bundle.tar.gz
+
+triggers_downstream:
+  - name: windows-test
+    artifacts:
+      - dist/bundle.tar.gz
+
+retention:
+  max_builds: 30
