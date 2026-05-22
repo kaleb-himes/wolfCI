@@ -2063,7 +2063,7 @@ Decisions to lock in before the phase starts:
          the heartbeat goroutine and the assignment-
          dispatch path share streamMu and do not race.
          agent.Config gains HeartbeatInterval (default "30s").
-- [ ] 12.4 internal/agentsvc records the most recent NodeStatus
+- [x] 12.4 internal/agentsvc records the most recent NodeStatus
          + receive timestamp per agent_id. Exposes
          Server.LastHeartbeat(agentID) (NodeStatus, time.Time,
          bool). The Connect stream's existing message loop
@@ -2074,10 +2074,42 @@ Decisions to lock in before the phase starts:
          StaleThreshold" (default 90s) instead of "stream open
          right now" - this matches Jenkins's "offline" badge
          heuristic and survives transient stream re-connects.
-         Gates: TestServer_RecordHeartbeat,
-         TestServer_LastHeartbeatStale (older than threshold ->
-         ok=true but Connected=false),
-         TestServer_LastHeartbeatUnknownAgent.
+         Done: Server grew a heartbeats map keyed by agent_id
+         (value = heartbeatRecord{status, received}), a
+         heartbeatsMu to guard it, an exported StaleThreshold
+         field (0 means DefaultStaleThreshold = 90s; tests set
+         10ms), RecordHeartbeat(agentID, *NodeStatus), and
+         LastHeartbeat(agentID) (status, received, ok). The
+         Connect recv loop in server.go gained a
+         msg.GetHeartbeat() arm that delegates to
+         RecordHeartbeat; nil-status messages are no-ops so
+         a future protocol regression cannot crash the loop.
+         ConnectedAgents was rewritten to filter the registered
+         agents by "heartbeat received after time.Now() -
+         StaleThreshold". An agent with a stale record stays in
+         LastHeartbeat (the UI keeps showing last-known
+         metrics) but drops out of ConnectedAgents (the live
+         badge); an agent that has never sent a heartbeat is
+         invisible in both views. Agents() is unchanged: the
+         "extends with LastHeartbeat data" PLAN line is
+         honored by leaving the registry surface as-is so
+         callers can correlate via LastHeartbeat(agentID)
+         per row rather than adopting a new bundle type.
+         The dispatch_test gates that previously polled
+         ConnectedAgents() == N now poll IdleAgentWithLabel
+         (which reads the streams map directly) so they
+         remain correct under the heartbeat-derived semantic
+         without depending on test clients sending a fake
+         heartbeat.
+         Gates (internal/agentsvc/server_test.go):
+         TestServer_RecordHeartbeat (RecordHeartbeat then
+         LastHeartbeat returns the stored pointer + a receive
+         time within a few-ms window of the wall clock),
+         TestServer_LastHeartbeatStale (StaleThreshold=10ms,
+         sleep 60ms; LastHeartbeat still ok=true but
+         ConnectedAgents no longer lists the agent),
+         TestServer_LastHeartbeatUnknownAgent (ok=false for
+         an agent that never registered a heartbeat).
 - [ ] 12.5 Built-in master node registration. cmd/wolfci/main.go,
          right after agentsvc.New, calls
          svc.RegisterBuiltInNode(...) which inserts a synthetic

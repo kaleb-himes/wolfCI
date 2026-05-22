@@ -47,9 +47,13 @@ func TestServer_AssignJob_TargetsAgent(t *testing.T) {
 		t.Fatalf("Connect: %v", err)
 	}
 
-	// Give the server a moment to register the stream.
+	/* Give the server a moment to wire the Connect stream into
+	 * its streams map. IdleAgentWithLabel reads that map
+	 * directly, so it is the right sync point now that
+	 * ConnectedAgents() is heartbeat-derived (Phase 12.4).
+	 */
 	if err := waitFor(2*time.Second, func() bool {
-		return len(svc.ConnectedAgents()) == 1
+		return svc.IdleAgentWithLabel("linux") == "linux-agent"
 	}); err != nil {
 		t.Fatal(err)
 	}
@@ -117,8 +121,14 @@ func TestServer_IdleAgentWithLabel(t *testing.T) {
 	defer a.conn.Close()
 	defer b.conn.Close()
 
+	/* Wait until both Connect streams are wired server-side.
+	 * IdleAgentWithLabel reads the streams map directly, the
+	 * right sync point now that ConnectedAgents() is
+	 * heartbeat-derived (Phase 12.4).
+	 */
 	if err := waitFor(2*time.Second, func() bool {
-		return len(svc.ConnectedAgents()) == 2
+		return svc.IdleAgentWithLabel("linux") == "agent-linux" &&
+			svc.IdleAgentWithLabel("macos") == "agent-macos"
 	}); err != nil {
 		t.Fatal(err)
 	}

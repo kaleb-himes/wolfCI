@@ -94,3 +94,88 @@ func TestAgentService_Register_Validation(t *testing.T) {
 		})
 	}
 }
+
+// TestServer_RecordHeartbeat gates PLAN.md 12.4. After
+// RecordHeartbeat, LastHeartbeat returns the same NodeStatus
+// the caller stored plus a receive timestamp within a small
+// window of the wall clock.
+func TestServer_RecordHeartbeat(t *testing.T) {
+	svc := agentsvc.New("hb-test")
+	status := &wolfciv1.NodeStatus{
+		Architecture:        "darwin/arm64",
+		GoVersion:           "go1.22",
+		FreeDiskBytes:       1_000_000,
+		HostUptimeSeconds:   3600,
+		WallClockUnixMicros: time.Now().UnixMicro(),
+		AgentVersion:        "v0.1.0",
+	}
+	before := time.Now()
+	svc.RecordHeartbeat("agent-a", status)
+	after := time.Now()
+
+	got, received, ok := svc.LastHeartbeat("agent-a")
+	if !ok {
+		t.Fatal("LastHeartbeat ok = false after RecordHeartbeat; want true")
+	}
+	if got != status {
+		t.Errorf("LastHeartbeat returned %p, want stored pointer %p",
+			got, status)
+	}
+	if received.Before(before) || received.After(after) {
+		t.Errorf("receive timestamp %v outside [%v, %v]",
+			received, before, after)
+	}
+}
+
+// TestServer_LastHeartbeatStale: an agent whose most recent
+// heartbeat is older than StaleThreshold is still reachable
+// via LastHeartbeat (ok=true, the data is still on file) but
+// no longer appears in ConnectedAgents - the Phase 12 Nodes
+// view uses ConnectedAgents for the live/offline filter.
+func TestServer_LastHeartbeatStale(t *testing.T) {
+	svc := agentsvc.New("hb-test")
+	svc.StaleThreshold = 10 * time.Millisecond
+
+	/* Register the agent so the heartbeat lookup has an
+	 * AgentInfo to correlate with. ConnectedAgents() returns
+	 * the AgentInfo, not raw heartbeat records, so an
+	 * unregistered agent would be invisible regardless of
+	 * heartbeat freshness.
+	 */
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+	if _, err := svc.Register(ctx, &wolfciv1.AgentInfo{
+		AgentId: "agent-stale", Executors: 1,
+	}); err != nil {
+		t.Fatalf("Register: %v", err)
+	}
+
+	svc.RecordHeartbeat("agent-stale", &wolfciv1.NodeStatus{
+		Architecture: "linux/amd64",
+	})
+
+	/* LastHeartbeat must still return ok=true even after the
+	 * threshold passes - the record is on file, just stale.
+	 */
+	time.Sleep(60 * time.Millisecond)
+	if _, _, ok := svc.LastHeartbeat("agent-stale"); !ok {
+		t.Error("LastHeartbeat ok = false for an agent with a stale " +
+			"heartbeat; want true (record is still on file)")
+	}
+	for _, a := range svc.ConnectedAgents() {
+		if a.AgentId == "agent-stale" {
+			t.Errorf("ConnectedAgents included agent-stale despite " +
+				"a stale (>StaleThreshold) heartbeat")
+		}
+	}
+}
+
+// TestServer_LastHeartbeatUnknownAgent: LastHeartbeat returns
+// ok=false for an agent that has never sent a heartbeat,
+// regardless of whether the agent has Register'd or not.
+func TestServer_LastHeartbeatUnknownAgent(t *testing.T) {
+	svc := agentsvc.New("hb-test")
+	if _, _, ok := svc.LastHeartbeat("agent-never-here"); ok {
+		t.Error("LastHeartbeat ok = true for an unknown agent; want false")
+	}
+}

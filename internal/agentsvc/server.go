@@ -14,6 +14,7 @@ import (
 	"fmt"
 	"io"
 	"sync"
+	"time"
 
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/metadata"
@@ -21,6 +22,14 @@ import (
 
 	wolfciv1 "github.com/kaleb-himes/wolfCI/api/v1"
 )
+
+// DefaultStaleThreshold is how long ConnectedAgents waits before
+// dropping an agent whose heartbeat has gone silent. Matches the
+// Jenkins "offline" badge heuristic closely enough to read the
+// same way to operators familiar with Jenkins's UI; 90s also
+// gives the agent's default 30s heartbeat interval (Phase 12.3)
+// two missed beats of grace.
+const DefaultStaleThreshold = 90 * time.Second
 
 // AgentIDMetadataKey is the gRPC metadata key the agent uses to
 // identify itself when opening a Connect stream. The value must
@@ -41,6 +50,12 @@ type Server struct {
 	version string
 	logSink LogSink
 
+	// StaleThreshold is the maximum age of a heartbeat record
+	// before ConnectedAgents drops the agent from its result.
+	// Zero means use DefaultStaleThreshold (90s). Exported so
+	// tests can shorten the window without sleeping for 90s.
+	StaleThreshold time.Duration
+
 	mu     sync.Mutex
 	agents map[string]*wolfciv1.AgentInfo
 
@@ -54,6 +69,16 @@ type Server struct {
 
 	completedMu sync.Mutex
 	completed   []*wolfciv1.BuildComplete
+
+	heartbeatsMu sync.Mutex
+	heartbeats   map[string]heartbeatRecord
+}
+
+// heartbeatRecord is the per-agent latest NodeStatus + the
+// wall-clock time the server received it.
+type heartbeatRecord struct {
+	status   *wolfciv1.NodeStatus
+	received time.Time
 }
 
 // pendingKey identifies an outstanding SubmitAndWait that wants
@@ -87,7 +112,53 @@ func New(serverVersion string) *Server {
 		pendingJobs: make(chan *wolfciv1.JobAssignment, 64),
 		streams:     make(map[string]*agentStream),
 		pending:     make(map[pendingKey]*assignmentInFlight),
+		heartbeats:  make(map[string]heartbeatRecord),
 	}
+}
+
+// RecordHeartbeat stores the latest NodeStatus for agentID and
+// stamps the receive time at the current wall clock. PLAN.md
+// 12.4: the server's Connect recv loop calls this on every
+// AgentMessage_Heartbeat; cmd/wolfci's built-in master node
+// (12.5) calls it directly from a self-refresh goroutine.
+// Passing a nil status is a no-op rather than an error: the
+// only documented caller is the recv loop, which already
+// nil-checks the oneof variant.
+func (s *Server) RecordHeartbeat(agentID string, status *wolfciv1.NodeStatus) {
+	if status == nil {
+		return
+	}
+	s.heartbeatsMu.Lock()
+	defer s.heartbeatsMu.Unlock()
+	s.heartbeats[agentID] = heartbeatRecord{
+		status:   status,
+		received: time.Now(),
+	}
+}
+
+// LastHeartbeat returns the most recent NodeStatus stored for
+// agentID along with the wall-clock time it was received. ok is
+// false when the agent has never sent (or had recorded for it)
+// a heartbeat. The record is preserved past StaleThreshold so
+// callers can still display the last-known metrics on an
+// offline-badged row.
+func (s *Server) LastHeartbeat(agentID string) (*wolfciv1.NodeStatus, time.Time, bool) {
+	s.heartbeatsMu.Lock()
+	defer s.heartbeatsMu.Unlock()
+	rec, ok := s.heartbeats[agentID]
+	if !ok {
+		return nil, time.Time{}, false
+	}
+	return rec.status, rec.received, true
+}
+
+// staleThreshold returns the configured StaleThreshold or the
+// default if the field was left as the zero value.
+func (s *Server) staleThreshold() time.Duration {
+	if s.StaleThreshold > 0 {
+		return s.StaleThreshold
+	}
+	return DefaultStaleThreshold
 }
 
 // SetLogSink registers a sink for LogChunk messages received
@@ -201,14 +272,34 @@ func (s *Server) IdleAgentWithLabel(label string) string {
 	return ""
 }
 
-// ConnectedAgents returns a snapshot of every agent that
-// currently has an open Connect stream.
+// ConnectedAgents returns a snapshot of every agent whose most
+// recent heartbeat is younger than StaleThreshold. PLAN.md 12.4
+// switched this from "open stream right now" to a heartbeat-
+// derived liveness check so the result survives transient gRPC
+// stream reconnects and matches Jenkins's "offline" badge
+// heuristic. Agents that have not yet recorded a heartbeat are
+// also absent; the UI handles that case via LastHeartbeat
+// returning ok=false (rendering an "N/A" status badge instead
+// of dropping the row entirely).
 func (s *Server) ConnectedAgents() []*wolfciv1.AgentInfo {
-	s.streamsMu.Lock()
-	defer s.streamsMu.Unlock()
-	out := make([]*wolfciv1.AgentInfo, 0, len(s.streams))
-	for _, st := range s.streams {
-		out = append(out, st.info)
+	cutoff := time.Now().Add(-s.staleThreshold())
+
+	s.heartbeatsMu.Lock()
+	fresh := make(map[string]struct{}, len(s.heartbeats))
+	for id, rec := range s.heartbeats {
+		if rec.received.After(cutoff) {
+			fresh[id] = struct{}{}
+		}
+	}
+	s.heartbeatsMu.Unlock()
+
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	out := make([]*wolfciv1.AgentInfo, 0, len(fresh))
+	for id := range fresh {
+		if info, ok := s.agents[id]; ok {
+			out = append(out, info)
+		}
 	}
 	return out
 }
@@ -358,6 +449,9 @@ func (s *Server) Connect(stream wolfciv1.AgentService_ConnectServer) error {
 		if l := msg.GetLog(); l != nil && s.logSink != nil {
 			jobName := s.lookupJobName(agentID, l.BuildNumber)
 			s.logSink.WriteLogChunk(jobName, int(l.BuildNumber), l.Data)
+		}
+		if hb := msg.GetHeartbeat(); hb != nil {
+			s.RecordHeartbeat(agentID, hb.Status)
 		}
 	}
 }
