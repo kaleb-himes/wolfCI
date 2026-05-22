@@ -7,6 +7,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"strings"
 	"testing"
 	"time"
@@ -64,6 +65,81 @@ func TestLogTail_LivePersistAndStream(t *testing.T) {
 	if collected != "first-half-second-half" {
 		t.Errorf("collected = %q, want %q", collected, "first-half-second-half")
 	}
+}
+
+// TestLogTail_FallsBackToLocalExecutorLog covers the user-reported
+// "[wolfci: stream closed]" symptom: the in-process LocalExecutor
+// writes the build's output to <build>/log (no .live suffix),
+// while the tail handler historically only looked at log.live (the
+// agent-streamed name). Without the fallback the EventSource sees
+// an empty 2s stream and the buildlog page renders the error
+// message.
+func TestLogTail_FallsBackToLocalExecutorLog(t *testing.T) {
+    root := t.TempDir()
+    /* Seed the LocalExecutor-style "log" file with content. No
+     * log.live ever exists.
+     */
+    buildDir := root + "/builds/echo/4"
+    if err := os.MkdirAll(buildDir, 0o755); err != nil {
+        t.Fatalf("mkdir: %v", err)
+    }
+    if err := os.WriteFile(buildDir+"/log",
+        []byte("hello from LocalExecutor\n"), 0o644); err != nil {
+        t.Fatalf("write log: %v", err)
+    }
+
+    handler := &server.LogTailHandler{
+        Root:         root,
+        PollInterval: 25 * time.Millisecond,
+        IdleTimeout:  500 * time.Millisecond,
+    }
+    ts := httptest.NewServer(handler)
+    defer ts.Close()
+
+    ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+    defer cancel()
+    req, _ := http.NewRequestWithContext(ctx, http.MethodGet,
+        ts.URL+"/api/v1/builds/echo/4/log", nil)
+    resp, err := http.DefaultClient.Do(req)
+    if err != nil {
+        t.Fatalf("Do: %v", err)
+    }
+    defer resp.Body.Close()
+    if resp.StatusCode != http.StatusOK {
+        t.Fatalf("status = %d, want 200", resp.StatusCode)
+    }
+    /* The handler reads existing bytes immediately, encodes as
+     * one SSE event, then idles until ctx or IdleTimeout. Read
+     * the event and assert the content.
+     */
+    body, _ := io.ReadAll(resp.Body)
+    s := string(body)
+    if !strings.Contains(s, "event: log") {
+        t.Errorf("SSE response missing 'event: log': %q", s)
+    }
+    /* The chunk is base64-encoded; we decode and check the
+     * payload contains our marker.
+     */
+    if !sseBodyContains(s, "hello from LocalExecutor") {
+        t.Errorf("decoded SSE content missing marker; raw = %q", s)
+    }
+}
+
+func sseBodyContains(sseBody, want string) bool {
+    for _, line := range strings.Split(sseBody, "\n") {
+        if !strings.HasPrefix(line, "data: ") {
+            continue
+        }
+        encoded := strings.TrimPrefix(line, "data: ")
+        decoded, err := base64.StdEncoding.DecodeString(encoded)
+        if err != nil {
+            continue
+        }
+        if strings.Contains(string(decoded), want) {
+            return true
+        }
+    }
+    return false
 }
 
 // TestLogTail_BadPath rejects malformed routes with 400.

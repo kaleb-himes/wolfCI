@@ -42,10 +42,26 @@ type LogTailHandler struct {
 	IdleTimeout time.Duration
 }
 
-// LogPath returns the file path the handler reads for
+// LogPath returns the preferred file path the handler reads for
 // (jobName, buildNum). Exported for tests.
+//
+// Two filenames are supported: log.live is what agentsvc's
+// FileLogSink streams as build chunks arrive; log is what
+// scheduler.LocalExecutor writes when it runs the job in-process
+// on the server host. The handler tries log.live first because a
+// running agent-driven build will have it, and a completed
+// agent-driven build will have renamed it; falls back to log so a
+// LocalExecutor build is also tail-able.
 func (h *LogTailHandler) LogPath(jobName string, buildNum int) string {
 	return path.Join(h.Root, "builds", jobName, strconv.Itoa(buildNum), "log.live")
+}
+
+// fallbackLogPath is the LocalExecutor's filename; checked when
+// LogPath does not exist. Same shape as LogPath; kept as a
+// separate method so a future executor that introduces a third
+// filename has one obvious place to register it.
+func (h *LogTailHandler) fallbackLogPath(jobName string, buildNum int) string {
+	return path.Join(h.Root, "builds", jobName, strconv.Itoa(buildNum), "log")
 }
 
 func (h *LogTailHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
@@ -70,18 +86,22 @@ func (h *LogTailHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		poll = 100 * time.Millisecond
 	}
 
-	path := h.LogPath(job, num)
+	primaryPath := h.LogPath(job, num)
+	fallbackPath := h.fallbackLogPath(job, num)
 
-	// Wait briefly for the file to exist; agents may stream
-	// LogChunks before the first reader connects.
-	if err := waitForFile(r.Context(), path, poll, 2*time.Second); err != nil {
-		// File never appeared; return an empty stream so the
+	// Wait briefly for either file to exist; agents may stream
+	// LogChunks before the first reader connects, and the
+	// in-process LocalExecutor writes the fallback path.
+	resolvedPath, err := waitForEitherFile(r.Context(),
+		[]string{primaryPath, fallbackPath}, poll, 2*time.Second)
+	if err != nil {
+		// Neither file appeared; return an empty stream so the
 		// client sees no events and can decide what to do.
 		flusher.Flush()
 		return
 	}
 
-	f, err := os.Open(path)
+	f, err := os.Open(resolvedPath)
 	if err != nil {
 		http.Error(w, fmt.Sprintf("open log: %v", err), http.StatusInternalServerError)
 		return
@@ -166,6 +186,29 @@ func waitForFile(ctx interface{ Done() <-chan struct{} }, path string, poll, dea
 		select {
 		case <-ctx.Done():
 			return fmt.Errorf("waitForFile: context done")
+		case <-time.After(poll):
+		}
+	}
+}
+
+// waitForEitherFile polls each candidate path until one of them
+// exists; returns the path that resolved first. Lets the tail
+// handler accept either log.live (agent-streamed) or log
+// (LocalExecutor) without two separate timers.
+func waitForEitherFile(ctx interface{ Done() <-chan struct{} }, candidates []string, poll, deadline time.Duration) (string, error) {
+	until := time.Now().Add(deadline)
+	for {
+		for _, p := range candidates {
+			if _, err := os.Stat(p); err == nil {
+				return p, nil
+			}
+		}
+		if time.Now().After(until) {
+			return "", fmt.Errorf("waitForEitherFile: none of %v appeared", candidates)
+		}
+		select {
+		case <-ctx.Done():
+			return "", fmt.Errorf("waitForEitherFile: context done")
 		case <-time.After(poll):
 		}
 	}
