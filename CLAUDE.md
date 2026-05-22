@@ -24,10 +24,16 @@ contributing to the implementation; see docs/CREDITS.md.
 Read these every session before acting. They come from the project
 owner and override defaults.
 
-1. Operate from PLAN.md on disk. Each /loop iteration picks the next
-   unchecked task, completes it, marks it done, commits, and ends.
-   Resumability is the point: a fresh session with no chat context
-   must be able to pick up by reading CLAUDE.md and PLAN.md alone.
+1. Operate from PLAN.md on disk. Each /loop iteration picks the
+   next unchecked task, completes it, marks it done, commits,
+   pushes to origin/main, clears its working state, and starts
+   the next iteration on the new next-unchecked task. The loop
+   keeps looping until PLAN.md has no unchecked tasks left, the
+   user interrupts, or a step fails (test red, ASCII gate, push
+   rejected) - in which case stop and surface the failure rather
+   than skipping ahead. Resumability is still the point: a fresh
+   session with no chat context must be able to pick up by
+   reading CLAUDE.md and PLAN.md alone.
 2. Test-Driven Development. For every new feature, write a test that
    FAILS first, then implement until it passes. No exceptions.
 3. ASCII only. No emdash, no endash, no smart quotes, no UTF-8 bytes
@@ -159,8 +165,17 @@ owner and override defaults.
    No "Co-Authored-By" lines.
 10. Merge to main locally (already there if you have not branched)
     and rebuild.
-11. Check CLAUDE.md size:
+11. `git push origin main`. The remote must end every iteration
+    matching local main; a stalled local branch is a regression
+    against rule 1. If the push is rejected (non-fast-forward,
+    auth, hook), stop and surface the failure rather than
+    silently dropping the change.
+12. Check CLAUDE.md size:
     `wc -c CLAUDE.md`. If over 40000, rotate per rule 6.
+13. Return to step 2 and start the next iteration on the new
+    next-unchecked task. Stop only when PLAN.md has no
+    unchecked tasks left, the user interrupts, or a step in
+    this procedure fails.
 
 ## Architecture Summary
 
