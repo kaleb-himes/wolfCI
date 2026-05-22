@@ -2300,17 +2300,43 @@ Decisions to lock in before the phase starts:
          NodeLabel="master"; Status=StatusError + Error
          mentions "no agent available". Re-enable and re-run;
          Status=StatusSuccess.
-- [ ] 12.8 scripts/build.sh injects the agent version via
+- [x] 12.8 scripts/build.sh injects the agent version via
          -ldflags "-X main.version=$(git describe --tags
          --always --dirty 2>/dev/null || echo dev)" so
          NodeStatus.agent_version is meaningful on a release
          build and stamps the build commit on a dev build.
-         Gates: TestBuild_AgentBinaryEmbedsVersion (run the
-         freshly-built wolfci-agent with --version, assert
-         output matches the git-derived string).
-         scripts/test-build.sh already gates the -ldflags
-         injection for wolfci itself; extend the gate to
-         wolfci-agent.
+         Done: scripts/build.sh's VERSION resolution is now a
+         three-step ladder - WOLFCI_BUILD_VERSION env var wins
+         when set (release pipelines stamp a tag), otherwise
+         "git describe --tags --always --dirty" runs in the
+         working tree, otherwise the original "dev" literal
+         (kept so a tarball release with no .git still builds).
+         The existing -X main.version flag in LDFLAGS reaches
+         all three binaries, so wolfci, wolfci-agent, and
+         wolfci-ctl all carry the same stamp - no per-binary
+         flag set is needed.
+         cmd/wolfci-agent/main.go gained a `var version =
+         "dev"` package variable that -ldflags now overrides
+         and a --version flag that prints "wolfci-agent <v>"
+         and exits. The same value is wired through to
+         client.SetVersion before client.Run so the agent's
+         12.3 heartbeat carries the stamp on every
+         NodeStatus.agent_version, and the /nodes "Agent
+         version" column shows what is actually deployed.
+         scripts/test-build.sh grew a step 7b that exec's the
+         freshly-built wolfci-agent --version and asserts the
+         output matches the WOLFCI_BUILD_VERSION env it
+         injected; symmetric to the existing step 7 which
+         gates wolfci-ctl. The shell test is the concrete
+         realization of PLAN.md's
+         TestBuild_AgentBinaryEmbedsVersion gate name; a
+         separate Go test would either duplicate the work or
+         require a go-build inside the test, neither of which
+         buys anything beyond what the shell gate already
+         covers.
+         Verified locally:
+           WOLFCI_BUILD_VERSION=test-9.1 -> "wolfci-agent test-9.1"
+           default (no env var)         -> "wolfci-agent 81b2f2b-dirty"
 - [ ] 12.9 docs/ARCHITECTURE.md + docs/SECURITY.md updates:
          - ARCHITECTURE.md gains a Nodes section describing
            the master-node synthetic entry, the heartbeat

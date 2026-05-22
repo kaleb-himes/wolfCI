@@ -52,7 +52,18 @@ export GOOS GOARCH
 BINDIR="$REPO_ROOT/build/bin/$GOOS-$GOARCH"
 mkdir -p "$BINDIR"
 
-VERSION=${WOLFCI_BUILD_VERSION:-dev}
+# VERSION resolution order (Phase 12.8):
+#   1. WOLFCI_BUILD_VERSION env var (release pipelines stamp a tag).
+#   2. git describe --tags --always --dirty in this working tree
+#      (a dev build still embeds the commit it was cut from, with a
+#      -dirty suffix when the tree is modified).
+#   3. literal "dev" (the original Phase 9.1 fallback, kept so a
+#      tarball release with no .git still builds cleanly).
+if [ -n "${WOLFCI_BUILD_VERSION:-}" ]; then
+    VERSION=$WOLFCI_BUILD_VERSION
+else
+    VERSION=$(git describe --tags --always --dirty 2>/dev/null || echo dev)
+fi
 
 # wolfSSL is consumed via CGO. Pin the vendored static lib so the
 # build does not silently link the system wolfSSL (if any).

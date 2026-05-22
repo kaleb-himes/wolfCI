@@ -81,6 +81,16 @@ case "$out" in
     *) fail "wolfci-ctl version did not reflect WOLFCI_BUILD_VERSION (got: $out)" ;;
 esac
 
+# 7b. wolfci-agent --version must also reflect the stamped version
+# (PLAN.md 12.8: NodeStatus.agent_version comes from the same
+# -ldflags-injected main.version variable, surfaced for operators
+# via --version on the agent binary).
+out=$("$bindir/wolfci-agent" --version 2>&1)
+case "$out" in
+    *test-9.1*) ;;
+    *) fail "wolfci-agent --version did not reflect WOLFCI_BUILD_VERSION (got: $out)" ;;
+esac
+
 # 8. Repo-root file set must be unchanged (no stray go-build outputs).
 post_root_files=$(ls -1)
 if [ "$pre_root_files" != "$post_root_files" ]; then
