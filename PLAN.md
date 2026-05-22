@@ -2027,6 +2027,299 @@ Decisions to lock in before the phase starts:
          scripts/test-architecture.sh + scripts/test-security.sh
          gate the new content.
 
+## Phase 13 - Per-job detail page
+
+User ask 2026-05-22 (from a Jenkins screenshot annotated by the
+project owner): bring wolfCI's per-job UX up to roughly the
+Jenkins parity bar - a left sidebar with the operator's most-
+used actions, a header carrying description + permalinks + the
+upstream-job relationship, and a build history panel grouped by
+date. Today /jobs lists every job but there is NO per-job page;
+the only navigable per-job URLs are /jobs/<name>/edit (the spec
+editor) and /jobs/<name>/builds/<n> (the live log).
+
+Annotated screenshot called out the minimum set of sidebar
+actions: Build Now, Rebuild Last, Configure, Rename, Workspace.
+Phase 13 ships Build Now + Configure + Delete + the visible
+chrome; Phase 14 adds Rebuild Last + Workspace + Rename
+(operational features that need supporting infrastructure first).
+
+Decisions to lock in before the phase starts:
+
+- The detail page lives at /jobs/<name>. handleJobRoutes today
+  does not match bare /jobs/<name>; 13.1 adds the case before
+  the existing /edit + /builds/<n> + /run cases.
+- The sidebar is rendered server-side as part of the template,
+  not a separate panel reload. Operators expect the same chrome
+  on every job action page, so /jobs/<name>/edit and the
+  live-log page should also embed the sidebar in a follow-up
+  (deferred backlog; the initial sidebar lives on the detail
+  page only).
+- Build history pagination: server caps the rendered list at
+  100 most-recent builds with a "see all" link to an
+  /jobs/<name>/builds endpoint that paginates. Avoids loading
+  a 10000-build history into one HTML page.
+- Permalinks compute lazily from an on-disk build directory
+  scan + each result.json. No cache for the first iteration;
+  if scan time becomes a problem we add an in-memory index in
+  Phase 14.
+- Description is plain text (template's HTMLEscapeString); a
+  markdown variant is deferred to a backlog item to avoid
+  pulling in a markdown parser before we have an opinion on
+  which one (CommonMark via gomarkdown is the likely choice).
+
+- [ ] 13.1 Add /jobs/<name> (GET) to handleJobRoutes. Loads the
+         Job, scans the builds directory for that job, renders
+         a new templates/jobdetail.html with:
+           - sidebar (Build Now form, Configure link, Delete
+             form; placeholders for Phase 14's Rebuild Last,
+             Rename, Workspace)
+           - <h2>{{ .Name }}</h2> + description block
+           - build history panel: list of build numbers +
+             status icons + relative timestamps, last 100
+         Failing tests (internal/server/jobdetail_test.go):
+         TestJobDetail_Returns200WithSidebar,
+         TestJobDetail_RendersDescription,
+         TestJobDetail_RendersBuildHistory_NewestFirst,
+         TestJobDetail_404OnMissingJob.
+- [ ] 13.2 Permalinks panel on the detail page. Header gets
+         a section listing:
+           Last build (#N, <relative time>)
+           Last stable build (#N or <none>)
+           Last successful build (#N or <none>)
+           Last unsuccessful build (#N or <none>)
+           Last completed build (#N or <none>)
+         "Stable" = StatusSuccess AND not a Phase-14 Rebuild
+         Last reattempt (initial impl treats stable ==
+         successful; flake/retry semantics tighten in Phase
+         14). Each link goes to /jobs/<name>/builds/<n>.
+         Failing tests:
+         TestJobDetail_PermalinksReflectMostRecentStatuses,
+         TestJobDetail_PermalinksHandlesNoBuilds.
+- [ ] 13.3 /jobs/<name>/builds index page (paginated build
+         list, linked from the "see all" affordance on the
+         detail page). 25 builds per page, ?page=N query,
+         optional ?since=<rfc3339> filter.
+         Failing tests:
+         TestBuildsIndex_FirstPageReturnsNewest,
+         TestBuildsIndex_RespectsSinceFilter,
+         TestBuildsIndex_PaginationLinks.
+- [ ] 13.4 Delete project action in the sidebar. POST
+         /jobs/<name>/delete gated by jobs.configure permission
+         (mirroring /jobs/<name>/edit). Removes jobs/<name>/
+         AND keeps builds/<name>/ in place: the operator can
+         re-create the job and the history persists on disk.
+         A separate "wipe history too" flow is destructive
+         enough to need its own UI affordance and lands as a
+         backlog item.
+         Failing tests:
+         TestJobDelete_RemovesSpec,
+         TestJobDelete_KeepsBuildHistory,
+         TestJobDelete_RequiresConfigurePermission.
+
+## Phase 14 - Build retention, workspace browser, rebuild, rename
+
+Operational features that complete the Phase 13 sidebar and keep
+disk usage bounded once builds run for real.
+
+Decisions to lock in:
+
+- Retention is per-job. Job spec gains a Retention block:
+    retention:
+      max_builds: 30      # keep most-recent 30, sweep older
+      max_age: 720h       # OR keep anything newer than 30d
+  Either field may be set; if both are set, EITHER condition
+  protects a build (the more lenient of the two). Default:
+  keep forever. Sweeper runs every 5 minutes (configurable
+  via cfg.RetentionSweepInterval, default "5m").
+- Workspace browser is read-only. Operators see a file tree
+  rooted at builds/<job>/<n>/workspace/ with text preview
+  (line-numbered) for files under a size threshold and a
+  download link for everything else. No edit, no shell, no
+  symlink resolution beyond the workspace root. Path-traversal
+  guards at every node.
+- Rebuild Last runs the spec snapshotted at the time of the
+  last build. Each Enqueue captures builds/<job>/<n>/spec.yaml
+  (cheap: specs are small). If the live spec has diverged the
+  operator sees a banner and can opt into "rebuild with
+  current spec" instead.
+
+- [ ] 14.1 storage.Job gains optional Retention field. New
+         sweeper goroutine in cmd/wolfci enforces it every 5
+         minutes; each removed build dir logs to stdout for
+         auditability.
+         Failing tests:
+         TestRetention_KeepsMaxBuilds (33 builds +
+         max_builds=30 -> 30 newest survive),
+         TestRetention_KeepsByAge (max_age=1h leaves no build
+         older than 1h),
+         TestRetention_KeepsByEitherWhenBothSet,
+         TestRetention_DefaultIsKeepForever.
+- [ ] 14.2 Workspace browser at /jobs/<name>/builds/<n>/ws/
+         and /jobs/<name>/builds/<n>/ws/<path>. Server-side
+         tree walk with path-traversal guards (no "..", no
+         absolute paths, normalize before stat). Text preview
+         under 256KiB; download link with Content-Type sniff
+         for everything else.
+         Failing tests:
+         TestWorkspace_ListsImmediateChildren,
+         TestWorkspace_RejectsPathTraversal,
+         TestWorkspace_RendersTextPreviewBelowThreshold,
+         TestWorkspace_DownloadsBinaryWithSniff.
+- [ ] 14.3 Each Enqueue snapshots the current job spec into
+         builds/<job>/<n>/spec.yaml. Rebuild Last (POST
+         /jobs/<name>/rebuild) loads the snapshot of the most
+         recent build, enqueues a new build from it, and
+         redirects to the live log. A "rebuild with current
+         spec" variant button on the per-build page enqueues
+         from the live spec instead.
+         Failing tests:
+         TestRebuild_UsesSnapshottedSpec,
+         TestRebuild_CurrentSpecVariantUsesLiveSpec,
+         TestRebuild_RequiresJobsBuildPermission.
+- [ ] 14.4 Rename project. POST /jobs/<name>/rename takes a
+         new_name form field, validates per validJobName,
+         atomically moves jobs/<old>/ -> jobs/<new>/ and
+         builds/<old>/ -> builds/<new>/. matrix.yaml has no
+         per-job entries today; the rename is forward-
+         compatible with Phase 15's trigger graph (the cycle
+         check there walks job names, so a rename will
+         automatically pick up the new name on next save).
+         Failing tests:
+         TestRename_MovesSpecAndBuildHistory,
+         TestRename_RejectsExistingTargetName,
+         TestRename_RequiresJobsConfigurePermission.
+
+## Phase 15 - Upstream / downstream jobs + artifacts
+
+The dependency graph between jobs and the artifact-passing
+plumbing that makes cross-platform pipelines possible. The
+motivating example from the project owner: "Build a bundle on
+linux, zip it. Send .zip to windows machine, unarchive and run
+test with resources." Sibling-job navigation (jobs that share an
+upstream) falls out for free once the trigger graph exists.
+
+Decisions to lock in:
+
+- Job spec gains two new fields:
+    upstream: [job-a, job-b]      # this job is eligible to be
+                                  # triggered when any of these
+                                  # upstreams succeed
+    triggers_downstream:
+      - name: windows-test
+        artifacts:
+          - dist/bundle.tar.gz    # paths inside this build's
+                                  # workspace that the downstream
+                                  # build sees at $WOLFCI_INPUTS/
+                                  # <artifact-basename>
+- Trigger semantics: AFTER a build reaches StatusSuccess, the
+  scheduler walks job.TriggersDownstream and Enqueues each
+  downstream with the parent build's identity stamped into
+  BuildResult.TriggeredBy = {Job, Build}. Downstream jobs with
+  no triggers_downstream stay no-ops; jobs with upstream:[] in
+  their spec are eligible to be triggered but the scheduler
+  does NOT enforce ordering beyond the one-success-triggers-
+  many fan-out.
+- Artifact storage: when a job declares triggers_downstream
+  with artifacts, the executor copies each listed file from
+  the build's workspace into builds/<job>/<n>/artifacts/
+  BEFORE marking the build successful. A missing artifact
+  fails the build with a clear error. Phase 14's retention
+  rules apply to artifacts the same as to logs.
+- Loop guard: triggers_downstream cycles are rejected at
+  SaveJob time. SaveJob walks the trigger graph (existing
+  jobs plus the new spec) and refuses to persist a spec that
+  would close a loop. Returns ErrCycleInTriggerGraph.
+- Cross-node artifact transfer: when the downstream lands on a
+  different node than the upstream, the agent dialer fetches
+  the artifact bundle from the server over the existing mTLS
+  gRPC channel. No new port, no new protocol; just a new
+  AgentService.GetArtifact RPC streaming the bytes. This
+  matches the linux-builds, windows-tests use case directly.
+
+- [ ] 15.1 storage.Job gains Upstream []string and
+         TriggersDownstream []TriggerSpec fields. TriggerSpec
+         is {Name string; Artifacts []string}. SaveJob runs
+         the cycle check and returns ErrCycleInTriggerGraph
+         on failure.
+         Failing tests:
+         TestJob_TriggerGraphAcyclic_OK,
+         TestJob_TriggerGraphRejectsSelfLoop,
+         TestJob_TriggerGraphRejectsTwoNodeCycle,
+         TestJob_TriggerGraphRejectsLongerCycle.
+- [ ] 15.2 BuildResult gains TriggeredBy {Job string; Build int}
+         so a downstream build attributes itself to a specific
+         upstream build. result.json carries it; the per-build
+         page renders it as a backlink.
+         Failing tests:
+         TestBuildResult_TriggeredByRoundtrip,
+         TestBuildResult_TriggeredByEmptyForRootBuild.
+- [ ] 15.3 LocalExecutor (and the agent's executor) copies
+         declared artifacts into builds/<job>/<n>/artifacts/
+         as the LAST step of a successful build, before writing
+         result.json. A missing artifact aborts the build with
+         Status=Failure. Each downstream invocation receives
+         WOLFCI_INPUTS=<absolute path to upstream's artifacts/>
+         in its env; the agent-side executor copies them into
+         the workspace at WOLFCI_INPUTS/<basename> before the
+         first step.
+         Failing tests:
+         TestExecutor_CopiesDeclaredArtifacts,
+         TestExecutor_MissingArtifactFailsBuild,
+         TestExecutor_DownstreamSeesUpstreamArtifacts.
+- [ ] 15.4 Scheduler trigger fan-out. After each
+         BuildResult.Status==Success, the scheduler walks the
+         job's TriggersDownstream and Enqueues each named job
+         with TriggeredBy set. Failures, cancels, and errors do
+         not fan out. Missing downstream jobs log a warning
+         (not a crash) so a half-deleted graph stays operable.
+         Failing tests:
+         TestScheduler_FanoutOnSuccess (job A succeeds -> jobs
+         B and C are enqueued with TriggeredBy.Job=A),
+         TestScheduler_NoFanoutOnFailure,
+         TestScheduler_FanoutSkipsMissingDownstreamJobWithWarning.
+- [ ] 15.5 New AgentService.GetArtifact streaming RPC. The
+         agent calls it with (upstream_job, upstream_build,
+         artifact_basename) and the server streams the bytes
+         from builds/<upstream>/<build>/artifacts/<basename>.
+         Cert-CN-based authz: the calling agent must be the
+         one assigned the downstream build OR have the
+         builds.read permission. No anonymous reads.
+         Failing tests:
+         TestGetArtifact_StreamsFile,
+         TestGetArtifact_RejectsUnauthorizedAgent,
+         TestGetArtifact_RejectsTraversal (artifact_basename
+         containing "/" or ".." is refused before any disk
+         access).
+- [ ] 15.6 Job detail page (Phase 13.1) gains two new sections:
+           Upstream Projects: list from job.Upstream, each link
+             goes to /jobs/<upstream-name>.
+           Downstream Projects: computed by scanning every job's
+             TriggersDownstream for entries that name this job,
+             each link goes to /jobs/<downstream-name>. The
+             same scan exposes sibling jobs (jobs that share an
+             upstream) via a third "Sibling Projects" section
+             rendered when len(siblings) > 0.
+         The /jobs index page gains a small badge next to each
+         job name showing inbound + outbound trigger counts.
+         Failing tests:
+         TestJobDetail_RendersUpstreamLinks,
+         TestJobDetail_RendersDownstreamLinks_ComputedFromOtherJobs,
+         TestJobDetail_RendersSiblingsWhenSharingUpstream,
+         TestJobsIndex_BadgesShowTriggerCounts.
+- [ ] 15.7 End-to-end example under examples/jobs/. Ships
+         linux-bundle.yaml (builds a tarball, declares
+         triggers_downstream: [windows-test] with artifacts:
+         [dist/bundle.tar.gz]) and windows-test.yaml (declares
+         upstream: [linux-bundle], runs the bundled tests
+         against $WOLFCI_INPUTS/bundle.tar.gz). Doubles as a
+         readable answer to "how do I wire a multi-platform
+         pipeline" and as an integration-test fixture.
+         scripts/test-examples.sh gates that both specs parse,
+         the trigger graph is acyclic, and the schemas match
+         storage.Job after marshal + unmarshal. Wired into
+         scripts/test.sh.
+
 ## Backlog (not in main flow)
 
 Items that came up but are not on the critical path. Promote into a
