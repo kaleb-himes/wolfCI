@@ -91,14 +91,6 @@ owner at the start of the phase):
   github-hook-for-GITScm-polling, poll-SCM, trigger-builds-
   remotely.
 
-- [ ] 18.2 wolfCrypt seal/unseal primitive
-        (internal/credstore/seal.go). Failing test:
-        TestSeal_RoundTrip uses wc_HKDF + wc_AesGcmEncrypt
-        through go-wolfssl. Add the HKDF wrapper to
-        third_party/go-wolfssl/ if go-wolfssl does not already
-        expose it (record a patch under
-        third_party/go-wolfssl-patches/). Per rule 11, NO
-        crypto/hkdf, NO golang.org/x/crypto fallback.
 - [ ] 18.3 Credential store directory layout
         (internal/credstore/store.go). Failing test:
         TestStore_AddListGet adds three creds (one of each

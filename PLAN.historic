@@ -3162,4 +3162,33 @@ completed and were moved here:
         TestUnseal_RejectsWrongCredID.
 
 
+- [x] 18.2 wolfCrypt seal/unseal primitive
+        (internal/credstore/seal.go). Failing test:
+        TestSeal_RoundTrip uses wc_HKDF + wc_AesGcmEncrypt
+        through go-wolfssl. Add the HKDF wrapper to
+        third_party/go-wolfssl/ if go-wolfssl does not already
+        expose it (record a patch under
+        third_party/go-wolfssl-patches/). Per rule 11, NO
+        crypto/hkdf, NO golang.org/x/crypto fallback.
+        Done: the internal/credstore/seal.go file landed with
+        18.1, and the HKDF + AES-GCM wrappers in
+        internal/wolfcrypt/aead.go already use wc_HKDF and
+        wc_AesGcm via the go-wolfssl exports the vendored copy
+        carries (no new patches needed - Wc_HKDF and
+        Wc_AesGcm_Appended_Tag_* were already present).
+        18.2's specific value lands in a primitive-level gate
+        decoupled from the credstore record schema:
+        internal/wolfcrypt/aead_test.go now carries
+        TestSeal_RoundTrip (the name PLAN.md called out), plus
+        TestHKDFSHA256_DistinguishesInfo and
+        TestHKDFSHA256_Deterministic so the HKDF surface is
+        verified separately from the credstore layering, plus
+        TestAESGCMOpen_RejectsTampering,
+        TestAESGCMOpen_RejectsWrongKey,
+        TestAESGCMSeal_AADBound,
+        TestAESGCMSeal_RejectsBadKeyLen, and
+        TestAESGCMSeal_RejectsBadNonceLen so the AES-GCM wrapper
+        rejects every operator-misuse path.
+
+
 End of PLAN.historic.
