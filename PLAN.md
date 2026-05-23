@@ -91,17 +91,6 @@ owner at the start of the phase):
   github-hook-for-GITScm-polling, poll-SCM, trigger-builds-
   remotely.
 
-- [ ] 18.11 Pipeline DSL lexer (internal/pipeline/lexer.go).
-        Failing test: TestLexer_TokenizeMasterJob feeds the
-        whole master-job PRB.Jenkinsfile in and asserts a
-        token stream covering every keyword (pipeline, agent,
-        label, options, stages, stage, steps, script, parallel,
-        when, expression, withCredentials, post, always,
-        success, failure), every operator (=, +, ., :, ?, &&,
-        ||, !, +=), strings (single, double, triple-double
-        with $-interpolation, triple-single literal), numbers,
-        identifiers, comments (// and /* */), and the def
-        keyword.
 - [ ] 18.12 Pipeline DSL parser - declarative top level
         (internal/pipeline/parser_declarative.go). Failing
         test: TestParser_DeclarativeAST parses

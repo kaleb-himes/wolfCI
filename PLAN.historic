@@ -3426,4 +3426,49 @@ completed and were moved here:
         TestPostStatus_PropagatesNon2xx.
 
 
+- [x] 18.11 Pipeline DSL lexer (internal/pipeline/lexer.go).
+        Failing test: TestLexer_TokenizeMasterJob feeds the
+        whole master-job PRB.Jenkinsfile in and asserts a
+        token stream covering every keyword (pipeline, agent,
+        label, options, stages, stage, steps, script, parallel,
+        when, expression, withCredentials, post, always,
+        success, failure), every operator (=, +, ., :, ?, &&,
+        ||, !, +=), strings (single, double, triple-double
+        with $-interpolation, triple-single literal), numbers,
+        identifiers, comments (// and /* */), and the def
+        keyword.
+        Done: internal/pipeline.Tokenize returns a []Token
+        terminated by TokEOF. Each Token carries Kind, Value,
+        StringKind (for TokString only), and the 1-indexed
+        (Line, Col) of its first byte. The 4 string flavors
+        (single, double, triple-single, triple-double) are
+        distinguished by StringKind; the body is returned
+        verbatim with $-interpolation markers preserved for
+        the interpreter to expand at eval time. Comments
+        (// line + slash-star block) are dropped from the
+        stream; unterminated block comments and unterminated
+        strings are lex errors with positions. Operator
+        recognition was widened beyond the PLAN.md list (=,
+        +, ., :, ?, &&, ||, !, +=) to include ->, ==, !=, <,
+        >, <=, >=, ++, --, -, *, /, -= - the master-job
+        PRB.Jenkinsfile actually needs ->, ==, !=, <, ++ and
+        we added the closure / comparison / increment / basic
+        arithmetic completers so every Jenkinsfile under
+        third_party/testing/Jenkins lexes with no further
+        operator churn. && and || stay PLAN-spec; in the
+        master-job they happen to appear only inside a single-
+        quoted label string, so the dedicated
+        TestLexer_Operators_AllListed gates them via a
+        focused fixture. Gates:
+        TestLexer_TokenizeMasterJob (the spec's name; full
+        file lexes + per-category presence),
+        TestLexer_Keywords_OptionsPostAlwaysSuccessFailure
+        (keywords absent from the master-job),
+        TestLexer_Operators_AllListed (every PLAN.md operator),
+        TestLexer_StringFlavors (all 4 quote styles),
+        TestLexer_Comments (// + slash-star skipped, no
+        text leakage), TestLexer_NumberAndDef,
+        TestLexer_PositionTracking.
+
+
 End of PLAN.historic.
