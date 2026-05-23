@@ -80,6 +80,15 @@ type Server struct {
 	// Phase 15.5.
 	WorkDir string
 
+	// PendingClaimer is the seam Register consults to inherit
+	// pre-registered Labels + Executors from a PendingAgent
+	// record when the incoming AgentInfo's agent_id matches.
+	// nil disables pre-registration (Register uses only the
+	// agent-supplied values, the pre-19.4 behavior). Wired
+	// from cmd/wolfci with an adapter around storage.Storage;
+	// tests pass a fake. PLAN.md 19.4.
+	PendingClaimer PendingAgentClaimer
+
 	mu     sync.Mutex
 	agents map[string]*wolfciv1.AgentInfo
 
@@ -461,8 +470,31 @@ func (s *Server) deliverCompletion(agentID string, c *wolfciv1.BuildComplete) {
 	}
 }
 
+// PendingAgentClaimer is the seam Server.Register consults to
+// inherit Labels + Executors from a pre-registered PendingAgent
+// slot when the incoming agent_id matches. The production
+// adapter lives in cmd/wolfci (wrapping storage.Storage); tests
+// pass a fake. PLAN.md 19.4.
+type PendingAgentClaimer interface {
+	// LookupPendingAgent returns the (labels, executors,
+	// found) tuple for the given agent_id. A non-existent
+	// pending returns ([nil], 0, false) with no error;
+	// real I/O errors propagate.
+	LookupPendingAgent(name string) (
+		labels []string, executors int, found bool, err error)
+
+	// DeletePendingAgent removes the pending record after a
+	// successful claim. Idempotent: a missing record is not
+	// an error.
+	DeletePendingAgent(name string) error
+}
+
 // Register records an agent's self-described capabilities and
-// returns the server's response.
+// returns the server's response. PLAN.md 19.4: if a
+// PendingAgentClaimer is wired and the agent_id matches a
+// pre-registered slot, the stored AgentInfo inherits the
+// pending Labels + Executors (overriding what the agent
+// supplied) and the pending record is deleted.
 func (s *Server) Register(ctx context.Context, info *wolfciv1.AgentInfo) (*wolfciv1.RegisterResponse, error) {
 	if info == nil {
 		return nil, status.Error(codes.InvalidArgument, "agentsvc.Register: AgentInfo is nil")
@@ -474,11 +506,35 @@ func (s *Server) Register(ctx context.Context, info *wolfciv1.AgentInfo) (*wolfc
 		return nil, status.Errorf(codes.InvalidArgument, "agentsvc.Register: AgentInfo.executors must be >= 1 (got %d)", info.Executors)
 	}
 
+	labels := append([]string(nil), info.Labels...)
+	executors := info.Executors
+	if s.PendingClaimer != nil {
+		pendingLabels, pendingExecs, found, err :=
+			s.PendingClaimer.LookupPendingAgent(info.AgentId)
+		if err != nil {
+			return nil, status.Errorf(codes.Internal,
+				"agentsvc.Register: lookup pending %q: %v",
+				info.AgentId, err)
+		}
+		if found {
+			labels = append([]string(nil), pendingLabels...)
+			executors = int32(pendingExecs)
+			/* Delete the pending record AFTER we have its
+			 * values. A delete failure is logged but does
+			 * not fail the register (the slot's identity has
+			 * already been claimed in the in-memory
+			 * registry; a stale on-disk record is annoying
+			 * but recoverable through the UI). */
+			_ = s.PendingClaimer.DeletePendingAgent(
+				info.AgentId)
+		}
+	}
+
 	s.mu.Lock()
 	stored := &wolfciv1.AgentInfo{
 		AgentId:   info.AgentId,
-		Executors: info.Executors,
-		Labels:    append([]string(nil), info.Labels...),
+		Executors: executors,
+		Labels:    labels,
 	}
 	s.agents[info.AgentId] = stored
 	s.mu.Unlock()

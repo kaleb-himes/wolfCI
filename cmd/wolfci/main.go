@@ -133,6 +133,11 @@ func Run(ctx context.Context, cfg *server.ServerConfig, opts RunOptions) error {
      * WorkDir the handler returns FailedPrecondition.
      */
     svc.WorkDir = cfg.WorkDir
+    /* Phase 19.4: claim a pre-registered PendingAgent slot
+     * when an agent registers with the matching name. The
+     * adapter is two methods deep so it lives inline rather
+     * than as a named type. */
+    svc.PendingClaimer = &storagePendingClaimer{store: store}
     /* Built-in master node (Phase 12.5): registers a synthetic
      * "wolfci-master" agent and refreshes its NodeStatus every
      * 30s so the /nodes view always has a self-row. The
@@ -446,6 +451,43 @@ func parseDurationOr(s string) (time.Duration, error) {
  * has no builds to age out yet, and waiting one tick keeps
  * startup logs from churning when nothing needs sweeping.
  */
+/* storagePendingClaimer adapts a *storage.Storage to the
+ * agentsvc.PendingAgentClaimer interface. The adapter lives
+ * here rather than in storage to keep agentsvc free of a
+ * storage import - storage already does not depend on
+ * agentsvc, so the wiring direction is one-way.
+ */
+type storagePendingClaimer struct {
+    store *storage.Storage
+}
+
+func (c *storagePendingClaimer) LookupPendingAgent(
+    name string) ([]string, int, bool, error) {
+    pa, err := c.store.LoadPendingAgent(name)
+    if err != nil {
+        if errors.Is(err, os.ErrNotExist) {
+            return nil, 0, false, nil
+        }
+        /* Validation errors (bad name) also surface as
+         * "not pending" rather than a hard fail; the
+         * incoming Register has already passed the
+         * agent_id check, so the most useful behavior is
+         * "no claim available" rather than blocking the
+         * register. */
+        return nil, 0, false, nil
+    }
+    return pa.Labels, pa.Executors, true, nil
+}
+
+func (c *storagePendingClaimer) DeletePendingAgent(
+    name string) error {
+    err := c.store.DeletePendingAgent(name)
+    if err != nil && errors.Is(err, os.ErrNotExist) {
+        return nil
+    }
+    return err
+}
+
 func runRetentionSweeper(ctx context.Context,
     store *storage.Storage, interval time.Duration) {
 

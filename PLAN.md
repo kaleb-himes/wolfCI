@@ -65,16 +65,6 @@ owner at the start of the phase):
 - Land scope: 19.1-19.5 land first (the core Permanent Agent
   flow); 19.6 (GCE) + 19.7 (Copy) ship in follow-on pushes.
 
-- [ ] 19.4 Agent-side claim on Register. When the agent
-        calls AgentSvc.Register with an agent_id matching a
-        PendingAgent record, the registry's AgentInfo
-        inherits the pending's Labels + Executors and the
-        PendingAgent entry is deleted (one-shot claim).
-        Failing test (internal/agentsvc/pending_test.go):
-        TestAgentSvc_RegisterClaimsPendingAgent seeds a
-        PendingAgent, calls Register with that agent_id,
-        asserts the resulting AgentInfo carries the pending
-        labels + executors and the PendingAgent is gone.
 - [ ] 19.5 /nodes/<name> connection-command page for
         pending agents. Failing test
         (internal/server/nodes_pending_detail_test.go):

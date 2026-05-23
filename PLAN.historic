@@ -4747,3 +4747,39 @@ owner at the start of the phase):
         (POST with foo/bar 200s the form re-render with
         the "path separator" diagnostic and persists
         nothing).
+- [x] 19.4 Agent-side claim on Register. When the agent
+        calls AgentSvc.Register with an agent_id matching a
+        PendingAgent record, the registry's AgentInfo
+        inherits the pending's Labels + Executors and the
+        PendingAgent entry is deleted (one-shot claim).
+        Failing test (internal/agentsvc/pending_test.go):
+        TestAgentSvc_RegisterClaimsPendingAgent seeds a
+        PendingAgent, calls Register with that agent_id,
+        asserts the resulting AgentInfo carries the
+        pending labels + executors and the PendingAgent is
+        gone.
+        Done: agentsvc.Server gained an optional
+        PendingClaimer field satisfying a new
+        agentsvc.PendingAgentClaimer interface
+        (LookupPendingAgent / DeletePendingAgent). When
+        wired, Register consults the claimer; a found
+        record overrides the agent-supplied Labels +
+        Executors and the pending is deleted (delete
+        failure logs through but does not fail the
+        Register - the in-memory registry already carries
+        the claim and a stale on-disk record is
+        recoverable through the UI). The production
+        adapter (storagePendingClaimer in cmd/wolfci/main.go)
+        wraps storage.Storage; cmd/wolfci sets
+        svc.PendingClaimer = &storagePendingClaimer{store:
+        store} at startup. Gating: TestAgentSvc_RegisterClaimsPendingAgent
+        seeds a fakePendingClaimer with linux-builder-1
+        (linux/build/x86_64 labels, executors=4),
+        Register's the same name with self-reported
+        executors=1 + a different label, asserts the
+        stored AgentInfo carries the pending values and
+        the fake recorded exactly one Delete.
+        TestAgentSvc_RegisterIgnoresNonPending Register's
+        an ad-hoc agent_id and asserts the stored
+        AgentInfo keeps the agent-supplied values + the
+        fake's Delete counter stays at zero.
