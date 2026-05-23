@@ -3520,4 +3520,75 @@ completed and were moved here:
         TestParser_Errors with four error-message substrings.
 
 
+- [x] 18.13 Pipeline DSL parser - script {} Groovy subset
+        (internal/pipeline/parser_script.go). Supports: def
+        declarations (typed and untyped), assignment, list
+        and map literals, closures (with and without explicit
+        params), string interpolation, member access (a.b.c),
+        method calls (a.b(c, d)) including labelled args
+        (k: v), if / else, for / while, try / catch / finally,
+        return, throw, break, continue, .each {} via the
+        general method-call machinery. Failing test:
+        TestParser_ScriptSubsetParsesJenkinsUtils parses
+        third_party/testing/Jenkins/jenkins-functions/
+        jenkinsUtils.groovy without error.
+        Done: internal/pipeline.ParseScript (plus
+        ParseScriptTokens for the declarative parser to call
+        against the script {} body tokens it captures in
+        18.12, wired up to the interpreter in 18.15). Full
+        recursive-descent parser building a typed AST: Block,
+        FuncDecl, VarDecl, AssignStmt, ExprStmt, IfStmt,
+        ForInStmt, ForCStmt, WhileStmt, TryStmt (with
+        CatchClause list + optional Finally), ReturnStmt
+        (value optional), ThrowStmt, BreakStmt, ContinueStmt,
+        BlockStmt; and for expressions NumberLit, StringLit
+        (with StringKind preserved), BoolLit, NullLit,
+        IdentExpr, MemberExpr, SubscriptExpr, CallExpr (with
+        labelled args + optional ClosureArg trailing closure),
+        CommandCallExpr (for `echo "..."`), BinaryExpr (full
+        precedence chain: || && == != < > <= >= instanceof
+        + - * /), UnaryExpr (! -), TernaryExpr, AssignExpr,
+        ListExpr, MapExpr (with [:] empty-map marker),
+        ClosureExpr (with optional typed params and ->
+        separator), NewExpr (`new T(args)`). Lexer extended:
+        added TokAnnotation kind plus '@' handling (emit
+        TokAnnotation token with the bare name), and the
+        script-subset reserved words return / if / else / for
+        / while / in / try / catch / finally / throw / break
+        / continue / null / true / false / new / instanceof
+        joined the keyword set. Newline-significance is
+        tracked by a bracketDepth counter incremented only on
+        ( and [ (not {), so multi-line argument lists and
+        leading-comma list literals parse uniformly while
+        statement boundaries inside blocks and closures keep
+        their newline-as-terminator semantics. The function-
+        decl disambiguator looks ahead three tokens past 'def'
+        to distinguish `def f(...)` from `def x = ...`; typed
+        local decls (`String text = null`) are detected by an
+        IDENT IDENT = three-token lookahead at statement
+        start; and a closure's optional param header is
+        detected by scanning forward for an unbalanced ->.
+        Annotations (@NonCPS) are absorbed at statement
+        boundaries and attached to the next FuncDecl. Gates:
+        TestParser_ScriptSubsetParsesJenkinsUtils (the spec's
+        name; parses the real jenkinsUtils.groovy under
+        third_party/testing/Jenkins/jenkins-functions/ and
+        confirms its six expected function declarations plus
+        the trailing `return this`), plus focused subtests
+        for each construct PLAN.md called out:
+        TestParser_Script_FuncDeclUntyped,
+        TestParser_Script_FuncDeclTyped,
+        TestParser_Script_ListAndMapLiterals,
+        TestParser_Script_Closure,
+        TestParser_Script_MemberAccessAndCall,
+        TestParser_Script_IfElse,
+        TestParser_Script_ForWhile,
+        TestParser_Script_TryCatchFinally,
+        TestParser_Script_ReturnThrowBreakContinue,
+        TestParser_Script_EachClosure,
+        TestParser_Script_Annotation, and
+        TestParser_Script_Error_UnterminatedBlock for an
+        error-path sanity check.
+
+
 End of PLAN.historic.

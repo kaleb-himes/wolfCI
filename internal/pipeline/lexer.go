@@ -62,6 +62,7 @@ const (
     TokComma
     TokSemicolon
     TokNewline
+    TokAnnotation
     TokEOF
 )
 
@@ -118,6 +119,27 @@ var keywords = map[string]struct{}{
     "success":         {},
     "failure":         {},
     "def":             {},
+    /* Phase 18.13 script-subset keywords. The Groovy reserved
+     * words the script-block parser needs to recognise as
+     * statement / expression heads rather than identifiers.
+     */
+    "return":     {},
+    "if":         {},
+    "else":       {},
+    "for":        {},
+    "while":      {},
+    "in":         {},
+    "try":        {},
+    "catch":      {},
+    "finally":    {},
+    "throw":      {},
+    "break":      {},
+    "continue":   {},
+    "null":       {},
+    "true":       {},
+    "false":      {},
+    "new":        {},
+    "instanceof": {},
 }
 
 /* Tokenize converts src into a token stream terminated by a
@@ -282,8 +304,33 @@ func (l *lexer) next() (Token, error) {
         return l.readString(line, col)
     }
 
+    /* Annotations. Groovy uses '@AnnotationName' to attach
+     * metadata to a declaration (e.g. '@NonCPS'). The lexer
+     * emits TokAnnotation with the bare name (no leading '@')
+     * so the script-subset parser added in 18.13 can skip
+     * past annotations without misreading their bytes.
+     */
+    if c == '@' && isIdentStart(l.peekAt(1)) {
+        l.advance() /* '@' */
+        return l.readAnnotation(line, col), nil
+    }
+
     /* Punctuation + operators. */
     return l.readPunctOrOperator(line, col)
+}
+
+/* readAnnotation reads an identifier following an '@' marker.
+ * The '@' has already been consumed; the returned token's
+ * Value is the annotation name with no leading '@'.
+ */
+func (l *lexer) readAnnotation(line, col int) Token {
+    start := l.pos
+    for !l.eof() && isIdentPart(l.peek()) {
+        l.advance()
+    }
+    return Token{Kind: TokAnnotation,
+        Value: string(l.src[start:l.pos]),
+        Line:  line, Col: col}
 }
 
 func isIdentStart(c byte) bool {

@@ -91,18 +91,6 @@ owner at the start of the phase):
   github-hook-for-GITScm-polling, poll-SCM, trigger-builds-
   remotely.
 
-- [ ] 18.13 Pipeline DSL parser - script {} Groovy subset
-        (internal/pipeline/parser_script.go). Supports: def
-        declarations (typed and untyped), assignment, list
-        and map literals, closures (with and without explicit
-        params), string interpolation, member access (a.b.c),
-        method calls (a.b(c, d)) including labelled args
-        (k: v), if / else, for / while, try / catch / finally,
-        return, throw, break, continue, .each {} via the
-        general method-call machinery. Failing test:
-        TestParser_ScriptSubsetParsesJenkinsUtils parses
-        third_party/testing/Jenkins/jenkins-functions/
-        jenkinsUtils.groovy without error.
 - [ ] 18.14 Pipeline interpreter - declarative top level
         (internal/pipeline/exec_declarative.go). Failing test:
         TestExec_SingleStageSh runs
