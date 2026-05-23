@@ -33,49 +33,9 @@ Format conventions:
 
 ## Current Phase
 
-Phase 19 - Node management UI.
+Polish queue - job-edit form / raw view UI polish.
 
-## Phase 19 - Node management UI
-
-Goal: an operator can add a new node from /nodes through a
-Jenkins-style picker (Permanent Agent / Google Compute Engine /
-Copy existing node). Permanent agents pre-register so the
-operator copies a connection command to the remote machine
-(Linux / Windows / macOS) and runs `wolfci-agent` there to
-join; the registry inherits the pre-configured labels +
-executors when the agent connects. GCE pools persist as
-scheduler-consumable config (wiring into the scheduler's
-overflow-routing path is a follow-on). Copy existing node
-duplicates a node's config with edit-before-save.
-
-Decisions locked in for Phase 19 (confirmed with the project
-owner at the start of the phase):
-
-- Permanent Agent cert delivery: the connection-command page
-  shows the literal `wolfci-agent --server-addr ... --agent-id
-  ... --cert-dir ...` command plus instructions for the
-  operator to copy the master CA pubkey + the agent's keypair
-  onto the remote machine manually. A "connection bundle"
-  (one-shot-download tarball with cert + config + installer)
-  is a follow-on once the command-only flow is in use.
-- GCE form: config-only for 19.6 - the form persists a
-  gce.Config to disk; routing the saved configs into the
-  scheduler's overflow path is a separate sub-task that lands
-  when there is a real credential set to test against.
-- Land scope: 19.1-19.5 land first (the core Permanent Agent
-  flow); 19.6 (GCE) + 19.7 (Copy) ship in follow-on pushes.
-
-- [ ] 19.7 Copy existing node. /nodes/new?copy=<id> pre-fills
-        the Permanent Agent form with the source's labels +
-        executors so the operator can edit before saving.
-        Failing test (internal/server/nodes_new_copy_test.go):
-        TestNodesNewCopy_PrefillsFormFromSource seeds a
-        PendingAgent (or a connected AgentInfo), GETs
-        /nodes/new?copy=<source>, asserts the form's value
-        attributes carry the source's labels + executors.
-
-
-## Polish queue (do after phase 19 closes, before phase 20 opens)
+## Polish queue (after phase 19; visual gates need real-browser verification)
 
 The job-view page at /jobs/<name> is the reference for what
 "professional, clean, properly aligned" looks like in this

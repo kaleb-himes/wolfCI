@@ -350,6 +350,24 @@ func (s *Server) handleNodesNew(w http.ResponseWriter,
 				http.StatusMethodNotAllowed)
 			return
 		}
+		/* PLAN.md 19.7: when ?copy= is set, redirect to the
+		 * Permanent Agent form pre-filled with the source's
+		 * labels + executors. ?copy= with an empty value
+		 * lands on the copy-source picker; the landing
+		 * "Copy existing node" card links here so operators
+		 * who do not yet know the source pick from a list. */
+		if cq, ok := r.URL.Query()["copy"]; ok {
+			source := ""
+			if len(cq) > 0 {
+				source = cq[0]
+			}
+			if source == "" {
+				s.handleNodesNewCopyPicker(w, r)
+				return
+			}
+			s.handleNodesNewPermanentFromCopy(w, r, source)
+			return
+		}
 		s.render(w, "nodes_new.html",
 			map[string]interface{}{
 				"Title": "New node",
@@ -361,6 +379,83 @@ func (s *Server) handleNodesNew(w http.ResponseWriter,
 	default:
 		http.NotFound(w, r)
 	}
+}
+
+// handleNodesNewCopyPicker renders the source-picker page
+// /nodes/new?copy= (empty value) lists every node wolfCI knows
+// about - both pending slots and connected agents - so the
+// operator can pick one as the copy source. Each row links to
+// /nodes/new?copy=<id>.
+func (s *Server) handleNodesNewCopyPicker(
+	w http.ResponseWriter, r *http.Request) {
+
+	type pickerRow struct {
+		ID        string
+		Kind      string /* "pending" or "connected" */
+		Labels    []string
+		Executors int32
+	}
+	var rows []pickerRow
+
+	pendings, _ := s.opts.Storage.ListPendingAgents()
+	for _, pa := range pendings {
+		rows = append(rows, pickerRow{
+			ID:        pa.Name,
+			Kind:      "pending",
+			Labels:    pa.Labels,
+			Executors: int32(pa.Executors),
+		})
+	}
+	if s.opts.AgentSvc != nil {
+		for _, a := range s.opts.AgentSvc.Agents() {
+			rows = append(rows, pickerRow{
+				ID:        a.AgentId,
+				Kind:      "connected",
+				Labels:    a.Labels,
+				Executors: a.Executors,
+			})
+		}
+	}
+	sort.Slice(rows, func(i, j int) bool {
+		return rows[i].ID < rows[j].ID
+	})
+	s.render(w, "nodes_new_copy_picker.html",
+		map[string]interface{}{
+			"Title": "Pick copy source",
+			"Rows":  rows,
+		})
+}
+
+// handleNodesNewPermanentFromCopy renders the Permanent
+// Agent form with the source's Labels + Executors
+// pre-filled. The Name field stays empty so the operator
+// must type a fresh name (avoiding collision with the
+// source). Source can be either a pending agent or a
+// currently-connected agent.
+func (s *Server) handleNodesNewPermanentFromCopy(
+	w http.ResponseWriter, r *http.Request, source string) {
+
+	var labels []string
+	executors := 1
+
+	if pa, err := s.opts.Storage.LoadPendingAgent(
+		source); err == nil && pa != nil {
+		labels = pa.Labels
+		executors = pa.Executors
+	} else if s.opts.AgentSvc != nil {
+		for _, a := range s.opts.AgentSvc.Agents() {
+			if a.AgentId == source {
+				labels = append(
+					[]string(nil), a.Labels...)
+				if a.Executors > 0 {
+					executors = int(a.Executors)
+				}
+				break
+			}
+		}
+	}
+	s.renderNodesNewPermanent(w, "", "", labels, executors,
+		"")
 }
 
 // handleNodesNewGCE renders + processes the

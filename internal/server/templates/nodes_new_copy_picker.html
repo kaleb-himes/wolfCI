@@ -1,0 +1,39 @@
+{{ define "content" }}
+<section class="panel">
+<h2>Copy existing node - pick source</h2>
+
+<p class="muted">Pick a node whose configuration you want to
+copy into a new Permanent Agent slot. The next page is the
+Permanent Agent form, pre-filled with the source's labels
+and executor count. Type a new name there - the form rejects
+the source's name to avoid a collision.</p>
+
+{{ if .Rows }}
+<table class="nodes">
+<thead>
+<tr><th>Name</th><th>Kind</th><th>Labels</th>
+    <th>Executors</th><th></th></tr>
+</thead>
+<tbody>
+{{ range .Rows }}
+<tr>
+<td><code>{{ .ID }}</code></td>
+<td>{{ .Kind }}</td>
+<td>
+{{ range .Labels }}<code>{{ . }}</code> {{ end }}
+{{ if not .Labels }}<span class="muted">(none)</span>{{ end }}
+</td>
+<td>{{ .Executors }}</td>
+<td><a class="btn-primary" href="/nodes/new?copy={{ .ID }}">Copy</a></td>
+</tr>
+{{ end }}
+</tbody>
+</table>
+{{ else }}
+<p class="muted">No nodes available to copy. Create a
+permanent agent first or wait for an agent to register.</p>
+{{ end }}
+
+<p class="form-actions"><a href="/nodes/new">Back</a></p>
+</section>
+{{ end }}
