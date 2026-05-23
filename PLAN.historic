@@ -3471,4 +3471,53 @@ completed and were moved here:
         TestLexer_PositionTracking.
 
 
+- [x] 18.12 Pipeline DSL parser - declarative top level
+        (internal/pipeline/parser_declarative.go). Failing
+        test: TestParser_DeclarativeAST parses
+        pipeline { agent { label '...' } options { ... }
+        stages { stage(name) { steps { ... } } post { ... } } }
+        into an AST. Covers nested stages NOT (left for a
+        follow-on); covers parallel as both a step inside steps
+        AND as a stage child.
+        Done: internal/pipeline.Parse tokenises src, captures
+        any tokens before the pipeline keyword as a Preamble
+        slice (def declarations etc., handed off to 18.13 to
+        interpret later), then recursively parses the
+        pipeline block. Sections recognised at pipeline level:
+        agent (any/none/{ label '<str>' }), options (each
+        option is a Call with raw paren'd ArgTokens captured
+        for 18.13 to decode), stages, post. Inside a stage we
+        accept when (expression-only body, captured raw),
+        steps (a sequence of StepCall), parallel (stage-direct
+        ParallelBlock containing stage(...) branches), and
+        post. StepCall captures Name + ArgsKind (None / Paren
+        / Naked) + raw ArgTokens + an optional trailing closure
+        Block as raw tokens, so the script-subset parser added
+        in 18.13 can reparse arg expressions and closure bodies
+        when execution needs the semantics. Brace/paren/bracket
+        balancing in captureUntil + captureNakedArgs keeps
+        triple-nested constructs like
+        `withCredentials([string(...)]) { script { sh(...) } }`
+        parseable without 18.13 in place. parallel is dispatched
+        contextually: as a step inside steps {} it lands as a
+        StepCall named "parallel" with naked args; as a
+        stage-direct child it becomes Stage.Parallel with a
+        ParallelBlock whose Branches are full Stages
+        (recursing through parseStage). Error paths surface
+        line/col-pinned messages for unknown stage children,
+        unterminated braces, parallel-at-stage-level with a
+        non-stage entry, and missing 'pipeline' altogether.
+        Gates: TestParser_DeclarativeAST (the spec's name -
+        a synthetic Jenkinsfile that exercises preamble, agent
+        label, two options, four stages covering when /
+        parallel-as-step / parallel-as-stage-child /
+        script {} / withCredentials() {} / stage-level post /
+        pipeline-level post), TestParser_DeclarativeMasterJob
+        (the real master-job PRB.Jenkinsfile under
+        third_party/testing/Jenkins parses to the expected
+        shape: Preflight + Run Tests stages, when guard on
+        Run Tests, echo + script steps inside it), and
+        TestParser_Errors with four error-message substrings.
+
+
 End of PLAN.historic.

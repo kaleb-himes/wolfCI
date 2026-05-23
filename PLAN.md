@@ -91,14 +91,6 @@ owner at the start of the phase):
   github-hook-for-GITScm-polling, poll-SCM, trigger-builds-
   remotely.
 
-- [ ] 18.12 Pipeline DSL parser - declarative top level
-        (internal/pipeline/parser_declarative.go). Failing
-        test: TestParser_DeclarativeAST parses
-        pipeline { agent { label '...' } options { ... }
-        stages { stage(name) { steps { ... } } post { ... } } }
-        into an AST. Covers nested stages NOT (left for a
-        follow-on); covers parallel as both a step inside steps
-        AND as a stage child.
 - [ ] 18.13 Pipeline DSL parser - script {} Groovy subset
         (internal/pipeline/parser_script.go). Supports: def
         declarations (typed and untyped), assignment, list
