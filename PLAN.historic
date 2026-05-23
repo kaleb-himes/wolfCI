@@ -4671,6 +4671,32 @@ owner at the start of the phase):
   build-after-other-projects, build-periodically,
   github-hook-for-GITScm-polling, poll-SCM,
   trigger-builds-remotely.
-
-
-End of PLAN.historic.
+- [x] 19.1 PendingAgent storage type + on-disk persistence
+        (internal/storage). Failing test
+        (internal/storage/pending_agent_test.go):
+        TestPendingAgent_Roundtrip writes a PendingAgent
+        with Name, Labels, Executors, Description,
+        CreatedAt and asserts SaveAgent + LoadAgent
+        round-trip the YAML; ListPendingAgents returns the
+        entry. TestPendingAgent_Validation rejects empty
+        names, names with path separators, and non-positive
+        executor counts.
+        Done: storage.PendingAgent + SaveAgent /
+        LoadPendingAgent / ListPendingAgents /
+        DeletePendingAgent / PendingAgentPath live at
+        internal/storage/pending_agent.go. Per-slot YAML at
+        <root>/nodes/<name>/pending.yaml, exclusive flock
+        during write, CreatedAt auto-stamped if the caller
+        leaves it zero, validation rejects empty names /
+        path separators / leading dot / non-positive
+        executors. Gating:
+        TestPendingAgent_Roundtrip writes a 4-executor
+        linux-builder slot, asserts every field
+        round-trips (CreatedAt within a 1-second drift),
+        the on-disk path matches PendingAgentPath, the
+        list call returns the entry, and DeletePendingAgent
+        removes both the file and the empty directory.
+        TestPendingAgent_Validation walks nil receiver,
+        empty name, foo/bar, foo\bar, .hidden, executors=0,
+        executors=-1, plus two "good" cases (plain name +
+        ci.linux.01 with internal dots).

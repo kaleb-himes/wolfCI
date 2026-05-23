@@ -33,9 +33,81 @@ Format conventions:
 
 ## Current Phase
 
-Polish queue - job-edit form / raw view UI polish before Phase 19.
+Phase 19 - Node management UI.
 
-## Polish queue (do after phase 18 closes, before phase 19 opens)
+## Phase 19 - Node management UI
+
+Goal: an operator can add a new node from /nodes through a
+Jenkins-style picker (Permanent Agent / Google Compute Engine /
+Copy existing node). Permanent agents pre-register so the
+operator copies a connection command to the remote machine
+(Linux / Windows / macOS) and runs `wolfci-agent` there to
+join; the registry inherits the pre-configured labels +
+executors when the agent connects. GCE pools persist as
+scheduler-consumable config (wiring into the scheduler's
+overflow-routing path is a follow-on). Copy existing node
+duplicates a node's config with edit-before-save.
+
+Decisions locked in for Phase 19 (confirmed with the project
+owner at the start of the phase):
+
+- Permanent Agent cert delivery: the connection-command page
+  shows the literal `wolfci-agent --server-addr ... --agent-id
+  ... --cert-dir ...` command plus instructions for the
+  operator to copy the master CA pubkey + the agent's keypair
+  onto the remote machine manually. A "connection bundle"
+  (one-shot-download tarball with cert + config + installer)
+  is a follow-on once the command-only flow is in use.
+- GCE form: config-only for 19.6 - the form persists a
+  gce.Config to disk; routing the saved configs into the
+  scheduler's overflow path is a separate sub-task that lands
+  when there is a real credential set to test against.
+- Land scope: 19.1-19.5 land first (the core Permanent Agent
+  flow); 19.6 (GCE) + 19.7 (Copy) ship in follow-on pushes.
+
+- [ ] 19.2 /nodes/new landing page + "New node" button on
+        /nodes. Failing test
+        (internal/server/nodes_new_test.go):
+        TestUI_NodesNew_LandingHasThreeCards asserts the
+        landing renders three cards (Permanent Agent,
+        Google Compute Engine, Copy existing node) each
+        pointing at the right /nodes/new/<kind> URL, and
+        TestUI_NodesPageHasNewButton asserts the existing
+        /nodes page now carries a "New node" button that
+        links to /nodes/new.
+- [ ] 19.3 /nodes/new/permanent form. Failing test
+        (internal/server/nodes_new_permanent_test.go):
+        TestNodesNewPermanent_FormHasFields asserts the
+        rendered form has inputs for name (text), labels
+        (multi-line textarea), executors (number, default
+        1), and description (text). A second test
+        TestNodesNewPermanent_PostCreatesPending POSTs the
+        form and asserts a PendingAgent landed in storage
+        with the supplied values, then asserts the response
+        redirects to /nodes/<name>.
+- [ ] 19.4 Agent-side claim on Register. When the agent
+        calls AgentSvc.Register with an agent_id matching a
+        PendingAgent record, the registry's AgentInfo
+        inherits the pending's Labels + Executors and the
+        PendingAgent entry is deleted (one-shot claim).
+        Failing test (internal/agentsvc/pending_test.go):
+        TestAgentSvc_RegisterClaimsPendingAgent seeds a
+        PendingAgent, calls Register with that agent_id,
+        asserts the resulting AgentInfo carries the pending
+        labels + executors and the PendingAgent is gone.
+- [ ] 19.5 /nodes/<name> connection-command page for
+        pending agents. Failing test
+        (internal/server/nodes_pending_detail_test.go):
+        TestNodesPendingDetail_RendersCommand asserts the
+        page renders the wolfci-agent command line with
+        the server address and agent_id pre-filled, plus
+        a short instruction block on how to copy the
+        master CA pubkey + the agent's keypair onto the
+        remote machine. The page must NOT render for
+        connected agents - those keep using the existing
+        handleNodeDetail surface.
+
+## Polish queue (do after phase 19 closes, before phase 20 opens)
 
 The job-view page at /jobs/<name> is the reference for what
 "professional, clean, properly aligned" looks like in this
