@@ -4290,6 +4290,64 @@ completed and were moved here:
         returns null, the `prev == null ?` ternary picks
         'none', and the workspace marker confirms the null-
         short-circuit path.
+- [x] 18.26 Pipeline-script-from-SCM job definition. Failing
+        test (internal/jobspec/scm_test.go):
+        TestJob_PipelineScriptFromSCM loads a job whose
+        pipeline.definition is "from_scm" with repo URL,
+        credentials id (ssh-private-key), branch_specifier
+        */master, script_path "Jenkins/master-job/PRB.Jenkinsfile",
+        lightweight_checkout: true. At build start the runner
+        does a SHALLOW fetch of just the script path (or full
+        clone if lightweight is false), parses, runs.
+        TestJob_PipelineScriptFromSCM_BadBranch exercises the
+        no-such-branch error path.
+        Done: new internal/jobspec package carries scm.go +
+        scm_test.go. The data model is jobspec.JobSpec ->
+        Pipeline -> SCMConfig with the Jenkinsfile-author
+        field names (repo_url, credentials_id,
+        branch_specifier, script_path, lightweight_checkout);
+        LoadSpec parses YAML and validates required fields
+        (name, pipeline.definition, scm.repo_url,
+        scm.script_path, scm.branch_specifier) with
+        actionable field-name-bearing errors.
+        RunFromSCM(ctx, spec, workspace, executor) is the
+        entry point: cleans the .scm-checkout subdir under
+        workspace, normalises the "*/<branch>" Jenkins
+        specifier into a bare branch, drives git to fetch
+        (gitFullCheckout: --depth 1 --branch <b> --single-
+        branch when lightweight is false; gitLightweightCheckout:
+        --depth 1 --filter=blob:none --sparse followed by
+        sparse-checkout set <parent-of-script-path> when
+        lightweight is true), reads ScriptPath out of the
+        clone, parses it through pipeline.Parse, and runs
+        through pipeline.ExecDeclarative against the
+        supplied Executor. The sparse argument is the script
+        path's parent directory because cone-mode sparse-
+        checkout treats arguments as directory prefixes; a
+        repo-root script degenerates to "/" which
+        sparse-checkout reads as "include everything",
+        matching a non-lightweight clone for that edge case.
+        Errors include the underlying git stderr so an
+        operator can diagnose without re-running by hand.
+        Gating: TestJob_PipelineScriptFromSCM builds a tiny
+        in-process git fixture (init -b master + commit a
+        Jenkinsfile at the named path), points the spec at
+        the local file:// URL, runs RunFromSCM, and asserts
+        the spec loaded correctly (Name, Definition, SCM
+        fields including the ssh-private-key credentials_id
+        and lightweight=true), the pipeline ran end to end
+        (build.Status = BuildSuccess), and the pipeline's sh
+        step landed marker.txt in the workspace - proving
+        the fetched script actually executed.
+        TestJob_PipelineScriptFromSCM_BadBranch uses the
+        same fixture but asks for branch "nonexistent" and
+        asserts the returned error mentions that name.
+        Out of scope and tracked in the backlog: the
+        ssh-private-key credential is not wired into git's
+        SSH transport yet - the file:// URL in the gating
+        test exercises the cred slot through the loader
+        without actually authing; production GitHub auth
+        lands when the master-job pipeline phase needs it.
 
 
 End of PLAN.historic.

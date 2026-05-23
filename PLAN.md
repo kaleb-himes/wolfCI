@@ -91,17 +91,6 @@ owner at the start of the phase):
   github-hook-for-GITScm-polling, poll-SCM, trigger-builds-
   remotely.
 
-- [ ] 18.26 Pipeline-script-from-SCM job definition. Failing
-        test (internal/jobspec/scm_test.go):
-        TestJob_PipelineScriptFromSCM loads a job whose
-        pipeline.definition is "from_scm" with repo URL,
-        credentials id (ssh-private-key), branch_specifier
-        */master, script_path "Jenkins/master-job/PRB.Jenkinsfile",
-        lightweight_checkout: true. At build start the runner
-        does a SHALLOW fetch of just the script path (or full
-        clone if lightweight is false), parses, runs.
-        TestJob_PipelineScriptFromSCM_BadBranch exercises the
-        no-such-branch error path.
 - [ ] 18.27 General job options form fields. Failing test
         (internal/server/jobedit_test.go):
         TestJobEdit_GeneralOptionsRoundtrip POSTs a form with
