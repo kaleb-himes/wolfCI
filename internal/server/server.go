@@ -103,7 +103,8 @@ type Server struct {
 
 // New constructs the Server.
 func New(opts Options) *Server {
-	tmpl := template.Must(template.ParseFS(templatesFS, "templates/*.html"))
+	tmpl := template.New("wolfci").Funcs(jobFormFuncs())
+	tmpl = template.Must(tmpl.ParseFS(templatesFS, "templates/*.html"))
 	s := &Server{opts: opts, tmpl: tmpl, mux: http.NewServeMux()}
 	s.routes()
 	return s
@@ -138,7 +139,8 @@ func (s *Server) handleJobRoutes(w http.ResponseWriter, r *http.Request) {
 	case rest == "new":
 		switch r.Method {
 		case http.MethodGet:
-			s.renderJobForm(w, "", "", "")
+			view := normalizeView(r.URL.Query().Get("view"))
+			s.renderJobForm(w, "", "", "", view, nil)
 		case http.MethodPost:
 			s.handleJobCreate(w, r)
 		default:
@@ -582,23 +584,25 @@ func (s *Server) handleJobCreate(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "bad request", http.StatusBadRequest)
 		return
 	}
-	spec := r.FormValue("spec")
-	job, err := parseJobSpec(spec)
+	view := normalizeView(r.FormValue("view"))
+	job, spec, err := s.parseJobFromRequest(r, view)
 	if err != nil {
-		s.renderJobForm(w, "", spec, err.Error())
+		s.renderJobForm(w, "", spec, err.Error(), view, job)
 		return
 	}
 	if job.Name == "" {
-		s.renderJobForm(w, "", spec, "spec must include 'name'")
+		s.renderJobForm(w, "", spec, "spec must include 'name'", view, job)
 		return
 	}
 	// Refuse to overwrite an existing job from the "new" route.
 	if existing, _ := s.opts.Storage.LoadJob(job.Name); existing != nil {
-		s.renderJobForm(w, "", spec, fmt.Sprintf("job %q already exists; use /jobs/%s/edit", job.Name, job.Name))
+		s.renderJobForm(w, "", spec,
+			fmt.Sprintf("job %q already exists; use /jobs/%s/edit", job.Name, job.Name),
+			view, job)
 		return
 	}
 	if err := s.opts.Storage.SaveJob(job); err != nil {
-		s.renderJobForm(w, "", spec, "save: "+err.Error())
+		s.renderJobForm(w, "", spec, "save: "+err.Error(), view, job)
 		return
 	}
 	http.Redirect(w, r, "/jobs", http.StatusSeeOther)
@@ -615,7 +619,8 @@ func (s *Server) handleJobEditGet(w http.ResponseWriter, r *http.Request, name s
 		http.Error(w, "marshal job: "+err.Error(), http.StatusInternalServerError)
 		return
 	}
-	s.renderJobForm(w, name, string(out), "")
+	view := normalizeView(r.URL.Query().Get("view"))
+	s.renderJobForm(w, name, string(out), "", view, job)
 }
 
 func (s *Server) handleJobEditPost(w http.ResponseWriter, r *http.Request, name string) {
@@ -623,26 +628,70 @@ func (s *Server) handleJobEditPost(w http.ResponseWriter, r *http.Request, name 
 		http.Error(w, "bad request", http.StatusBadRequest)
 		return
 	}
-	spec := r.FormValue("spec")
-	job, err := parseJobSpec(spec)
+	view := normalizeView(r.FormValue("view"))
+	job, spec, err := s.parseJobFromRequest(r, view)
 	if err != nil {
-		s.renderJobForm(w, name, spec, err.Error())
+		s.renderJobForm(w, name, spec, err.Error(), view, job)
 		return
 	}
 	if job.Name != name {
-		s.renderJobForm(w, name, spec, fmt.Sprintf("name in spec (%q) does not match URL (%q); rename is not supported via the edit form", job.Name, name))
+		s.renderJobForm(w, name, spec,
+			fmt.Sprintf("name in spec (%q) does not match URL (%q); rename is not supported via the edit form", job.Name, name),
+			view, job)
 		return
 	}
 	if err := s.opts.Storage.SaveJob(job); err != nil {
-		s.renderJobForm(w, name, spec, "save: "+err.Error())
+		s.renderJobForm(w, name, spec, "save: "+err.Error(), view, job)
 		return
 	}
 	http.Redirect(w, r, "/jobs", http.StatusSeeOther)
 }
 
+// parseJobFromRequest reads either the raw YAML textarea
+// (view == "raw") or the per-field form inputs (view ==
+// "form") and returns the assembled storage.Job + the
+// canonical YAML form (for re-rendering the raw textarea on
+// validation errors). Form view marshals the assembled Job
+// to YAML so the raw tab stays in sync when an operator
+// flips between tabs after a failed save.
+func (s *Server) parseJobFromRequest(r *http.Request,
+	view string) (*storage.Job, string, error) {
+
+	if view == "form" {
+		job, err := buildJobFromForm(r)
+		if err != nil {
+			return job, "", err
+		}
+		spec, marshErr := yamlMarshal(job)
+		if marshErr != nil {
+			return job, "", marshErr
+		}
+		return job, string(spec), nil
+	}
+	spec := r.FormValue("spec")
+	job, err := parseJobSpec(spec)
+	if err != nil {
+		return nil, spec, err
+	}
+	return job, spec, nil
+}
+
+// normalizeView clamps the ?view= query / hidden-field
+// value to the two we render. Anything unrecognized -> raw.
+func normalizeView(v string) string {
+	if v == "form" {
+		return "form"
+	}
+	return "raw"
+}
+
 // renderJobForm writes the create/edit form. name=="" means
-// "new"; otherwise it's an edit screen for that job.
-func (s *Server) renderJobForm(w http.ResponseWriter, name, spec, errMsg string) {
+// "new"; otherwise it's an edit screen for that job. view is
+// "raw" or "form"; job is the parsed Job for form-view
+// prefill (nil for /jobs/new on first paint).
+func (s *Server) renderJobForm(w http.ResponseWriter, name,
+	spec, errMsg, view string, job *storage.Job) {
+
 	isNew := name == ""
 	action := "/jobs/new"
 	title := "New job"
@@ -650,13 +699,26 @@ func (s *Server) renderJobForm(w http.ResponseWriter, name, spec, errMsg string)
 		action = "/jobs/" + name + "/edit"
 		title = "Edit job"
 	}
+	/* Slots is a fixed-length range the form view iterates
+	 * over to render trigger rows. Kept here rather than as
+	 * a template helper so the row count is a single
+	 * constant shared with buildJobFromForm.
+	 */
+	slots := make([]int, formTriggerRows)
+	for i := range slots {
+		slots[i] = i
+	}
 	s.render(w, "jobedit.html", map[string]interface{}{
-		"Title":  title,
-		"IsNew":  isNew,
-		"Name":   name,
-		"Spec":   spec,
-		"Error":  errMsg,
-		"Action": action,
+		"Title":              title,
+		"IsNew":              isNew,
+		"Name":               name,
+		"Spec":               spec,
+		"Error":              errMsg,
+		"Action":             action,
+		"View":               view,
+		"Job":                job,
+		"TriggerSlots":       slots,
+		"TriggerTypeOptions": knownTriggerTypes,
 	})
 }
 

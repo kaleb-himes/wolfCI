@@ -21,7 +21,7 @@ Format conventions:
 
 ## Current Phase
 
-Phase 16 - Jenkins-parity UI refresh.
+Phase 17 - Dual configuration editor (Raw YAML + Form).
 
 (Phase completion log. Phase 0 was completed in the initial
 planning turn. Phase 1 completed in iteration 4, Phase 2 in
@@ -3015,7 +3015,93 @@ Decisions to lock in:
          today / yesterday / week-ago and asserts the
          three corresponding labels appear).
 
-Phase 16 complete; Current Phase remains Phase 16 for any
+Phase 16 complete; Current Phase advances to Phase 17.
+
+## Phase 17 - Dual configuration editor
+
+User ask 2026-05-22 (Jenkins screenshot annotated by the
+project owner): some operators prefer typing raw YAML, some
+prefer Jenkins-style per-field forms. /jobs/<name>/edit and
+/jobs/new keep the existing raw textarea AND gain a Form
+view tab with one input per top-level schema item, plus a
+dropdown for finite-option fields (trigger type).
+
+Decisions to lock in:
+
+- Tabs driven by ?view=raw (default) vs ?view=form. No
+  client-side JS for tab switching - a plain hyperlink
+  per tab survives a no-JS browser.
+- Form view fields:
+    name           text (required; readonly on edit)
+    description    textarea
+    node_label     text
+    timeout        text (placeholder "5m")
+    retries        number
+    retention      max_builds (number) + max_age (text)
+    upstream       textarea, one job name per line
+    triggers       3 fixed rows of {type select, config text}
+                   type options: empty / cron / webhook / scm
+    parameters     textarea, YAML fragment
+    steps          textarea, YAML fragment
+    axis           textarea, YAML fragment
+    triggers_downstream textarea, YAML fragment
+  Nested lists with deep structure (parameters / steps /
+  axis / triggers_downstream) stay as YAML-fragment
+  textareas in the V1; a future iteration can break them
+  into repeatable rows with add/remove buttons. The form
+  view's value is the SCALAR fields and the trigger
+  dropdown - those are what operators most commonly tune.
+- Submit handler reads a hidden "view" field. raw -> the
+  existing single-textarea parse. form -> buildJobFromForm
+  assembles a storage.Job from the per-field inputs.
+  Either path ends in storage.SaveJob so the cycle check
+  + flock + write semantics are identical.
+
+- [x] 17.1 Two tabs on the create/edit page driven by
+         ?view=. Form view renders inputs for every top-
+         level schema item, with a <select> dropdown for
+         trigger.type. POST detects the view via a hidden
+         field and reconstructs the spec accordingly;
+         both paths exit through storage.SaveJob.
+         Done: jobedit.html renders editor-tabs (Raw YAML
+         + Form), driven by .View ("raw" default vs
+         "form"). Form view has labeled inputs for name
+         (readonly on edit), description, node_label,
+         timeout, retries, retention.{max_builds, max_age}
+         + upstream (textarea, one job name per line) +
+         three trigger rows (type <select> with empty/cron/
+         webhook/scm + config text input) + steps_yaml,
+         parameters_yaml, axis_yaml, triggers_downstream_
+         yaml textareas for the deep-list fragments.
+         server.go gains normalizeView + parseJobFromRequest
+         which routes raw POSTs to the existing
+         parseJobSpec path and form POSTs to the new
+         buildJobFromForm helper (jobform_builder.go).
+         buildJobFromForm validates each field, refuses
+         trigger types outside knownTriggerTypes,
+         unmarshals each YAML-fragment textarea into its
+         concrete slice type so a syntax error surfaces a
+         field-level reason. Template gains FuncMap
+         entries (inc, triggerTypeFor, triggerConfigFor,
+         stepsYAML, parametersYAML, axisYAML,
+         triggersDownstreamYAML); New() registers them on
+         the root template so per-render Clone+ParseFS
+         inherits the funcs. Tabs are plain hyperlinks so
+         a no-JS browser sees the editor unchanged. The
+         deep-list fragments stay as textareas in V1; a
+         future iteration can break parameters/steps/axis/
+         triggers_downstream into repeatable rows with
+         add/remove buttons. Gates:
+         TestJobEdit_BothViewTabsLinked,
+         TestJobEdit_FormViewHasFieldPerSchemaItem,
+         TestJobEdit_FormViewTriggerTypeIsDropdown
+         (asserts both the <select> and the cron / webhook
+         / scm option values),
+         TestJobEdit_FormViewSubmitBuildsSpec (POST with
+         every scalar + trigger + steps_yaml, then LoadJob
+         and verify each field round-tripped).
+
+Phase 17 complete; Current Phase remains Phase 17 for any
 follow-up polish iterations.
 
 ## Backlog (not in main flow)

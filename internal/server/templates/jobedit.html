@@ -1,16 +1,114 @@
 {{ define "content" }}
 <section class="panel">
 <h2>{{ if .IsNew }}New job{{ else }}Edit job: {{ .Name }}{{ end }}</h2>
+
+<nav class="editor-tabs">
+<a href="?view=raw" class="tab {{ if ne .View "form" }}tab-active{{ end }}">Raw YAML</a>
+<a href="?view=form" class="tab {{ if eq .View "form" }}tab-active{{ end }}">Form</a>
+</nav>
+
 {{ if .Error }}<p class="error">{{ .Error }}</p>{{ end }}
-<form method="POST" action="{{ .Action }}">
-<label for="spec">Spec (YAML)</label>
-<textarea id="spec" name="spec" rows="20" cols="80" required>{{ .Spec }}</textarea>
+
+{{ if eq .View "form" }}
+
+<form method="POST" action="{{ .Action }}" class="job-form">
+<input type="hidden" name="view" value="form">
+
+<label for="f-name">Name</label>
+<input type="text" id="f-name" name="name" required
+       value="{{ if .Job }}{{ .Job.Name }}{{ else }}{{ .Name }}{{ end }}"
+       {{ if not .IsNew }}readonly{{ end }}>
+
+<label for="f-desc">Description</label>
+<textarea id="f-desc" name="description" rows="3">{{ if .Job }}{{ .Job.Description }}{{ end }}</textarea>
+
+<label for="f-node-label">Node label</label>
+<input type="text" id="f-node-label" name="node_label"
+       value="{{ if .Job }}{{ .Job.NodeLabel }}{{ end }}">
+
+<label for="f-timeout">Timeout</label>
+<input type="text" id="f-timeout" name="timeout"
+       placeholder="Go duration string like 5m, 1h"
+       value="{{ if .Job }}{{ .Job.Timeout }}{{ end }}">
+
+<label for="f-retries">Retries</label>
+<input type="number" id="f-retries" name="retries" min="0"
+       value="{{ if .Job }}{{ .Job.Retries }}{{ else }}0{{ end }}">
+
+<fieldset class="form-group">
+<legend>Retention</legend>
+<label for="f-rmb">Max builds</label>
+<input type="number" id="f-rmb" name="retention_max_builds" min="0"
+       placeholder="e.g. 30"
+       value="{{ if and .Job .Job.Retention }}{{ .Job.Retention.MaxBuilds }}{{ end }}">
+<label for="f-rma">Max age</label>
+<input type="text" id="f-rma" name="retention_max_age"
+       placeholder="Go duration like 720h"
+       value="{{ if and .Job .Job.Retention }}{{ .Job.Retention.MaxAge }}{{ end }}">
+</fieldset>
+
+<label for="f-upstream">Upstream (one job name per line)</label>
+<textarea id="f-upstream" name="upstream" rows="3">{{ if .Job }}{{ range .Job.Upstream }}{{ . }}
+{{ end }}{{ end }}</textarea>
+
+<fieldset class="form-group">
+<legend>Triggers</legend>
+<p class="muted">Up to three trigger rows. Leave a row's type blank to disable it. Use the raw YAML view if you need more rows.</p>
+{{ range $i := .TriggerSlots }}
+<div class="trigger-row">
+<label for="trigger_{{ $i }}_type">Trigger {{ inc $i }} type</label>
+<select id="trigger_{{ $i }}_type" name="trigger_{{ $i }}_type">
+<option value="">(none)</option>
+{{ $sel := triggerTypeFor $.Job $i }}
+{{ range $.TriggerTypeOptions }}
+<option value="{{ . }}" {{ if eq $sel . }}selected{{ end }}>{{ . }}</option>
+{{ end }}
+</select>
+<label for="trigger_{{ $i }}_config">Trigger {{ inc $i }} config</label>
+<input type="text" id="trigger_{{ $i }}_config" name="trigger_{{ $i }}_config"
+       placeholder='cron: "0 * * * *"  webhook/scm: opaque string'
+       value="{{ triggerConfigFor $.Job $i }}">
+</div>
+{{ end }}
+</fieldset>
+
+<label for="f-steps">Steps (YAML fragment)</label>
+<textarea id="f-steps" name="steps_yaml" rows="8" placeholder="- name: build
+  shell: make all">{{ stepsYAML .Job }}</textarea>
+
+<label for="f-params">Parameters (YAML fragment)</label>
+<textarea id="f-params" name="parameters_yaml" rows="4">{{ parametersYAML .Job }}</textarea>
+
+<label for="f-axis">Axis (YAML fragment)</label>
+<textarea id="f-axis" name="axis_yaml" rows="4">{{ axisYAML .Job }}</textarea>
+
+<label for="f-td">Triggers downstream (YAML fragment)</label>
+<textarea id="f-td" name="triggers_downstream_yaml" rows="4">{{ triggersDownstreamYAML .Job }}</textarea>
+
+<div class="form-actions">
 <button type="submit">{{ if .IsNew }}Create{{ else }}Save{{ end }}</button>
 <a href="/jobs">Cancel</a>
+</div>
+</form>
+
+{{ else }}
+
+<form method="POST" action="{{ .Action }}">
+<input type="hidden" name="view" value="raw">
+<label for="spec">Spec (YAML)</label>
+<textarea id="spec" name="spec" rows="20" cols="80" required>{{ .Spec }}</textarea>
+<div class="form-actions">
+<button type="submit">{{ if .IsNew }}Create{{ else }}Save{{ end }}</button>
+<a href="/jobs">Cancel</a>
+</div>
 </form>
 <p class="muted">Expected schema: name, description, node_label,
 timeout (Go duration string like "5m"), retries, triggers,
-parameters, steps, axis. See docs/STORAGE.md for the full
-shape.</p>
+parameters, steps, axis, retention, upstream,
+triggers_downstream. See docs/STORAGE.md for the full shape.
+Prefer the <a href="?view=form">Form view</a> if you would
+rather not hand-edit YAML.</p>
+
+{{ end }}
 </section>
 {{ end }}

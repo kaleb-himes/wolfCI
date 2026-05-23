@@ -1,0 +1,246 @@
+package server
+
+/* buildJobFromForm assembles a storage.Job from the Phase
+ * 17.1 form view's per-field inputs. The form is one input
+ * per top-level schema item; nested lists with deep shape
+ * (parameters / steps / axis / triggers_downstream) come in
+ * as YAML-fragment textareas so the V1 form does not have
+ * to manage repeating UI rows for everything. Triggers are
+ * a 3-row exception with a type dropdown - the canonical
+ * "finite set of options" field the operator asked for.
+ */
+
+import (
+    "fmt"
+    "html/template"
+    "net/http"
+    "strconv"
+    "strings"
+
+    "gopkg.in/yaml.v3"
+
+    "github.com/kaleb-himes/wolfCI/internal/storage"
+)
+
+/* jobFormFuncs is the template.FuncMap the create/edit page
+ * uses. Registered once at server New so every page render
+ * sees the same set; per-page Clone+ParseFS inherits them.
+ */
+func jobFormFuncs() template.FuncMap {
+    return template.FuncMap{
+        "inc": func(i int) int { return i + 1 },
+        "triggerTypeFor": func(j *storage.Job, idx int) string {
+            if j == nil || idx >= len(j.Triggers) {
+                return ""
+            }
+            return j.Triggers[idx].Type
+        },
+        "triggerConfigFor": func(j *storage.Job, idx int) string {
+            if j == nil || idx >= len(j.Triggers) || j.Triggers[idx].Config == nil {
+                return ""
+            }
+            t := j.Triggers[idx]
+            if v, ok := t.Config["schedule"]; ok {
+                return v
+            }
+            if v, ok := t.Config["config"]; ok {
+                return v
+            }
+            /* Fallback: pick any single value so an
+             * operator-typed key still surfaces.
+             */
+            for _, v := range t.Config {
+                return v
+            }
+            return ""
+        },
+        "stepsYAML":              func(j *storage.Job) string { return marshalListFragment(jobStepsOrNil(j)) },
+        "parametersYAML":         func(j *storage.Job) string { return marshalListFragment(jobParamsOrNil(j)) },
+        "axisYAML":               func(j *storage.Job) string { return marshalListFragment(jobAxisOrNil(j)) },
+        "triggersDownstreamYAML": func(j *storage.Job) string { return marshalListFragment(jobTDOrNil(j)) },
+    }
+}
+
+func jobStepsOrNil(j *storage.Job) interface{} {
+    if j == nil || len(j.Steps) == 0 {
+        return nil
+    }
+    return j.Steps
+}
+func jobParamsOrNil(j *storage.Job) interface{} {
+    if j == nil || len(j.Parameters) == 0 {
+        return nil
+    }
+    return j.Parameters
+}
+func jobAxisOrNil(j *storage.Job) interface{} {
+    if j == nil || len(j.Axis) == 0 {
+        return nil
+    }
+    return j.Axis
+}
+func jobTDOrNil(j *storage.Job) interface{} {
+    if j == nil || len(j.TriggersDownstream) == 0 {
+        return nil
+    }
+    return j.TriggersDownstream
+}
+
+/* marshalListFragment renders a single list as a YAML
+ * fragment for the form's textareas. yaml.Marshal of a slice
+ * emits "- item\n- item\n" form which is what an operator
+ * expects to see (and what buildJobFromForm reads back).
+ * Empty or nil input renders empty so the textarea is blank
+ * rather than showing "null".
+ */
+func marshalListFragment(v interface{}) string {
+    if v == nil {
+        return ""
+    }
+    data, err := yaml.Marshal(v)
+    if err != nil {
+        return ""
+    }
+    return strings.TrimRight(string(data), "\n")
+}
+
+/* knownTriggerTypes is the set of values the trigger.type
+ * dropdown offers. Empty selects no trigger in that row.
+ * Anything outside this list is refused at parse time so
+ * the dropdown stays the canonical entry point.
+ */
+var knownTriggerTypes = []string{"cron", "webhook", "scm"}
+
+/* formTriggerRows is how many trigger slots the form
+ * renders. Operators who need more rows can drop down to
+ * the raw YAML view or extend this constant later.
+ */
+const formTriggerRows = 3
+
+func buildJobFromForm(r *http.Request) (*storage.Job, error) {
+    if err := r.ParseForm(); err != nil {
+        return nil, fmt.Errorf("parse form: %w", err)
+    }
+    job := &storage.Job{
+        Name:        strings.TrimSpace(r.FormValue("name")),
+        Description: r.FormValue("description"),
+        NodeLabel:   strings.TrimSpace(r.FormValue("node_label")),
+        Timeout:     strings.TrimSpace(r.FormValue("timeout")),
+    }
+    if job.Name == "" {
+        return nil, fmt.Errorf("name is required")
+    }
+    if v := strings.TrimSpace(r.FormValue("retries")); v != "" {
+        n, err := strconv.Atoi(v)
+        if err != nil {
+            return nil, fmt.Errorf("retries: %w", err)
+        }
+        job.Retries = n
+    }
+
+    /* Retention is optional; the block is set only when at
+     * least one of the two sub-fields was filled in.
+     */
+    mb := strings.TrimSpace(r.FormValue("retention_max_builds"))
+    ma := strings.TrimSpace(r.FormValue("retention_max_age"))
+    if mb != "" || ma != "" {
+        ret := &storage.Retention{MaxAge: ma}
+        if mb != "" {
+            n, err := strconv.Atoi(mb)
+            if err != nil {
+                return nil, fmt.Errorf("retention_max_builds: %w", err)
+            }
+            ret.MaxBuilds = n
+        }
+        job.Retention = ret
+    }
+
+    /* Upstream is one job name per line. Blank lines are
+     * dropped so an operator can format the textarea with
+     * blank padding without poisoning the list.
+     */
+    if v := r.FormValue("upstream"); strings.TrimSpace(v) != "" {
+        for _, line := range strings.Split(v, "\n") {
+            line = strings.TrimSpace(line)
+            if line != "" {
+                job.Upstream = append(job.Upstream, line)
+            }
+        }
+    }
+
+    /* Trigger rows: empty type drops the row, otherwise
+     * the type must be one of the known options.
+     */
+    for i := 0; i < formTriggerRows; i++ {
+        t := strings.TrimSpace(
+            r.FormValue(fmt.Sprintf("trigger_%d_type", i)))
+        if t == "" {
+            continue
+        }
+        if !contains(knownTriggerTypes, t) {
+            return nil, fmt.Errorf("trigger_%d_type %q is "+
+                "not one of %v", i, t, knownTriggerTypes)
+        }
+        cfg := strings.TrimSpace(
+            r.FormValue(fmt.Sprintf("trigger_%d_config", i)))
+        trig := storage.Trigger{Type: t}
+        if cfg != "" {
+            /* "cron" carries the schedule under "schedule";
+             * other types use a free-form config under
+             * "config" so we do not silently lose what the
+             * operator typed.
+             */
+            key := "config"
+            if t == "cron" {
+                key = "schedule"
+            }
+            trig.Config = map[string]string{key: cfg}
+        }
+        job.Triggers = append(job.Triggers, trig)
+    }
+
+    /* Deep-list YAML fragments. Each unmarshal is into the
+     * concrete slice type so a syntax error fails the form
+     * with the schema-level reason instead of a wrapping
+     * "could not parse" string.
+     */
+    if v := strings.TrimSpace(r.FormValue("steps_yaml")); v != "" {
+        var steps []storage.Step
+        if err := yaml.Unmarshal([]byte(v), &steps); err != nil {
+            return nil, fmt.Errorf("steps_yaml: %w", err)
+        }
+        job.Steps = steps
+    }
+    if v := strings.TrimSpace(r.FormValue("parameters_yaml")); v != "" {
+        var params []storage.Parameter
+        if err := yaml.Unmarshal([]byte(v), &params); err != nil {
+            return nil, fmt.Errorf("parameters_yaml: %w", err)
+        }
+        job.Parameters = params
+    }
+    if v := strings.TrimSpace(r.FormValue("axis_yaml")); v != "" {
+        var axis []storage.AxisDimension
+        if err := yaml.Unmarshal([]byte(v), &axis); err != nil {
+            return nil, fmt.Errorf("axis_yaml: %w", err)
+        }
+        job.Axis = axis
+    }
+    if v := strings.TrimSpace(
+        r.FormValue("triggers_downstream_yaml")); v != "" {
+        var td []storage.TriggerSpec
+        if err := yaml.Unmarshal([]byte(v), &td); err != nil {
+            return nil, fmt.Errorf("triggers_downstream_yaml: %w", err)
+        }
+        job.TriggersDownstream = td
+    }
+    return job, nil
+}
+
+func contains(haystack []string, needle string) bool {
+    for _, h := range haystack {
+        if h == needle {
+            return true
+        }
+    }
+    return false
+}
