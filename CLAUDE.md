@@ -2,7 +2,8 @@
 
 This file is loaded into every Claude Code session that works in this
 repo. It is intentionally compact. The full working plan lives in
-PLAN.md and is the source of truth for what to do next.
+PLAN.md and is the source of truth for what to do next; the running
+archive of finished work lives in PLAN.historic.
 
 ## Mission
 
@@ -25,15 +26,22 @@ Read these every session before acting. They come from the project
 owner and override defaults.
 
 1. Operate from PLAN.md on disk. Each /loop iteration picks the
-   next unchecked task, completes it, marks it done, commits,
+   next unchecked task, completes it, MOVES THE COMPLETED TASK
+   (entire bullet, including its sub-bullets) FROM PLAN.md TO
+   PLAN.historic instead of marking it `[x]` in place, commits,
    pushes to origin/main, clears its working state, and starts
-   the next iteration on the new next-unchecked task. The loop
-   keeps looping until PLAN.md has no unchecked tasks left, the
-   user interrupts, or a step fails (test red, ASCII gate, push
+   the next iteration on the new next-unchecked task. When all
+   top-level tasks of a phase have moved out, the phase header
+   and any remaining phase-level context move to PLAN.historic
+   too, and "## Current Phase" advances. The loop keeps looping
+   until PLAN.md has no unchecked tasks left, the user
+   interrupts, or a step fails (test red, ASCII gate, push
    rejected) - in which case stop and surface the failure rather
    than skipping ahead. Resumability is still the point: a fresh
    session with no chat context must be able to pick up by
-   reading CLAUDE.md and PLAN.md alone.
+   reading CLAUDE.md and PLAN.md alone. PLAN.historic is
+   reference material for the audit trail, not part of the
+   next-action selection.
 2. Test-Driven Development. For every new feature, write a test that
    FAILS first, then implement until it passes. No exceptions.
 3. ASCII only. No emdash, no endash, no smart quotes, no UTF-8 bytes
@@ -158,9 +166,19 @@ owner and override defaults.
 5. Implement the smallest change that makes the test pass.
 6. Run the full test suite.
 7. Run scripts/check-ascii.sh.
-8. Update PLAN.md: change `[ ]` to `[x]` for the completed task.
-   If the phase is now fully checked, update "## Current Phase" to
-   point at the next phase.
+8. Update PLAN.md: REMOVE the completed task bullet (with all of
+   its sub-bullets) from PLAN.md and APPEND it to PLAN.historic
+   under the matching `## Phase N - <name>` section there
+   (create that section if it does not yet exist, in numeric
+   order). Do NOT change `[ ]` to `[x]` in PLAN.md - the
+   completed bullet moves out rather than turning into an
+   `[x]`. The only `[x]` items that legitimately stay in PLAN.md
+   are sub-bullets of an open parent that exist as historical
+   context for the work still in flight. When a phase no longer
+   has any unchecked top-level tasks, MOVE the phase header
+   (and any unrelocated context paragraphs) to PLAN.historic
+   too, and update "## Current Phase" to point at the next
+   phase that still has open work.
 9. Stage and commit with a single-author trailer (kaleb-himes only).
    No "Co-Authored-By" lines.
 10. Merge to main locally (already there if you have not branched)
@@ -201,7 +219,8 @@ owner and override defaults.
 ```
 wolfCI/
   CLAUDE.md              this file
-  PLAN.md                durable plan; updated every loop
+  PLAN.md                durable plan; only unfinished work
+  PLAN.historic          running archive of finished work
   README.md
   LICENSE                GPL-3.0
   go.mod                 Go module (path: github.com/kaleb-himes/wolfCI)
@@ -234,6 +253,7 @@ wolfCI/
 ## Pointers
 
 - Next work to do: see PLAN.md, section "Current Phase".
+- Audit trail of finished work: see PLAN.historic.
 - Build instructions: scripts/build.sh.
 - ASCII gate: scripts/check-ascii.sh.
 - Security model: docs/SECURITY.md (written in Phase 3).

@@ -60,3 +60,10 @@ third_party/wolfssl/aclocal.m4
 
 # Claude Code session-local state
 .claude/
+
+# KH temp files:
+tmp-kh-do-not-commit/
+
+# Local clone of wolfSSL's private testing repo. Reference material
+# for Phase 18 Jenkinsfile parity; never committed.
+third_party/testing/
