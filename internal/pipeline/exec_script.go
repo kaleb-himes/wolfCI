@@ -46,6 +46,8 @@ import (
     "strconv"
     "strings"
     "sync"
+
+    "github.com/kaleb-himes/wolfCI/internal/credstore"
 )
 
 /* ----- value model ------------------------------------------ */
@@ -212,6 +214,26 @@ type scriptRuntime struct {
     workspace    string
     stashDir     string
     artifactsDir string
+
+    /* creds is the credential-store handle the 18.18+
+     * withCredentials step uses to unseal secrets at binding
+     * time. nil when the caller didn't wire one. */
+    creds *credstore.Store
+
+    /* secretMu guards envExtra and masks, which
+     * withCredentials pushes onto a stack for the duration
+     * of a closure body and pops on exit. Pop is keyed on
+     * the saved length recorded at push, so nested
+     * withCredentials blocks restore in LIFO order. */
+    secretMu sync.Mutex
+    /* envExtra is the list of KEY=value entries that the
+     * runtime passes to executor.Sh for the wrapped block.
+     * Outside withCredentials it stays empty. */
+    envExtra []string
+    /* masks holds substrings that nativeSh redacts from any
+     * captured shell output before forwarding it to the
+     * echo buffer. Same lifetime as envExtra. */
+    masks []string
 }
 
 func newScriptRuntime(executor Executor) *scriptRuntime {
@@ -226,12 +248,78 @@ func newScriptRuntime(executor Executor) *scriptRuntime {
         rt.workspace = le.Workspace
         rt.stashDir = le.StashDir
         rt.artifactsDir = le.ArtifactsDir
+        rt.creds = le.Creds
     }
     rt.registerNatives()
     return rt
 }
 
+/* snapshotEnv returns a copy of the runtime's current
+ * extra-env stack so the caller can pass it to executor.Sh
+ * without holding the lock during the spawn. */
+func (rt *scriptRuntime) snapshotEnv() []string {
+    rt.secretMu.Lock()
+    defer rt.secretMu.Unlock()
+    if len(rt.envExtra) == 0 {
+        return nil
+    }
+    out := make([]string, len(rt.envExtra))
+    copy(out, rt.envExtra)
+    return out
+}
+
+/* maskOutput replaces every active mask value with a fixed
+ * '********' redaction. Empty masks are skipped so a binding
+ * with an empty secret never wipes every byte of the log. */
+func (rt *scriptRuntime) maskOutput(s string) string {
+    rt.secretMu.Lock()
+    masks := append([]string(nil), rt.masks...)
+    rt.secretMu.Unlock()
+    for _, m := range masks {
+        if m == "" {
+            continue
+        }
+        s = strings.ReplaceAll(s, m, "********")
+    }
+    return s
+}
+
+/* pushSecrets records the current env/masks lengths and
+ * appends the supplied bindings. The returned snapshot is
+ * passed to popSecrets so withCredentials can restore even
+ * on early returns / panics via defer. */
+type secretFrame struct {
+    envLen   int
+    masksLen int
+}
+
+func (rt *scriptRuntime) pushSecrets(env, masks []string) secretFrame {
+    rt.secretMu.Lock()
+    defer rt.secretMu.Unlock()
+    frame := secretFrame{
+        envLen:   len(rt.envExtra),
+        masksLen: len(rt.masks),
+    }
+    rt.envExtra = append(rt.envExtra, env...)
+    rt.masks = append(rt.masks, masks...)
+    return frame
+}
+
+func (rt *scriptRuntime) popSecrets(frame secretFrame) {
+    rt.secretMu.Lock()
+    defer rt.secretMu.Unlock()
+    rt.envExtra = rt.envExtra[:frame.envLen]
+    rt.masks = rt.masks[:frame.masksLen]
+}
+
 func (rt *scriptRuntime) appendEcho(msg string) {
+    /* Mask any active secrets BEFORE they land in the buffer
+     * so every echo path (native echo, sh output, future
+     * step natives) goes through the same redaction. The
+     * lock-order convention is secretMu first, then echoMu;
+     * maskOutput drops secretMu before we acquire echoMu so
+     * the two never overlap. */
+    msg = rt.maskOutput(msg)
     rt.echoMu.Lock()
     defer rt.echoMu.Unlock()
     rt.echoBuf = append(rt.echoBuf, msg)

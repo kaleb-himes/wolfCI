@@ -91,15 +91,6 @@ owner at the start of the phase):
   github-hook-for-GITScm-polling, poll-SCM, trigger-builds-
   remotely.
 
-- [ ] 18.18 Step library: withCredentials (secret-text only for
-        this task) (internal/pipeline/steps_creds.go). Failing
-        test: TestStep_WithCredentialsSecretText loads a
-        secret-text cred from internal/credstore (created
-        in-memory), wraps a sh step in
-        `withCredentials([string(credentialsId: 'c1',
-        variable: 'TOKEN')]) { sh 'echo $TOKEN' }`, asserts the
-        sh sees the unsealed secret in its environment and
-        that the secret is masked in the log output.
 - [ ] 18.19 wolfssh SSH agent investigation. Failing test
         (third_party/go-wolfssl/wolfssh/agent_test.go in the
         patch series): TestAgent_AddListSign loads an Ed25519

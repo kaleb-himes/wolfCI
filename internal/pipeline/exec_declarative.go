@@ -27,7 +27,10 @@ import (
     "bytes"
     "context"
     "fmt"
+    "os"
     "os/exec"
+
+    "github.com/kaleb-himes/wolfCI/internal/credstore"
 )
 
 /* BuildStatus enumerates the terminal states a build, stage,
@@ -88,11 +91,17 @@ type StepRun struct {
  */
 type Executor interface {
     /* Sh runs script under /bin/sh and returns its exit code
-     * and combined stdout+stderr. err is non-nil only on
-     * infrastructure failures (process couldn't be spawned,
-     * killed by signal); a non-zero exit code is reported via
-     * the int return, not via err. */
-    Sh(ctx context.Context, script string) (int, string, error)
+     * and combined stdout+stderr. extraEnv carries env
+     * additions ("KEY=value" entries) that the 18.18+
+     * withCredentials step uses to inject unsealed secrets
+     * into the wrapped sh; the executor merges extraEnv on
+     * top of its own environment so the shell sees them.
+     * err is non-nil only on infrastructure failures
+     * (process couldn't be spawned, killed by signal); a
+     * non-zero exit code is reported via the int return,
+     * not via err. */
+    Sh(ctx context.Context, script string,
+        extraEnv []string) (int, string, error)
 }
 
 /* LocalExecutor implements Executor by invoking /bin/sh on
@@ -119,6 +128,15 @@ type LocalExecutor struct {
     Workspace    string
     StashDir     string
     ArtifactsDir string
+
+    /* Creds is the credential store the 18.18+
+     * withCredentials step queries to unseal secrets at
+     * binding time. The runtime inherits the pointer in
+     * newScriptRuntime so the step-library natives can
+     * reach it. Nil means "no credstore wired" - any step
+     * that needs one errors out with an actionable message
+     * rather than panicking. */
+    Creds *credstore.Store
 }
 
 /* Sh runs script under /bin/sh -c and captures combined
@@ -126,12 +144,19 @@ type LocalExecutor struct {
  * not an error; only spawn/IO failures produce err != nil.
  * When Workspace is set the command runs with that as its
  * working directory; otherwise the process's cwd is used.
+ * extraEnv ("KEY=value" entries) is appended on top of the
+ * process environment so withCredentials-style secret
+ * injection lands inside the shell without polluting the
+ * parent process's env.
  */
 func (e *LocalExecutor) Sh(ctx context.Context,
-    script string) (int, string, error) {
+    script string, extraEnv []string) (int, string, error) {
     cmd := exec.CommandContext(ctx, "/bin/sh", "-c", script)
     if e.Workspace != "" {
         cmd.Dir = e.Workspace
+    }
+    if len(extraEnv) > 0 {
+        cmd.Env = append(os.Environ(), extraEnv...)
     }
     var buf bytes.Buffer
     cmd.Stdout = &buf

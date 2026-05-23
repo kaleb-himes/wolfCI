@@ -65,6 +65,8 @@ func registerCoreSteps(rt *scriptRuntime) {
         &sNative{name: "script", fn: nativeScript})
     /* 18.17 workspace step library. */
     registerWorkspaceSteps(rt)
+    /* 18.18 credential bindings step library. */
+    registerCredsSteps(rt)
 }
 
 /* ----- echo ------------------------------------------------- */
@@ -127,18 +129,23 @@ func nativeSh(ctx context.Context, rt *scriptRuntime,
         return nil, fmt.Errorf(
             "sh: arg must be string or map (got %T)", args[0])
     }
-    code, out, err := rt.executor.Sh(ctx, script)
+    code, out, err := rt.executor.Sh(ctx, script,
+        rt.snapshotEnv())
     if err != nil {
         return nil, err
     }
     rt.lastExitCode = code
     /* returnStdout suppresses the build-log echo - the caller
-     * is capturing the bytes. */
+     * is capturing the bytes. The captured value is masked
+     * only when it's about to land in the echo buffer; the
+     * raw value flows back to the script so a subsequent
+     * `echo` of it (or assignment) sees the real bytes. */
     if returnStdout {
         return &sStr{v: strings.TrimRight(out, "\n")}, nil
     }
     if out != "" {
-        rt.appendEcho(strings.TrimRight(out, "\n"))
+        rt.appendEcho(rt.maskOutput(
+            strings.TrimRight(out, "\n")))
     }
     if returnStatus {
         return &sNum{v: int64(code)}, nil

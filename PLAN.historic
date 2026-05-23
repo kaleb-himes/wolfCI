@@ -3825,4 +3825,68 @@ completed and were moved here:
         implicit cleanup on closure exit).
 
 
+- [x] 18.18 Step library: withCredentials (secret-text only
+        for this task) (internal/pipeline/steps_creds.go).
+        Failing test: TestStep_WithCredentialsSecretText
+        loads a secret-text cred from internal/credstore
+        (created in-memory), wraps a sh step in
+        `withCredentials([string(credentialsId: 'c1',
+        variable: 'TOKEN')]) { sh 'echo $TOKEN' }`, asserts
+        the sh sees the unsealed secret in its environment
+        and that the secret is masked in the log output.
+        Done: internal/pipeline/steps_creds.go adds
+        nativeStringCred (the Groovy `string(credentialsId:
+        ..., variable: ...)` binding-descriptor constructor)
+        and nativeWithCredentials, registered via
+        registerCredsSteps. Wiring changes that landed with
+        the step:
+          - The Executor.Sh signature now takes an
+            extraEnv []string parameter so withCredentials
+            can inject KEY=value pairs into the wrapped sh
+            without mutating shared state; LocalExecutor.Sh
+            appends extraEnv on top of os.Environ when
+            non-empty (and otherwise inherits the process
+            env unchanged so the 18.14-18.17 test surface
+            stays intact).
+          - LocalExecutor gained a Creds *credstore.Store
+            field; newScriptRuntime inherits it onto a
+            matching rt.creds handle. Nil means "no
+            credstore wired" - any step that needs creds
+            errors out with an actionable message.
+          - scriptRuntime gained a secretMu-protected secret
+            stack: envExtra []string ("KEY=value" entries
+            forwarded to executor.Sh) and masks []string
+            (substrings redacted from the build log).
+            withCredentials uses pushSecrets / popSecrets
+            (returning a secretFrame the defer pops in LIFO
+            order) so nested bindings compose and early
+            returns / throws never leak the secret past the
+            block.
+          - Log masking moved into appendEcho so every path
+            that writes to the build log (sh combined
+            stdout, native echo, future step natives) goes
+            through one redaction pass via maskOutput. Mask
+            substitution replaces each active secret with
+            '********'; the captured raw value still flows
+            back to the script (so a sh(returnStdout: true)
+            assignment receives the real bytes), but the
+            moment any byte lands in the log buffer it's
+            scrubbed.
+        nativeWithCredentials walks the bindings list,
+        rejects non-string binding types with an actionable
+        message (18.18 is secret-text only), Gets the
+        credstore record, json-unmarshals the
+        SecretTextPayload, and pushes both the env entry
+        (variable=secret) and the mask substring onto the
+        runtime stack before invokeClosure runs the trailing
+        body. Gates: TestStep_WithCredentialsSecretText (the
+        spec's name; sh wrote the raw secret into a
+        workspace file we read directly to prove env
+        injection worked, and the build-log Output contains
+        'got=' without the raw secret to prove masking
+        worked) and TestStep_WithCredentials_UnknownCred (a
+        missing cred id surfaces BuildFailure rather than a
+        panic).
+
+
 End of PLAN.historic.
