@@ -85,6 +85,96 @@
 <label for="f-td">Triggers downstream (YAML fragment)</label>
 <textarea id="f-td" name="triggers_downstream_yaml" rows="4">{{ triggersDownstreamYAML .Job }}</textarea>
 
+<fieldset class="form-group">
+<legend>GitHub Pull Request Builder</legend>
+<p class="muted">Poll a GitHub repo for open PRs and enqueue a build per
+PR. Leave api_credentials_id blank to disable the trigger.</p>
+
+<label for="f-ghprb-creds">API credentials</label>
+<select id="f-ghprb-creds" name="api_credentials_id">
+<option value="">(none)</option>
+{{ $selectedAPI := ghprbAPICredsFor .Job }}
+{{ range .CredentialOptions }}
+<option value="{{ . }}" {{ if eq $selectedAPI . }}selected{{ end }}>{{ . }}</option>
+{{ end }}
+</select>
+
+<label for="f-ghprb-url">GitHub project URL</label>
+<input type="text" id="f-ghprb-url" name="gh_project_url"
+       placeholder="https://github.com/owner/repo/"
+       value="{{ ghprbGHProjectURLFor .Job }}">
+
+<label for="f-ghprb-admins">Admin users (one GitHub login per line)</label>
+<textarea id="f-ghprb-admins" name="admin_users" rows="3"
+          placeholder="alice
+bob">{{ ghprbAdminUsersFor .Job }}</textarea>
+
+<label for="f-ghprb-branches">Branches to build (one refspec per line)</label>
+<textarea id="f-ghprb-branches" name="branches_to_build" rows="3"
+          placeholder="*/master
+*/release-*">{{ ghprbBranchesFor .Job }}</textarea>
+
+<label for="f-ghprb-poll">Poll interval (seconds)</label>
+<input type="number" id="f-ghprb-poll" name="poll_interval_seconds"
+       min="0" value="{{ ghprbPollIntervalFor .Job }}"
+       placeholder="300">
+</fieldset>
+
+<fieldset class="form-group">
+<legend>Pipeline script from SCM</legend>
+<p class="muted">Fetch the pipeline script from a git repo at build start.
+Leave repo_url blank to disable.</p>
+
+<label for="f-scm-repo">Repository URL</label>
+<input type="text" id="f-scm-repo" name="repo_url"
+       placeholder="git@github.com:owner/repo.git"
+       value="{{ scmRepoURLFor .Job }}">
+
+<label for="f-scm-creds">Credentials</label>
+<select id="f-scm-creds" name="credentials_id">
+<option value="">(none)</option>
+{{ $selectedSCM := scmCredsFor .Job }}
+{{ range .CredentialOptions }}
+<option value="{{ . }}" {{ if eq $selectedSCM . }}selected{{ end }}>{{ . }}</option>
+{{ end }}
+</select>
+
+<label for="f-scm-branch">Branch specifier</label>
+<input type="text" id="f-scm-branch" name="branch_specifier"
+       placeholder="*/master"
+       value="{{ scmBranchFor .Job }}">
+
+<label for="f-scm-script">Script path</label>
+<input type="text" id="f-scm-script" name="script_path"
+       placeholder="Jenkins/master-job/PRB.Jenkinsfile"
+       value="{{ scmScriptPathFor .Job }}">
+
+<label class="checkbox-row" for="f-scm-light">
+<input type="checkbox" id="f-scm-light" name="lightweight_checkout"
+       {{ if scmLightweightFor .Job }}checked{{ end }}>
+Lightweight checkout (sparse, blob-filtered)
+</label>
+</fieldset>
+
+<fieldset class="form-group">
+<legend>Build environment</legend>
+<label class="checkbox-row" for="f-be-prep">
+<input type="checkbox" id="f-be-prep" name="prepare_environment_for_run"
+       {{ if buildEnvPrep .Job }}checked{{ end }}>
+Prepare an environment for the run
+</label>
+<label class="checkbox-row" for="f-be-jenv">
+<input type="checkbox" id="f-be-jenv" name="keep_jenkins_environment_variables"
+       {{ if buildEnvKeepJEnv .Job }}checked{{ end }}>
+Keep Jenkins environment variables
+</label>
+<label class="checkbox-row" for="f-be-jbuild">
+<input type="checkbox" id="f-be-jbuild" name="keep_jenkins_build_variables"
+       {{ if buildEnvKeepBuild .Job }}checked{{ end }}>
+Keep Jenkins build variables
+</label>
+</fieldset>
+
 <div class="form-actions">
 <button type="submit">{{ if .IsNew }}Create{{ else }}Save{{ end }}</button>
 <a href="/jobs">Cancel</a>

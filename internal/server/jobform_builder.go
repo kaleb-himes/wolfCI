@@ -58,7 +58,119 @@ func jobFormFuncs() template.FuncMap {
         "parametersYAML":         func(j *storage.Job) string { return marshalListFragment(jobParamsOrNil(j)) },
         "axisYAML":               func(j *storage.Job) string { return marshalListFragment(jobAxisOrNil(j)) },
         "triggersDownstreamYAML": func(j *storage.Job) string { return marshalListFragment(jobTDOrNil(j)) },
+
+        /* 18.29 GHPRB section accessors: each returns the
+         * value from the job's GitHubPRBTrigger block, or
+         * the zero value when no GHPRB is configured. The
+         * poll-interval helper substitutes the canonical
+         * 300-second default so the rendered input is never
+         * blank for a freshly-created job. */
+        "ghprbAPICredsFor": func(j *storage.Job) string {
+            if j == nil || j.GitHubPRB == nil {
+                return ""
+            }
+            return j.GitHubPRB.APICredentialsID
+        },
+        "ghprbGHProjectURLFor": func(j *storage.Job) string {
+            if j == nil || j.GitHubPRB == nil {
+                return ""
+            }
+            return j.GitHubPRB.GHProjectURL
+        },
+        "ghprbAdminUsersFor": func(j *storage.Job) string {
+            if j == nil || j.GitHubPRB == nil {
+                return ""
+            }
+            return strings.Join(j.GitHubPRB.AdminUsers, "\n")
+        },
+        "ghprbBranchesFor": func(j *storage.Job) string {
+            if j == nil || j.GitHubPRB == nil {
+                return ""
+            }
+            return strings.Join(j.GitHubPRB.BranchesToBuild, "\n")
+        },
+        "ghprbPollIntervalFor": func(j *storage.Job) int {
+            if j == nil || j.GitHubPRB == nil ||
+                j.GitHubPRB.PollIntervalSeconds == 0 {
+                return 300
+            }
+            return j.GitHubPRB.PollIntervalSeconds
+        },
+
+        /* 18.29 Pipeline-from-SCM panel accessors. Read out
+         * of the storage.Pipeline block; nil pipeline (or
+         * non-from_scm Definition) means every field is
+         * empty so the form renders blank for an operator
+         * starting from scratch. */
+        "scmRepoURLFor": func(j *storage.Job) string {
+            if scm := jobSCMOrNil(j); scm != nil {
+                return scm.RepoURL
+            }
+            return ""
+        },
+        "scmCredsFor": func(j *storage.Job) string {
+            if scm := jobSCMOrNil(j); scm != nil {
+                return scm.CredentialsID
+            }
+            return ""
+        },
+        "scmBranchFor": func(j *storage.Job) string {
+            if scm := jobSCMOrNil(j); scm != nil {
+                return scm.BranchSpecifier
+            }
+            return ""
+        },
+        "scmScriptPathFor": func(j *storage.Job) string {
+            if scm := jobSCMOrNil(j); scm != nil {
+                return scm.ScriptPath
+            }
+            return ""
+        },
+        "scmLightweightFor": func(j *storage.Job) bool {
+            if scm := jobSCMOrNil(j); scm != nil {
+                return scm.LightweightCheckout
+            }
+            return false
+        },
+
+        /* 18.28 BuildEnv checkboxes - the form rendered
+         * these via 18.27's general-options block, but the
+         * UI surface lands here so the section sits next to
+         * GHPRB / SCM. Reads the *BuildEnv block; nil yields
+         * unchecked for each. */
+        "buildEnvPrep": func(j *storage.Job) bool {
+            if j == nil || j.BuildEnv == nil {
+                return false
+            }
+            return j.BuildEnv.PrepareEnvForRun
+        },
+        "buildEnvKeepJEnv": func(j *storage.Job) bool {
+            if j == nil || j.BuildEnv == nil {
+                return false
+            }
+            return j.BuildEnv.KeepJenkinsEnvVars
+        },
+        "buildEnvKeepBuild": func(j *storage.Job) bool {
+            if j == nil || j.BuildEnv == nil {
+                return false
+            }
+            return j.BuildEnv.KeepJenkinsBuildVars
+        },
     }
+}
+
+/* jobSCMOrNil returns the storage.SCMConfig block when the
+ * job has a from_scm pipeline definition, or nil otherwise.
+ * Keeps the FuncMap helpers above to one liners that only
+ * read the populated case. */
+func jobSCMOrNil(j *storage.Job) *storage.SCMConfig {
+    if j == nil || j.Pipeline == nil {
+        return nil
+    }
+    if j.Pipeline.Definition != "from_scm" {
+        return nil
+    }
+    return j.Pipeline.SCM
 }
 
 func jobStepsOrNil(j *storage.Job) interface{} {
@@ -250,6 +362,68 @@ func buildJobFromForm(r *http.Request) (*storage.Job, error) {
             PrepareEnvForRun:     prepEnv,
             KeepJenkinsEnvVars:   keepEnv,
             KeepJenkinsBuildVars: keepBuild,
+        }
+    }
+
+    /* 18.29 GHPRB section. Empty api_credentials_id (the
+     * canonical "trigger disabled" marker) leaves
+     * job.GitHubPRB nil so a job without GHPRB
+     * configuration round-trips clean YAML. */
+    if apiCred := strings.TrimSpace(
+        r.FormValue("api_credentials_id")); apiCred != "" {
+        ghprb := &storage.GitHubPRBTrigger{
+            APICredentialsID: apiCred,
+            GHProjectURL: strings.TrimSpace(
+                r.FormValue("gh_project_url")),
+        }
+        for _, line := range strings.Split(
+            r.FormValue("admin_users"), "\n") {
+            line = strings.TrimSpace(line)
+            if line != "" {
+                ghprb.AdminUsers = append(
+                    ghprb.AdminUsers, line)
+            }
+        }
+        for _, line := range strings.Split(
+            r.FormValue("branches_to_build"), "\n") {
+            line = strings.TrimSpace(line)
+            if line != "" {
+                ghprb.BranchesToBuild = append(
+                    ghprb.BranchesToBuild, line)
+            }
+        }
+        if v := strings.TrimSpace(
+            r.FormValue("poll_interval_seconds")); v != "" {
+            n, err := strconv.Atoi(v)
+            if err != nil {
+                return nil, fmt.Errorf(
+                    "poll_interval_seconds: %w", err)
+            }
+            ghprb.PollIntervalSeconds = n
+        }
+        job.GitHubPRB = ghprb
+    }
+
+    /* 18.29 Pipeline-from-SCM panel. Empty repo_url is the
+     * canonical "disabled" marker; the block stays nil so
+     * non-pipeline jobs round-trip the same YAML they did
+     * before 18.29. */
+    if repoURL := strings.TrimSpace(
+        r.FormValue("repo_url")); repoURL != "" {
+        scm := &storage.SCMConfig{
+            RepoURL: repoURL,
+            CredentialsID: strings.TrimSpace(
+                r.FormValue("credentials_id")),
+            BranchSpecifier: strings.TrimSpace(
+                r.FormValue("branch_specifier")),
+            ScriptPath: strings.TrimSpace(
+                r.FormValue("script_path")),
+            LightweightCheckout: isFormChecked(
+                r.FormValue("lightweight_checkout")),
+        }
+        job.Pipeline = &storage.PipelineBlock{
+            Definition: "from_scm",
+            SCM:        scm,
         }
     }
 

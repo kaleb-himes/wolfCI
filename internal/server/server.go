@@ -17,6 +17,7 @@ import (
 	wolfciv1 "github.com/kaleb-himes/wolfCI/api/v1"
 	"github.com/kaleb-himes/wolfCI/internal/agentsvc"
 	"github.com/kaleb-himes/wolfCI/internal/auth"
+	"github.com/kaleb-himes/wolfCI/internal/credstore"
 	"github.com/kaleb-himes/wolfCI/internal/storage"
 )
 
@@ -78,6 +79,14 @@ type Options struct {
 	// Optional; when nil the Run button is hidden and the POST
 	// endpoint returns 501.
 	JobRunner JobRunner
+
+	// Credstore is the credential-store the 18.29+ job-edit
+	// form consults to populate its api_credentials_id /
+	// credentials_id <select> dropdowns. Optional; when nil
+	// (tests that don't exercise creds, the
+	// pre-credstore-era server config) the selects render
+	// with just the empty "(none)" option.
+	Credstore *credstore.Store
 }
 
 // JobRunner is the surface server needs from the scheduler to wire
@@ -708,6 +717,7 @@ func (s *Server) renderJobForm(w http.ResponseWriter, name,
 	for i := range slots {
 		slots[i] = i
 	}
+	credOptions := s.credentialOptions()
 	s.render(w, "jobedit.html", map[string]interface{}{
 		"Title":              title,
 		"IsNew":              isNew,
@@ -719,7 +729,30 @@ func (s *Server) renderJobForm(w http.ResponseWriter, name,
 		"Job":                job,
 		"TriggerSlots":       slots,
 		"TriggerTypeOptions": knownTriggerTypes,
+		"CredentialOptions":  credOptions,
 	})
+}
+
+// credentialOptions returns the sorted credential IDs the
+// 18.29+ job-edit form's credential <select> dropdowns
+// (api_credentials_id, credentials_id) render as options.
+// Returns an empty slice when no credstore is wired or when
+// the store is empty - the template still renders the select
+// with the leading "(none)" option in that case.
+func (s *Server) credentialOptions() []string {
+	if s.opts.Credstore == nil {
+		return nil
+	}
+	entries, err := s.opts.Credstore.List()
+	if err != nil {
+		return nil
+	}
+	out := make([]string, 0, len(entries))
+	for _, e := range entries {
+		out = append(out, e.ID)
+	}
+	sort.Strings(out)
+	return out
 }
 
 // validJobName mirrors the file-system constraint storage uses

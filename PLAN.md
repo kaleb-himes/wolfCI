@@ -91,16 +91,6 @@ owner at the start of the phase):
   github-hook-for-GITScm-polling, poll-SCM, trigger-builds-
   remotely.
 
-- [ ] 18.29 UI: form fields for GHPRB trigger and Pipeline-
-        from-SCM definition. Failing test:
-        TestJobEdit_FormViewHasGHPRBSection asserts the
-        rendered form has inputs for api_credentials_id (a
-        <select> populated from credstore), gh_project_url,
-        admin_users (multi-line textarea, one user per line),
-        branches_to_build (multi-line), poll_interval_seconds
-        (number, default 300). Also asserts a Pipeline-from-
-        SCM panel: repo_url, credentials_id, branch_specifier,
-        script_path, lightweight_checkout (checkbox).
 - [ ] 18.30 End-to-end: master-job PRB.Jenkinsfile drives a
         fake-PR fan-out. Failing test
         (tests/prb_master_job_test.go): spins up a wolfCI

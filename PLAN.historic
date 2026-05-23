@@ -4452,6 +4452,64 @@ completed and were moved here:
         writes $WOLFCI_FROM_PRIOR to a marker file, and
         asserts the marker contains from-build-1 - proving
         the prior build's exported env actually propagated.
+- [x] 18.29 UI: form fields for GHPRB trigger and Pipeline-
+        from-SCM definition. Failing test:
+        TestJobEdit_FormViewHasGHPRBSection asserts the
+        rendered form has inputs for api_credentials_id (a
+        <select> populated from credstore), gh_project_url,
+        admin_users (multi-line textarea, one user per line),
+        branches_to_build (multi-line),
+        poll_interval_seconds (number, default 300). Also
+        asserts a Pipeline-from-SCM panel: repo_url,
+        credentials_id, branch_specifier, script_path,
+        lightweight_checkout (checkbox).
+        Done: jobedit.html grew a GitHub Pull Request
+        Builder fieldset and a Pipeline-script-from-SCM
+        fieldset, both rendered inside the existing
+        view=form path. The credentials selects
+        (api_credentials_id and credentials_id) iterate over
+        a new CredentialOptions slice the server passes
+        through renderJobForm; server.Options gained an
+        optional Credstore *credstore.Store that
+        credentialOptions() consults, falling back to an
+        empty list (the "(none)" placeholder is the only
+        option) when no credstore is wired. Template helpers
+        registered in jobFormFuncs (ghprbAPICredsFor,
+        ghprbGHProjectURLFor, ghprbAdminUsersFor,
+        ghprbBranchesFor, ghprbPollIntervalFor,
+        scmRepoURLFor, scmCredsFor, scmBranchFor,
+        scmScriptPathFor, scmLightweightFor) plus the
+        existing buildEnvPrep / buildEnvKeepJEnv /
+        buildEnvKeepBuild trio pull current values out of
+        storage.Job for pre-fill; ghprbPollIntervalFor
+        substitutes the canonical 300-second default so the
+        input is never blank on a fresh job. storage.Job
+        gained a *PipelineBlock field (+ SCMConfig type)
+        that mirror internal/jobspec's loader-side shape so
+        the YAML round-trips through both readers without
+        forking the on-disk format. buildJobFromForm
+        (jobform_builder.go) now parses both fieldsets:
+        empty api_credentials_id leaves job.GitHubPRB nil so
+        a non-GHPRB job round-trips clean YAML; empty
+        repo_url leaves job.Pipeline nil for the same
+        reason; otherwise the named fields land in
+        GitHubPRBTrigger.* / SCMConfig.* with admin_users
+        and branches_to_build split on newlines (blank lines
+        dropped) and poll_interval_seconds parsed as an int.
+        Gating: TestJobEdit_FormViewHasGHPRBSection sets up
+        a credstore with two entries (an API token + an SSH
+        key), creates a placeholder job, GETs
+        /jobs/<n>/edit?view=form, and asserts every input
+        name is present, both cred IDs appear as option
+        values in the selects, the default poll interval
+        300 pre-fills the number input, and the SCM panel
+        ships a checkbox for lightweight_checkout.
+        TestJobEdit_FormViewGHPRBRoundtrip POSTs the form
+        with every field set (alice / bob admin users,
+        */master + */release-* branches, poll = 120,
+        lightweight=on) and asserts every value landed in
+        the saved storage.Job.GitHubPRBTrigger /
+        storage.Job.Pipeline.SCMConfig fields after LoadJob.
 
 
 End of PLAN.historic.

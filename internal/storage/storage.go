@@ -137,6 +137,48 @@ type Job struct {
 	// os.Environ() is inherited, prior-build exported vars
 	// are not). Set explicitly to true to opt in.
 	BuildEnv *BuildEnv `yaml:"build_env,omitempty"`
+
+	// Pipeline carries the per-job pipeline-definition block
+	// the 18.26 + 18.29 form surfaces introduced. Nil when
+	// the job runs Steps directly; non-nil when the
+	// pipeline source is inline Groovy or fetched from SCM.
+	// The shape mirrors internal/jobspec.PipelineBlock /
+	// SCMConfig so the same YAML round-trips through both
+	// loaders.
+	Pipeline *PipelineBlock `yaml:"pipeline,omitempty"`
+}
+
+// PipelineBlock is the storage-side mirror of
+// internal/jobspec.PipelineBlock - same field names, same
+// YAML keys, so a job YAML round-trips through both loaders.
+// Carried on storage.Job so the 18.29 form view has
+// somewhere to persist the Pipeline-from-SCM panel.
+type PipelineBlock struct {
+	// Definition selects the pipeline source. "inline" reads
+	// from Script; "from_scm" pulls the named ScriptPath out
+	// of the SCM block at build start.
+	Definition string `yaml:"definition,omitempty"`
+
+	// Script is the inline pipeline body when Definition is
+	// "inline".
+	Script string `yaml:"script,omitempty"`
+
+	// SCM carries the source-control config when Definition
+	// is "from_scm". internal/jobspec.RunFromSCM reads the
+	// same field names.
+	SCM *SCMConfig `yaml:"scm,omitempty"`
+}
+
+// SCMConfig is the storage-side mirror of
+// internal/jobspec.SCMConfig. Same field names + YAML keys
+// so the 18.26 RunFromSCM path and the 18.29 form view both
+// read the same on-disk shape.
+type SCMConfig struct {
+	RepoURL             string `yaml:"repo_url"`
+	CredentialsID       string `yaml:"credentials_id,omitempty"`
+	BranchSpecifier     string `yaml:"branch_specifier"`
+	ScriptPath          string `yaml:"script_path"`
+	LightweightCheckout bool   `yaml:"lightweight_checkout,omitempty"`
 }
 
 // BuildEnv carries the build-environment-inheritance toggles
