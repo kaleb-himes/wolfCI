@@ -4149,6 +4149,55 @@ completed and were moved here:
         builds the same shape against the real
         scheduler+storage when the master-job pipeline phase
         lands.
+- [x] 18.23 Step library: catchError
+        (internal/pipeline/steps_catcherr.go). Failing test:
+        TestStep_CatchErrorRecords wraps a failing sh in
+        catchError(buildResult: 'FAILURE', stageResult:
+        'FAILURE'), asserts the stage is recorded FAILURE,
+        the build overall is FAILURE, but subsequent steps
+        in the same script block still execute.
+        Done: catchError native lives at
+        internal/pipeline/steps_catcherr.go. The step takes
+        a named-args map (buildResult / stageResult /
+        message) and a trailing closure, runs the closure
+        inside invokeClosure, and intercepts only throwSignal
+        results - infra errors (context cancel, unsupported
+        expressions) still propagate as before so they
+        surface as build infrastructure failures rather than
+        a silent FAILURE downgrade. The named labels are
+        normalised through normalizeCatchResult: SUCCESS
+        maps to BuildSuccess, "" / NOT_BUILT maps to
+        BuildRunning (the "no verdict" sentinel), and
+        everything else (FAILURE, UNSTABLE, ABORTED, unknown)
+        maps to BuildFailure for the current BuildStatus
+        enum's coarse-grained Success / Failure split.
+        Verdicts are recorded via scriptRuntime's new
+        catchForcedBuild / catchForcedStage fields
+        (separated so a future Unstable / Aborted split can
+        distinguish stage-only from build-wide downgrades);
+        nested catchError invocations compose through
+        applyCatchForced + isMoreSevereStatus so an inner
+        SUCCESS does not regress an outer FAILURE. After the
+        script step body finishes, execStep in
+        exec_declarative.go reads the forced fields: if
+        either equals BuildFailure, the StepRun's Status is
+        marked BuildFailure, which propagates up the stage
+        and build chains via the existing short-circuit
+        logic. Crucially, the closure-level swallow of
+        throwSignal lets subsequent statements in the
+        wrapping script block continue executing - the test
+        verifies this by writing a marker file from a `sh`
+        step that lives after the catchError block. Optional
+        `message:` lands on the runtime's echo buffer so
+        downstream log-grep paths see a stable line before
+        the swallowed throw. Gating: TestStep_CatchErrorRecords
+        runs the failing-sh form and asserts build.Status =
+        BuildFailure, stage[0].Status = BuildFailure, and
+        workspace/marker.txt contains "after" (the
+        subsequent sh ran). TestStep_CatchErrorPassesThroughSuccess
+        exercises the success path: a clean sh inside the
+        wrapper leaves build status BuildSuccess and the
+        trailing echo runs normally.
 
 
 End of PLAN.historic.

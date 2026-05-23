@@ -227,6 +227,19 @@ type scriptRuntime struct {
      * case. */
     dispatcher BuildDispatcher
 
+    /* catchForced{Build,Stage} carry the 18.23 catchError
+     * "this step / stage / build should be marked X" verdict
+     * out of the script runtime so execStep can apply it
+     * after the step body completes. Default BuildRunning
+     * means "no catchError fired"; any other value is the
+     * highest-severity verdict any catchError in this step
+     * recorded (currently SUCCESS or FAILURE). The pair is
+     * separate so a future BuildUnstable / BuildAborted
+     * split can distinguish stage-only from build-wide
+     * downgrades. */
+    catchForcedBuild BuildStatus
+    catchForcedStage BuildStatus
+
     /* secretMu guards envExtra and masks, which
      * withCredentials pushes onto a stack for the duration
      * of a closure body and pops on exit. Pop is keyed on
@@ -318,6 +331,28 @@ func (rt *scriptRuntime) popSecrets(frame secretFrame) {
     defer rt.secretMu.Unlock()
     rt.envExtra = rt.envExtra[:frame.envLen]
     rt.masks = rt.masks[:frame.masksLen]
+}
+
+/* applyCatchForced records a catchError verdict on the
+ * runtime. Repeated calls keep the worst-of result so nested
+ * catchError blocks compose without an upstream SUCCESS
+ * swallowing an inner FAILURE. */
+func (rt *scriptRuntime) applyCatchForced(build, stage BuildStatus) {
+    if isMoreSevereStatus(build, rt.catchForcedBuild) {
+        rt.catchForcedBuild = build
+    }
+    if isMoreSevereStatus(stage, rt.catchForcedStage) {
+        rt.catchForcedStage = stage
+    }
+}
+
+/* isMoreSevereStatus reports whether a is a worse outcome
+ * than b. The ordering matches the wolfCI BuildStatus
+ * enum's intent: Pending < Running < Success < Failure.
+ * Used by applyCatchForced to keep the worst observed
+ * verdict across nested catchError invocations. */
+func isMoreSevereStatus(a, b BuildStatus) bool {
+    return int(a) > int(b)
 }
 
 func (rt *scriptRuntime) appendEcho(msg string) {

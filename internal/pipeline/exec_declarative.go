@@ -288,6 +288,16 @@ func execStep(ctx context.Context, step StepCall,
     if n, ok := v.(*sNum); ok && sr.ExitCode == 0 {
         sr.ExitCode = int(n.v)
     }
+    /* A catchError inside the step body may have swallowed a
+     * throw and recorded a forced verdict (see 18.23). Apply
+     * the worse-of-default-success-and-forced here so the
+     * stage / build status chain still ends in FAILURE even
+     * though the script step itself completed cleanly. */
+    if rt.catchForcedStage == BuildFailure ||
+        rt.catchForcedBuild == BuildFailure {
+        sr.Status = BuildFailure
+        return sr, nil
+    }
     sr.Status = BuildSuccess
     return sr, nil
 }

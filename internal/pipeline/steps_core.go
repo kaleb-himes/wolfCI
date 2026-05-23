@@ -73,6 +73,8 @@ func registerCoreSteps(rt *scriptRuntime) {
     registerLoadSteps(rt)
     /* 18.22 build (downstream dispatch) step. */
     registerBuildStep(rt)
+    /* 18.23 catchError step. */
+    registerCatchErrorStep(rt)
 }
 
 /* ----- echo ------------------------------------------------- */

@@ -91,13 +91,6 @@ owner at the start of the phase):
   github-hook-for-GITScm-polling, poll-SCM, trigger-builds-
   remotely.
 
-- [ ] 18.23 Step library: catchError
-        (internal/pipeline/steps_catcherr.go). Failing test:
-        TestStep_CatchErrorRecords wraps a failing sh in
-        catchError(buildResult: 'FAILURE', stageResult:
-        'FAILURE'), asserts the stage is recorded FAILURE,
-        the build overall is FAILURE, but subsequent steps in
-        the same script block still execute.
 - [ ] 18.24 Step library: nested node()
         (internal/pipeline/steps_node.go). Failing test:
         TestStep_NestedNodeReallocates runs a pipeline whose
