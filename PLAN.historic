@@ -4783,3 +4783,42 @@ owner at the start of the phase):
         an ad-hoc agent_id and asserts the stored
         AgentInfo keeps the agent-supplied values + the
         fake's Delete counter stays at zero.
+- [x] 19.5 /nodes/<name> connection-command page for
+        pending agents. Failing test
+        (internal/server/nodes_pending_detail_test.go):
+        TestNodesPendingDetail_RendersCommand asserts the
+        page renders the wolfci-agent command line with
+        the server address and agent_id pre-filled, plus
+        a short instruction block on how to copy the
+        master CA pubkey + the agent's keypair onto the
+        remote machine. The page must NOT render for
+        connected agents - those keep using the existing
+        handleNodeDetail surface.
+        Done: handleNodeDetail now checks
+        storage.LoadPendingAgent first; a found pending
+        record routes to a new handlePendingNodeDetail
+        which renders templates/nodes_pending_detail.html.
+        The page assembles the wolfci-agent command line
+        verbatim ("wolfci-agent --server-addr <ep>
+        --agent-id <name> --cert-dir /etc/wolfci-agent"),
+        the SERVER_HOST:PORT placeholder when
+        Options.AgentEndpoint is unset (HTML-safe spelling
+        so html/template does not escape it), the
+        cert-material instructions (ca.pem +
+        agent.pem/agent.key with a wolfci-ctl agent-cert
+        mint command line), and the slot's labels +
+        executors + description for context. server.Options
+        gained the new AgentEndpoint field (optional;
+        empty triggers the placeholder + an inline error
+        diagnostic). Connected agents keep using the
+        existing handleNodeDetail surface - the pending
+        branch only fires when a PendingAgent record
+        exists on disk. Gating:
+        TestNodesPendingDetail_RendersCommand seeds a
+        4-executor linux-builder pending, asserts the
+        command + cert paths + wolfci-ctl mint command +
+        labels + "(pending)" tag are all in the body.
+        TestNodesPendingDetail_NoEndpointShowsWarning
+        confirms the SERVER_HOST:PORT placeholder + the
+        AgentEndpoint configuration diagnostic surface
+        when the field is empty.

@@ -1,0 +1,59 @@
+{{ define "content" }}
+<section class="panel">
+<h2>{{ .Name }} <span class="muted">(pending)</span></h2>
+
+<p class="muted">This permanent-agent slot is pre-registered
+but the remote machine has not connected yet. Run the command
+below on the Linux, Windows, or macOS host you want to attach
+to wolfCI as <code>{{ .Name }}</code>. The agent inherits the
+labels and executor count configured here automatically on
+first connect.</p>
+
+<dl class="node-attrs">
+  <dt>Name</dt><dd><code>{{ .Name }}</code></dd>
+  <dt>Labels</dt><dd>{{ range .Labels }}<code>{{ . }}</code> {{ end }}{{ if not .Labels }}<span class="muted">(none)</span>{{ end }}</dd>
+  <dt>Executors</dt><dd>{{ .Executors }}</dd>
+  {{ if .Description }}<dt>Description</dt><dd>{{ .Description }}</dd>{{ end }}
+</dl>
+
+<h3>Connection command</h3>
+<p>Copy this onto the remote machine, then run it as the user
+the agent should execute builds under (typically a dedicated
+<code>wolfci</code> account):</p>
+
+<pre class="cmd"><code>{{ .Command }}</code></pre>
+
+{{ if .EndpointMissing }}
+<p class="error">Server has no <code>AgentEndpoint</code>
+configured - replace <code>SERVER_HOST:PORT</code> with the
+host:port the wolfci-server is listening on for agent
+connections (the mTLS gRPC listener, usually port 8443).</p>
+{{ end }}
+
+<h3>Cert material</h3>
+<p>The agent authenticates to the server via mTLS. Copy two
+files onto the remote machine, under
+<code>/etc/wolfci-agent/</code> (matching the
+<code>--cert-dir</code> in the command above):</p>
+
+<ol>
+<li><code>ca.pem</code> - the wolfCI server's CA certificate
+(<code>config-files/wolfci-ca.pem</code> on the server host).
+The agent uses it to verify the server's identity.</li>
+<li><code>agent.pem</code> + <code>agent.key</code> - the
+agent's own certificate + private key, signed by the same CA.
+Generate them on the server with
+<code>wolfci-ctl agent-cert mint --name {{ .Name }}</code>
+(prints the cert + key to stdout) and copy the output onto
+the remote machine.</li>
+</ol>
+
+<p class="muted">Permission: the
+<code>/etc/wolfci-agent/</code> directory should be mode
+<code>0700</code> and owned by the user running
+<code>wolfci-agent</code>; the private key file should be
+mode <code>0600</code>.</p>
+
+<p class="form-actions"><a href="/nodes">Back to nodes</a></p>
+</section>
+{{ end }}

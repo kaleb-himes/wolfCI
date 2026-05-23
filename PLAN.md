@@ -65,17 +65,27 @@ owner at the start of the phase):
 - Land scope: 19.1-19.5 land first (the core Permanent Agent
   flow); 19.6 (GCE) + 19.7 (Copy) ship in follow-on pushes.
 
-- [ ] 19.5 /nodes/<name> connection-command page for
-        pending agents. Failing test
-        (internal/server/nodes_pending_detail_test.go):
-        TestNodesPendingDetail_RendersCommand asserts the
-        page renders the wolfci-agent command line with
-        the server address and agent_id pre-filled, plus
-        a short instruction block on how to copy the
-        master CA pubkey + the agent's keypair onto the
-        remote machine. The page must NOT render for
-        connected agents - those keep using the existing
-        handleNodeDetail surface.
+- [ ] 19.6 GCE config form. /nodes/new/gce renders project_id +
+        zone + machine_type + image + network + labels
+        (multi-line) + max_instances. POST saves a gce.Config
+        the existing gce.Provisioner consumes; wiring the
+        saved configs into the scheduler's overflow path is
+        a separate follow-on. Failing test
+        (internal/server/nodes_new_gce_test.go):
+        TestNodesNewGCE_FormHasFields asserts the rendered
+        form carries the seven inputs.
+        TestNodesNewGCE_PostCreatesConfig posts a sample
+        config and asserts the file lands on disk and
+        round-trips through gce.LoadConfig.
+- [ ] 19.7 Copy existing node. /nodes/new?copy=<id> pre-fills
+        the Permanent Agent form with the source's labels +
+        executors so the operator can edit before saving.
+        Failing test (internal/server/nodes_new_copy_test.go):
+        TestNodesNewCopy_PrefillsFormFromSource seeds a
+        PendingAgent (or a connected AgentInfo), GETs
+        /nodes/new?copy=<source>, asserts the form's value
+        attributes carry the source's labels + executors.
+
 
 ## Polish queue (do after phase 19 closes, before phase 20 opens)
 

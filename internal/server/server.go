@@ -87,6 +87,16 @@ type Options struct {
 	// pre-credstore-era server config) the selects render
 	// with just the empty "(none)" option.
 	Credstore *credstore.Store
+
+	// AgentEndpoint is the host:port a remote wolfci-agent
+	// should pass to its --server-addr flag. The 19.5
+	// connection-command page renders this verbatim so the
+	// operator can copy the command without editing. Empty
+	// is allowed (the page shows a placeholder + instruction
+	// to fill it in manually) so dev-time servers without a
+	// public address still surface the rest of the
+	// instructions.
+	AgentEndpoint string
 }
 
 // JobRunner is the surface server needs from the scheduler to wire
@@ -443,6 +453,17 @@ func splitLines(s string) []string {
 // history is left to a follow-up commit; the PLAN.md 12.7 gate
 // only asserts on the status fields.
 func (s *Server) handleNodeDetail(w http.ResponseWriter, r *http.Request, agentID string) {
+	/* PLAN.md 19.5: route pending (pre-registered but not
+	 * yet connected) agents to the connection-command page.
+	 * A connected agent is always present in AgentSvc.Agents
+	 * after it Register()s; if the name only exists on disk
+	 * as a PendingAgent, render the command + instructions
+	 * the operator needs to bring it online. */
+	if pa, err := s.opts.Storage.LoadPendingAgent(
+		agentID); err == nil && pa != nil {
+		s.handlePendingNodeDetail(w, r, pa)
+		return
+	}
 	if s.opts.AgentSvc == nil {
 		http.NotFound(w, r)
 		return
@@ -499,6 +520,44 @@ func (s *Server) handleNodeDetail(w http.ResponseWriter, r *http.Request, agentI
 // internal/authz but is not wired into requireSession), so for
 // now requireSession is the only gate. Wiring NodesConfigure is
 // tracked under the broader authz follow-up.
+// handlePendingNodeDetail renders the
+// /nodes/<name>-when-pending page from PLAN.md 19.5. The
+// page shows the wolfci-agent command line the operator
+// copies onto the remote machine plus a short paragraph on
+// how to provision the cert material the agent needs to
+// authenticate to the server's mTLS listener.
+func (s *Server) handlePendingNodeDetail(
+	w http.ResponseWriter, r *http.Request,
+	pa *storage.PendingAgent) {
+
+	endpoint := s.opts.AgentEndpoint
+	endpointMissing := endpoint == ""
+	if endpointMissing {
+		/* Placeholder shown literally in the command; the
+		 * SERVER_HOST:PORT bracket-shape names the variable
+		 * without bringing in HTML-special characters that
+		 * html/template would escape into the rendered
+		 * page. */
+		endpoint = "SERVER_HOST:PORT"
+	}
+	command := fmt.Sprintf(
+		"wolfci-agent --server-addr %s --agent-id %s "+
+			"--cert-dir /etc/wolfci-agent",
+		endpoint, pa.Name)
+	s.render(w, "nodes_pending_detail.html",
+		map[string]interface{}{
+			"Title":           pa.Name,
+			"Name":            pa.Name,
+			"Labels":          pa.Labels,
+			"Executors":       pa.Executors,
+			"Description":     pa.Description,
+			"CreatedAt":       pa.CreatedAt,
+			"AgentEndpoint":   endpoint,
+			"EndpointMissing": endpointMissing,
+			"Command":         command,
+		})
+}
+
 func (s *Server) handleNodeDisable(w http.ResponseWriter, r *http.Request,
 	agentID string, disable bool) {
 
