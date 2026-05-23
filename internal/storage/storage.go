@@ -118,6 +118,17 @@ type Job struct {
 	// context (e.g. GitHub PRB injects the ghprb* vars here in
 	// Phase 18.8). Normal job specs leave this empty.
 	Env map[string]string `yaml:"env,omitempty"`
+
+	// GitHubProjectURL is the canonical GitHub URL of the
+	// project this job builds, e.g.
+	// https://github.com/wolfssl/wolfssl/. Surfaced on the
+	// job-detail page as a clickable badge and consumed by
+	// 18.29's UI form for the general-options block. Phase
+	// 18.27 added it as a top-level field; the parallel
+	// GitHubPRBTrigger.GHProjectURL stays its own knob so a
+	// job can post statuses to a different fork than the one
+	// it links from the badge.
+	GitHubProjectURL string `yaml:"github_project_url,omitempty"`
 }
 
 // GitHubPRBTrigger is the per-job GitHub Pull Request Builder

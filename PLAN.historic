@@ -4348,6 +4348,53 @@ completed and were moved here:
         test exercises the cred slot through the loader
         without actually authing; production GitHub auth
         lands when the master-job pipeline phase needs it.
+- [x] 18.27 General job options form fields. Failing test
+        (internal/server/jobedit_test.go):
+        TestJobEdit_GeneralOptionsRoundtrip POSTs a form with
+        description (free text), discard_old_builds.strategy
+        = log_rotation, discard_old_builds.max_builds = 30,
+        discard_old_builds.days_to_keep = "" (blank),
+        github_project_url, asserts the job YAML matches.
+        Done: storage.Job gained a top-level
+        GitHubProjectURL string field (yaml:"github_project_url,
+        omitempty") so the project-level URL lives alongside
+        Description / NodeLabel / Timeout - independent of
+        the GitHubPRBTrigger.GHProjectURL knob a PRB-enabled
+        job can point at a different fork for status posts.
+        buildJobFromForm (internal/server/jobform_builder.go)
+        now reads github_project_url plus the Jenkins-aligned
+        discard_old_builds.* trio: strategy (accepts the
+        "log_rotation" marker - the only strategy wolfCI
+        ships, since Retention IS log rotation; an unknown
+        strategy surfaces an actionable form-rerender error
+        instead of being silently dropped), max_builds (maps
+        to Retention.MaxBuilds directly), days_to_keep
+        (normalised to "<N>d" so it lands in Retention.MaxAge
+        alongside the duration-string form the YAML editor
+        accepts). The pre-existing retention_max_builds /
+        retention_max_age inputs stay so the older form state
+        and the existing TestUI_JobCreateAndEdit /
+        TestJobEdit_FormViewSubmitBuildsSpec gates still
+        round-trip; when both surfaces are populated the
+        discard_old_builds.* inputs win because they are the
+        explicit per-field rows and the older inputs are
+        convenience aliases for raw-YAML migrations. Gating:
+        TestJobEdit_GeneralOptionsRoundtrip posts the four-
+        field form with view=form (Description, strategy =
+        log_rotation, max_builds = 30, days_to_keep = "",
+        github_project_url), asserts the storage.Job carries
+        Description, GitHubProjectURL, Retention.MaxBuilds=30,
+        and Retention.MaxAge="" (days_to_keep blank means no
+        MaxAge); then GETs /jobs/<name>/edit?view=raw and
+        checks the marshalled YAML contains
+        name: / description: / github_project_url: /
+        max_builds: 30 fragments.
+        TestJobEdit_DiscardOldBuilds_DaysSetMaxAge confirms
+        the days->14d branch (max_builds blank, days_to_keep
+        14 produces Retention.MaxAge="14d" and MaxBuilds=0).
+        TestJobEdit_DiscardOldBuilds_RejectsUnknownStrategy
+        confirms the form-rerender error path when strategy
+        is not "log_rotation".
 
 
 End of PLAN.historic.

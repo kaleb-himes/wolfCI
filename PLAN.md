@@ -91,13 +91,6 @@ owner at the start of the phase):
   github-hook-for-GITScm-polling, poll-SCM, trigger-builds-
   remotely.
 
-- [ ] 18.27 General job options form fields. Failing test
-        (internal/server/jobedit_test.go):
-        TestJobEdit_GeneralOptionsRoundtrip POSTs a form with
-        description (free text), discard_old_builds.strategy
-        = log_rotation, discard_old_builds.max_builds = 30,
-        discard_old_builds.days_to_keep = "" (blank),
-        github_project_url, asserts the job YAML matches.
 - [ ] 18.28 Build-environment toggles. Failing test:
         TestJobEdit_BuildEnvRoundtrip POSTs a form with
         prepare_environment_for_run = true,

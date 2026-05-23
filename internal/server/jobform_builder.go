@@ -122,10 +122,11 @@ func buildJobFromForm(r *http.Request) (*storage.Job, error) {
         return nil, fmt.Errorf("parse form: %w", err)
     }
     job := &storage.Job{
-        Name:        strings.TrimSpace(r.FormValue("name")),
-        Description: r.FormValue("description"),
-        NodeLabel:   strings.TrimSpace(r.FormValue("node_label")),
-        Timeout:     strings.TrimSpace(r.FormValue("timeout")),
+        Name:             strings.TrimSpace(r.FormValue("name")),
+        Description:      r.FormValue("description"),
+        NodeLabel:        strings.TrimSpace(r.FormValue("node_label")),
+        Timeout:          strings.TrimSpace(r.FormValue("timeout")),
+        GitHubProjectURL: strings.TrimSpace(r.FormValue("github_project_url")),
     }
     if job.Name == "" {
         return nil, fmt.Errorf("name is required")
@@ -139,10 +140,46 @@ func buildJobFromForm(r *http.Request) (*storage.Job, error) {
     }
 
     /* Retention is optional; the block is set only when at
-     * least one of the two sub-fields was filled in.
+     * least one of the sub-fields was filled in. Two form
+     * surfaces drive the same storage.Retention block:
+     *
+     *   - retention_max_builds + retention_max_age: the
+     *     pre-18.27 surface, kept verbatim so existing form
+     *     state and tests still round-trip.
+     *   - discard_old_builds.* : the Jenkins-aligned form
+     *     names 18.27 introduced. discard_old_builds.strategy
+     *     accepts "log_rotation" as a marker (the only
+     *     strategy wolfCI ships - Retention IS log rotation);
+     *     max_builds maps to Retention.MaxBuilds verbatim;
+     *     days_to_keep is normalised to "<N>d" so it lands
+     *     in Retention.MaxAge alongside the existing
+     *     duration-string form.
+     *
+     * If both surfaces are populated the discard_old_builds.*
+     * inputs win - the new form has explicit per-field rows
+     * and the older inputs are convenience aliases for
+     * raw-YAML migrations.
      */
     mb := strings.TrimSpace(r.FormValue("retention_max_builds"))
     ma := strings.TrimSpace(r.FormValue("retention_max_age"))
+    dobStrat := strings.TrimSpace(
+        r.FormValue("discard_old_builds.strategy"))
+    dobMaxBuilds := strings.TrimSpace(
+        r.FormValue("discard_old_builds.max_builds"))
+    dobDays := strings.TrimSpace(
+        r.FormValue("discard_old_builds.days_to_keep"))
+    if dobStrat != "" && dobStrat != "log_rotation" {
+        return nil, fmt.Errorf(
+            "discard_old_builds.strategy %q is not "+
+                "supported (only %q)",
+            dobStrat, "log_rotation")
+    }
+    if dobMaxBuilds != "" {
+        mb = dobMaxBuilds
+    }
+    if dobDays != "" {
+        ma = dobDays + "d"
+    }
     if mb != "" || ma != "" {
         ret := &storage.Retention{MaxAge: ma}
         if mb != "" {
