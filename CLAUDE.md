@@ -154,6 +154,27 @@ owner and override defaults.
     wolfCI source predates the rule and will get a reformat pass
     in a future maintenance phase; do not flip-flop file styles
     mid-edit while we are mid-feature work.
+14. Every wolfCI UI page must look professional. No
+    haphazard or misaligned text or controls. Every element
+    is properly padded, vertically aligned to a baseline grid,
+    and grouped into clearly separated sections (cells,
+    cards, fieldsets) when grouping makes sense. Pick the
+    control that matches the data:
+      - checkbox or radio button for simple on/off and small
+        mutually-exclusive choices,
+      - drop-down (<select>) for limited multi-choice
+        selection from a known list,
+      - text field for free-form customisation - kept clean,
+        aligned, padded, and the same width as its siblings
+        in the same column.
+    Reference for "what good looks like" is the job-view page
+    at /jobs/<name> (the read-only one). Edit / configure
+    pages and any new page added later must hit the same bar
+    BEFORE the task is declared complete. Tested by loading
+    the page in a real browser, taking a screenshot, and
+    verifying the result; type-checking and tests do not
+    verify visual layout. If you cannot test the UI, say so
+    explicitly rather than claiming the work is done.
 
 ## Operating Procedure (every session)
 

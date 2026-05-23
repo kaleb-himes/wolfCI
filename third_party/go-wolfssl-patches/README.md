@@ -335,3 +335,97 @@ authorized_keys public keys, OR adds a new
 directly. Then the parsing helpers in this file become thin
 wrappers over the wolfssh C calls, and eventually drop out
 entirely.
+
+## 0008-add-wolfssh-agent.patch
+
+Adds two files to the wolfssh sub-package:
+
+  `wolfssh/agent.go`      - pure-Go SSH agent-protocol
+                            implementation (no CGO).
+  `wolfssh/agent_test.go` - end-to-end gate that mints an
+                            Ed25519 keypair via the wolfCrypt
+                            wrappers in the root go-wolfssl
+                            package, runs an
+                            AGENTC_REQUEST_IDENTITIES round
+                            trip, signs a challenge through
+                            an AGENTC_SIGN_REQUEST, then
+                            verifies the resulting signature
+                            with wolfCrypt's Ed25519 verifier.
+
+Contents:
+
+  Constants AgentMsg* mirror the MSGID_AGENT_* enum in
+  `third_party/wolfssh/wolfssh/agent.h` byte for byte. Today
+  we ship the (REQUEST_IDENTITIES, SIGN_REQUEST) request half
+  + (IDENTITIES_ANSWER, SIGN_RESPONSE, FAILURE) response half;
+  ADD_IDENTITY / REMOVE_IDENTITY / LOCK / UNLOCK / EXTENSION
+  return AgentMsgFailure so a misbehaving client cannot hang
+  the agent.
+
+  AgentSigner - the per-identity signing primitive type. The
+  caller passes a closure that wraps whichever wolfCrypt
+  routine matches the identity's algorithm (Wc_ed25519_sign_msg
+  for ssh-ed25519, Wc_SignatureGenerate for RSA / ECDSA, ...);
+  agent.go itself stays algorithm-agnostic so the file pays
+  no CGO cost.
+
+  AgentIdentity - one entry: KeyBlob (the algorithm-specific
+  body of the SSH wire public key), Algorithm (e.g.
+  "ssh-ed25519"), Comment (the "user@host" string the agent
+  reports), Sign (the AgentSigner closure).
+
+  Agent + NewAgent / AddIdentity / Identities / RemoveAll /
+  HandleMessage / HandleFramedMessage. The agent is
+  goroutine-safe (sync.RWMutex) so parallel branches of a
+  wolfCI build can share one. HandleMessage takes the
+  unframed message body and returns the unframed response
+  body; HandleFramedMessage wraps both ends in the
+  uint32-big-endian length prefix net.Conn-style transports
+  use.
+
+  Wire shape follows draft-miller-ssh-agent section 4 and
+  matches what wolfssh's C-side agent.c produces:
+
+    SSH_AGENT_IDENTITIES_ANSWER:
+      byte    SSH_AGENT_IDENTITIES_ANSWER
+      uint32  num_keys
+      repeated num_keys times:
+        string key_blob       (string(algo) || body)
+        string comment
+
+    SSH_AGENT_SIGN_RESPONSE:
+      byte    SSH_AGENT_SIGN_RESPONSE
+      string  signature_blob  (string(algo) || string(sig))
+
+**Why:** PLAN.md 18.19 requires a wolfssh-backed SSH agent so
+the 18.20 `sshagent` step (master-job's `git clone git@...`
+via SSH) does not have to fall through to OpenSSH's ssh-agent
+binary. CLAUDE.md Hard Rule #11 says missing wolfssh wrappers
+go into the vendored copy via a numbered patch. wolfssh's
+C-side agent state machine (agent.c, behind WOLFSSH_AGENT)
+implements the same protocol but does not expose a stable
+C ABI we can bridge to Go without a churn-prone CGO shim; a
+pure-Go protocol layer on top of the wolfCrypt signing
+primitives (already wired via patch 0003) ships the same
+wire surface today and shrinks to a CGO bridge later when
+wolfssh upstream exposes the state machine.
+
+**Gate:** `internal/authssh/gowolfssh_agent_smoke_test.go`
+ships `TestGoWolfSSH_AgentAddListSign_Callable` (mints an
+ssh-ed25519 identity, drives AGENTC_REQUEST_IDENTITIES +
+AGENTC_SIGN_REQUEST through the agent, verifies the
+resulting signature with the wolfCrypt verifier) so the
+wrapper stays gated from wolfCI's test suite even if the
+in-submodule tests are skipped on a fresh clone. The
+in-submodule TestAgent_AddListSign +
+TestAgent_SignRequestUnknownKeyFails +
+TestAgent_HandleFramedMessage_RoundTrip cover the same
+ground at the wrapper layer.
+
+**What would let us drop this patch:** the project owner files
+the upstream PR carrying patches 0003-0008 at
+https://github.com/wolfSSL/go-wolfssl and the wolfssh agent
+file lands plus a release tag is cut. OR wolfssh upstream
+exposes a stable C-ABI agent state machine through
+agent.h, at which point this file shrinks to a thin CGO
+bridge.

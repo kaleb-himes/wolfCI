@@ -91,15 +91,6 @@ owner at the start of the phase):
   github-hook-for-GITScm-polling, poll-SCM, trigger-builds-
   remotely.
 
-- [ ] 18.19 wolfssh SSH agent investigation. Failing test
-        (third_party/go-wolfssl/wolfssh/agent_test.go in the
-        patch series): TestAgent_AddListSign loads an Ed25519
-        key into a wolfssh-backed agent, lists identities over
-        the SSH agent protocol (RFC 4253-style framed messages),
-        signs a challenge. If wolfssh does not yet implement
-        agent protocol message handling, ADD the wrapper to
-        the vendored copy and capture as
-        third_party/go-wolfssl-patches/0NNN-wolfssh-agent.patch.
 - [ ] 18.20 Step library: sshagent
         (internal/pipeline/steps_ssh.go). Failing test:
         TestStep_SshagentGitClone loads an ssh-private-key cred
@@ -219,6 +210,44 @@ owner at the start of the phase):
         able" pipelines (a subset that 18.30-style integration
         tests cover) is recorded in
         docs/pipeline-coverage.md.
+
+## Polish queue (do after phase 18 closes, before phase 19 opens)
+
+The job-view page at /jobs/<name> is the reference for what
+"professional, clean, properly aligned" looks like in this
+codebase. The configure / edit views fall short of that bar
+and need a polish pass that brings them in line with
+CLAUDE.md rule 14.
+
+- [ ] P1 Polish the job-edit view (YAML / raw mode).
+        URL: /jobs/<name>/edit?view=raw . Today the textarea,
+        the save/cancel controls, the breadcrumb, and the
+        view-toggle are arranged without consistent padding,
+        column alignment, or section grouping; the result
+        reads as haphazard against the clean read-only
+        /jobs/<name> page. Match the read-only page's
+        spacing rhythm, group the editor and its controls
+        into a single bordered card with a sticky action bar
+        at the bottom, give the textarea a fixed
+        monospace-width that aligns to the page's content
+        column, and surface validation errors (parse failure,
+        unknown field) inline above the editor in a
+        clearly-separated alert section rather than as raw
+        text bumped against other elements. Tested by
+        loading the page in a real browser AND taking a
+        before/after screenshot for the commit message.
+- [ ] P2 Polish the job-edit view (form mode).
+        URL: /jobs/<name>/edit?view=form . Same alignment /
+        grouping / control-choice rules from CLAUDE.md
+        rule 14: every named field is a labelled row,
+        checkboxes/radios for on-off, drop-downs for
+        bounded enumerations (retention strategy,
+        agent-label kind, etc.), text fields equal width
+        within their column, sections separated by
+        fieldsets or cards. The current form crams
+        unrelated controls together and reads cluttered;
+        the target is the same visual rhythm as the
+        read-only job view. Same testing protocol as P1.
 
 ## Backlog (not in main flow)
 

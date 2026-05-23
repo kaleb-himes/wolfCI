@@ -3889,4 +3889,69 @@ completed and were moved here:
         panic).
 
 
+- [x] 18.19 wolfssh SSH agent investigation. Failing test
+        (third_party/go-wolfssl/wolfssh/agent_test.go in the
+        patch series): TestAgent_AddListSign loads an
+        Ed25519 key into a wolfssh-backed agent, lists
+        identities over the SSH agent protocol (RFC 4253-
+        style framed messages), signs a challenge. If
+        wolfssh does not yet implement agent protocol
+        message handling, ADD the wrapper to the vendored
+        copy and capture as
+        third_party/go-wolfssl-patches/0NNN-wolfssh-agent.patch.
+        Done: investigation confirmed wolfssh upstream's
+        src/agent.c implements the protocol in C (gated
+        behind WOLFSSH_AGENT) but does not expose a stable
+        C ABI we can bridge to Go without a churn-prone
+        CGO shim. Per CLAUDE.md Hard Rule #11 and the user
+        confirmation at the top of 18.19, the wrapper went
+        into the vendored copy as patch 0008-add-
+        wolfssh-agent.patch carrying two new files in
+        third_party/go-wolfssl/wolfssh/: agent.go (pure
+        Go - no CGO of its own) and agent_test.go (uses
+        wolfCrypt's Ed25519 wrappers for the end-to-end
+        sign + verify round trip). API surface follows the
+        same conventions as the existing sshwire.go and
+        wolfssh.go in the same sub-package: AgentMsg*
+        constants mirror MSGID_AGENT_* from
+        third_party/wolfssh/wolfssh/agent.h byte for byte;
+        AgentSigner is a function-typed signing primitive so
+        the file stays algorithm-agnostic and pays no CGO
+        cost itself (callers wire whichever wolfCrypt
+        routine matches the identity's algorithm);
+        AgentIdentity carries KeyBlob / Algorithm / Comment
+        / Sign; Agent (with sync.RWMutex) exposes
+        NewAgent / AddIdentity / Identities / RemoveAll /
+        HandleMessage (unframed body) and
+        HandleFramedMessage (uint32-prefixed). Message
+        coverage in 18.19: AGENTC_REQUEST_IDENTITIES ->
+        IDENTITIES_ANSWER and AGENTC_SIGN_REQUEST ->
+        SIGN_RESPONSE; the remaining MSGID_AGENT_*
+        request kinds (ADD_IDENTITY / REMOVE_IDENTITY /
+        LOCK / UNLOCK / EXTENSION) get AgentMsgFailure so a
+        misbehaving client cannot hang the agent.
+        Patch series README in
+        third_party/go-wolfssl-patches/README.md gained the
+        0008 section explaining why the wrapper exists and
+        what would let us drop it (upstream PR + tag, OR
+        wolfssh exposing its C agent state machine through
+        a stable ABI). Gates: the in-submodule
+        TestAgent_AddListSign (the spec's name; mints an
+        Ed25519 identity via wolfCrypt, registers it on a
+        wolfssh.Agent, round-trips REQUEST_IDENTITIES,
+        round-trips SIGN_REQUEST, and verifies the resulting
+        signature with the same wolfCrypt verifier),
+        TestAgent_SignRequestUnknownKeyFails (a SIGN_REQUEST
+        for a key the agent doesn't hold returns
+        AgentMsgFailure rather than crashing),
+        TestAgent_HandleFramedMessage_RoundTrip (uint32-
+        length-prefixed convenience entry point exercises
+        the empty-list path), AND a wolfCI-side smoke test
+        at internal/authssh/gowolfssh_agent_smoke_test.go's
+        TestGoWolfSSH_AgentAddListSign_Callable so the
+        wrapper stays gated from wolfCI's own test suite
+        even when a fresh clone has not yet re-applied the
+        patches.
+
+
 End of PLAN.historic.

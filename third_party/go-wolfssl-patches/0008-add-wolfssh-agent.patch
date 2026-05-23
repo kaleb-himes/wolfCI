@@ -1,0 +1,703 @@
+diff --git a/wolfssh/agent.go b/wolfssh/agent.go
+new file mode 100644
+index 0000000..83b2cd4
+--- /dev/null
++++ b/wolfssh/agent.go
+@@ -0,0 +1,323 @@
++/* agent.go
++ *
++ * Copyright (C) 2006-2026 wolfSSL Inc.
++ *
++ * This file is part of wolfSSL.
++ *
++ * wolfSSL is free software; you can redistribute it and/or modify
++ * it under the terms of the GNU General Public License as published
++ * by the Free Software Foundation; either version 2 of the License,
++ * or (at your option) any later version.
++ *
++ * wolfSSL is distributed in the hope that it will be useful, but
++ * WITHOUT ANY WARRANTY; without even the implied warranty of
++ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
++ * General Public License for more details.
++ *
++ * You should have received a copy of the GNU General Public License
++ * along with this program; if not, write to the Free Software
++ * Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA
++ * 02110-1335, USA
++ */
++
++/*
++ * Pure-Go SSH agent-protocol helpers. No CGO; the file is usable
++ * without linking libwolfssh.a. The agent uses the wire-format
++ * helpers from sshwire.go (ReadSSHString / EncodeSSHString) for
++ * framing and an Identity-supplied signing closure for the actual
++ * cryptography, so callers wire up whichever wolfCrypt primitive
++ * matches the identity's algorithm (Wc_ed25519_sign_msg for
++ * ssh-ed25519 keys, Wc_SignatureGenerate for RSA / ECDSA, etc.).
++ *
++ * Why these live in the wolfssh sub-package: this is the protocol
++ * wolfssh's C-side agent.c (compiled with WOLFSSH_AGENT) speaks.
++ * Mirroring the message IDs and framing here gives callers a Go
++ * agent that wire-interoperates with wolfssh-built clients without
++ * pulling libwolfssh.a's agent state machine into Go. When
++ * wolfssh upstream exposes its agent state machine through a
++ * stable C ABI the Go wrappers can switch to it and this file
++ * shrinks to a thin CGO bridge.
++ *
++ * Supported message types (matching wolfssh/agent.h):
++ *
++ *   MSGID_AGENT_REQUEST_IDENTITIES (11) -> IDENTITIES_ANSWER (12)
++ *   MSGID_AGENT_SIGN_REQUEST       (13) -> SIGN_RESPONSE      (14)
++ *
++ * Other message types (ADD_IDENTITY, REMOVE_IDENTITY, LOCK,
++ * UNLOCK, EXTENSION) get SSH_AGENT_FAILURE so a misbehaving
++ * client cannot hang the agent. Promoting any of those to real
++ * support is one switch arm plus a wire decoder.
++ */
++package wolfssh
++
++import (
++    "bytes"
++    "encoding/binary"
++    "errors"
++    "sync"
++)
++
++/*
++ * SSH agent-protocol message IDs. Values mirror the
++ * MSGID_AGENT_* enum in third_party/wolfssh/wolfssh/agent.h
++ * verbatim so a wire dump from one stack drops in on the
++ * other.
++ */
++const (
++    AgentMsgFailure              = 5
++    AgentMsgSuccess              = 6
++    AgentMsgRequestIdentities    = 11
++    AgentMsgIdentitiesAnswer     = 12
++    AgentMsgSignRequest          = 13
++    AgentMsgSignResponse         = 14
++    AgentMsgAddIdentity          = 17
++    AgentMsgRemoveIdentity       = 18
++    AgentMsgRemoveAllIdentities  = 19
++)
++
++/*
++ * AgentSigner is the per-identity signing primitive. Callers
++ * implement this with whichever wolfCrypt routine matches the
++ * identity's algorithm; the agent itself stays algorithm-
++ * agnostic. challenge is the SSH session-id bytes the client
++ * wants signed; the returned signature is the algorithm's raw
++ * signature payload (64 bytes for ed25519, the DER-encoded
++ * (r, s) sequence for ECDSA, etc.). The caller decides which
++ * encoding it returns; SignResponse wraps it in the
++ * "string(algo) || string(sig)" envelope on the way out.
++ */
++type AgentSigner func(challenge []byte) ([]byte, error)
++
++/*
++ * AgentIdentity is one entry in the agent's identity table.
++ *
++ *   KeyBlob   - the SSH wire-format public key payload
++ *               (algorithm-specific body after the algo
++ *               string; ParseSSHWirePublicKey is the inverse).
++ *   Algorithm - the algorithm name string (AlgSSHEd25519,
++ *               AlgECDSAP256SHA256, AlgRSASHA256, ...).
++ *   Comment   - the human-readable comment the agent reports
++ *               in IDENTITIES_ANSWER; usually "user@host".
++ *   Sign      - the signing primitive (see AgentSigner).
++ *
++ * KeyBlob is the part that comes BETWEEN the leading
++ * length-prefixed algorithm string and the rest in the SSH
++ * authorized_keys wire format. The IDENTITIES_ANSWER message
++ * wraps this and the algorithm string together into a single
++ * length-prefixed blob, matching the on-wire shape OpenSSH
++ * ssh-add produces.
++ */
++type AgentIdentity struct {
++    KeyBlob   []byte
++    Algorithm string
++    Comment   string
++    Sign      AgentSigner
++}
++
++/*
++ * Agent is an in-memory SSH agent. Identities are addressed by
++ * their wire-format public-key blob (algo string + key body),
++ * matching how the agent protocol's SIGN_REQUEST routes to a
++ * key. The Agent is goroutine-safe so wolfCI's parallel test
++ * runners can share one instance across stages without
++ * surprises.
++ */
++type Agent struct {
++    mu         sync.RWMutex
++    identities []AgentIdentity
++}
++
++/*
++ * NewAgent returns an empty agent ready to receive identities.
++ */
++func NewAgent() *Agent {
++    return &Agent{}
++}
++
++/*
++ * AddIdentity appends id to the agent's table. Duplicate
++ * KeyBlobs are not deduped here - upstream agents accept
++ * duplicates and let the operator decide; we match that.
++ */
++func (a *Agent) AddIdentity(id AgentIdentity) {
++    a.mu.Lock()
++    defer a.mu.Unlock()
++    a.identities = append(a.identities, id)
++}
++
++/*
++ * Identities returns a defensive copy of the agent's identity
++ * table so callers can iterate without racing AddIdentity.
++ */
++func (a *Agent) Identities() []AgentIdentity {
++    a.mu.RLock()
++    defer a.mu.RUnlock()
++    out := make([]AgentIdentity, len(a.identities))
++    copy(out, a.identities)
++    return out
++}
++
++/*
++ * RemoveAll clears the identity table.
++ */
++func (a *Agent) RemoveAll() {
++    a.mu.Lock()
++    defer a.mu.Unlock()
++    a.identities = nil
++}
++
++/*
++ * HandleMessage processes one agent-protocol request and
++ * returns the response body. Both slices are the message
++ * BODY (no uint32 length prefix); callers using
++ * HandleFramedMessage get the framing layer added for them.
++ *
++ * Unrecognised or malformed requests resolve to a single
++ * AgentMsgFailure byte so the wire client doesn't hang.
++ * err is non-nil only on internal infrastructure failures
++ * the caller cannot recover from; protocol-level errors
++ * (bad keyblob, unknown identity) surface via AgentMsgFailure.
++ */
++func (a *Agent) HandleMessage(req []byte) ([]byte, error) {
++    if len(req) < 1 {
++        return agentFailure(), nil
++    }
++    msgID := req[0]
++    body := req[1:]
++    switch msgID {
++    case AgentMsgRequestIdentities:
++        return a.handleListIdentities(), nil
++    case AgentMsgSignRequest:
++        return a.handleSignRequest(body)
++    }
++    return agentFailure(), nil
++}
++
++/*
++ * HandleFramedMessage handles a wire-framed agent message.
++ * req is uint32-length-prefixed; the response is too. Useful
++ * for callers reading from a net.Conn that frames every
++ * message with a 4-byte big-endian length.
++ */
++func (a *Agent) HandleFramedMessage(req []byte) ([]byte, error) {
++    if len(req) < 4 {
++        return nil, errors.New(
++            "wolfssh: agent: framed message shorter than 4 " +
++                "bytes")
++    }
++    length := binary.BigEndian.Uint32(req[:4])
++    if uint32(len(req)-4) < length {
++        return nil, errors.New(
++            "wolfssh: agent: framed message length exceeds " +
++                "buffer")
++    }
++    body, err := a.HandleMessage(req[4 : 4+length])
++    if err != nil {
++        return nil, err
++    }
++    out := make([]byte, 4+len(body))
++    binary.BigEndian.PutUint32(out[:4], uint32(len(body)))
++    copy(out[4:], body)
++    return out, nil
++}
++
++/*
++ * agentFailure returns the canonical single-byte failure
++ * response the agent protocol uses for any unrecognised or
++ * malformed request.
++ */
++func agentFailure() []byte {
++    return []byte{AgentMsgFailure}
++}
++
++/*
++ * handleListIdentities builds an IDENTITIES_ANSWER response.
++ * Wire shape (RFC-draft-miller-ssh-agent section 4.4):
++ *
++ *   byte    SSH_AGENT_IDENTITIES_ANSWER
++ *   uint32  num_keys
++ *   repeated num_keys times:
++ *     string key_blob
++ *     string comment
++ *
++ * key_blob is the full SSH wire-format public key, including
++ * the leading length-prefixed algorithm string AND the body.
++ * AgentIdentity.KeyBlob stores only the algorithm-specific
++ * body, so we emit "string(algo) || body" composed.
++ */
++func (a *Agent) handleListIdentities() []byte {
++    ids := a.Identities()
++    var out bytes.Buffer
++    out.WriteByte(AgentMsgIdentitiesAnswer)
++    var num [4]byte
++    binary.BigEndian.PutUint32(num[:], uint32(len(ids)))
++    out.Write(num[:])
++    for _, id := range ids {
++        out.Write(EncodeSSHString(buildKeyBlob(id)))
++        out.Write(EncodeSSHString([]byte(id.Comment)))
++    }
++    return out.Bytes()
++}
++
++/*
++ * handleSignRequest decodes a SIGN_REQUEST and dispatches to
++ * the matching identity. Wire shape:
++ *
++ *   byte    SSH_AGENTC_SIGN_REQUEST
++ *   string  key_blob          (same shape as IDENTITIES_ANSWER)
++ *   string  data              (challenge to sign)
++ *   uint32  flags             (ignored; we always sign with
++ *                              the identity's default algorithm)
++ *
++ * Response on success:
++ *
++ *   byte    SSH_AGENT_SIGN_RESPONSE
++ *   string  signature_blob    (string(algo) || string(sig))
++ *
++ * Response on failure: single AgentMsgFailure byte.
++ */
++func (a *Agent) handleSignRequest(body []byte) ([]byte, error) {
++    keyBlob, rest, err := ReadSSHString(body)
++    if err != nil {
++        return agentFailure(), nil
++    }
++    challenge, _, err := ReadSSHString(rest)
++    if err != nil {
++        return agentFailure(), nil
++    }
++    /* flags uint32 follows but is ignored for 18.19; the
++     * subset we ship signs with the identity's default
++     * algorithm. */
++    ids := a.Identities()
++    for _, id := range ids {
++        if !bytes.Equal(buildKeyBlob(id), keyBlob) {
++            continue
++        }
++        sig, sigErr := id.Sign(challenge)
++        if sigErr != nil {
++            return agentFailure(), nil
++        }
++        inner := bytes.Buffer{}
++        inner.Write(EncodeSSHString([]byte(id.Algorithm)))
++        inner.Write(EncodeSSHString(sig))
++        var out bytes.Buffer
++        out.WriteByte(AgentMsgSignResponse)
++        out.Write(EncodeSSHString(inner.Bytes()))
++        return out.Bytes(), nil
++    }
++    return agentFailure(), nil
++}
++
++/*
++ * buildKeyBlob composes the IDENTITIES_ANSWER / SIGN_REQUEST
++ * key-blob payload from an AgentIdentity: the algorithm name
++ * as a length-prefixed string followed by the identity's
++ * algorithm-specific body. This is the same shape the
++ * authorized_keys base64 payload decodes into.
++ */
++func buildKeyBlob(id AgentIdentity) []byte {
++    var out bytes.Buffer
++    out.Write(EncodeSSHString([]byte(id.Algorithm)))
++    out.Write(id.KeyBlob)
++    return out.Bytes()
++}
+diff --git a/wolfssh/agent_test.go b/wolfssh/agent_test.go
+new file mode 100644
+index 0000000..509048e
+--- /dev/null
++++ b/wolfssh/agent_test.go
+@@ -0,0 +1,368 @@
++/* agent_test.go
++ *
++ * Copyright (C) 2006-2026 wolfSSL Inc.
++ *
++ * This file is part of wolfSSL.
++ *
++ * wolfSSL is free software; you can redistribute it and/or modify
++ * it under the terms of the GNU General Public License as published
++ * by the Free Software Foundation; either version 2 of the License,
++ * or (at your option) any later version.
++ *
++ * wolfSSL is distributed in the hope that it will be useful, but
++ * WITHOUT ANY WARRANTY; without even the implied warranty of
++ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
++ * General Public License for more details.
++ *
++ * You should have received a copy of the GNU General Public License
++ * along with this program; if not, write to the Free Software
++ * Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA
++ * 02110-1335, USA
++ */
++
++/*
++ * Exercises the agent.go SSH-agent wire surface end to end:
++ * mint a fresh Ed25519 keypair via the wolfCrypt wrappers in
++ * the root go-wolfssl package, register it on a wolfssh Agent,
++ * round-trip an SSH_AGENTC_REQUEST_IDENTITIES, then ask the
++ * same agent to sign a challenge and verify the signature
++ * with wolfCrypt's Ed25519 verifier. The whole protocol path
++ * (wire framing, identity matching, signature envelope) goes
++ * through the public surface of this package; the test never
++ * pokes private state.
++ */
++package wolfssh_test
++
++import (
++    "bytes"
++    "encoding/binary"
++    "testing"
++
++    gowolf "github.com/wolfssl/go-wolfssl"
++    "github.com/wolfssl/go-wolfssl/wolfssh"
++)
++
++/*
++ * TestAgent_AddListSign is the PLAN.md 18.19 gate. Mints an
++ * Ed25519 identity, lists it through the agent protocol, then
++ * signs a challenge through the same protocol and verifies
++ * the resulting signature against the identity's public key.
++ */
++func TestAgent_AddListSign(t *testing.T) {
++    pub, sign, verify := newEd25519Identity(t)
++    defer verify.close()
++
++    /* Build an AgentIdentity. KeyBlob is the SSH wire body for
++     * ssh-ed25519: one length-prefixed string holding the 32
++     * raw pubkey bytes. */
++    keyBlob := encodeString(pub)
++    agent := wolfssh.NewAgent()
++    agent.AddIdentity(wolfssh.AgentIdentity{
++        KeyBlob:   keyBlob,
++        Algorithm: wolfssh.AlgSSHEd25519,
++        Comment:   "wolfci-test@localhost",
++        Sign:      sign,
++    })
++
++    /* --- list identities round trip ----------------------- */
++
++    listReq := []byte{wolfssh.AgentMsgRequestIdentities}
++    listResp, err := agent.HandleMessage(listReq)
++    if err != nil {
++        t.Fatalf("HandleMessage(list): %v", err)
++    }
++    if len(listResp) < 5 ||
++        listResp[0] != wolfssh.AgentMsgIdentitiesAnswer {
++        t.Fatalf("list response wrong msgID/short: %v",
++            listResp)
++    }
++    numKeys := binary.BigEndian.Uint32(listResp[1:5])
++    if numKeys != 1 {
++        t.Fatalf("list reported %d keys, want 1", numKeys)
++    }
++    body := listResp[5:]
++    gotBlob, rest, err := wolfssh.ReadSSHString(body)
++    if err != nil {
++        t.Fatalf("read keyblob: %v", err)
++    }
++    gotComment, _, err := wolfssh.ReadSSHString(rest)
++    if err != nil {
++        t.Fatalf("read comment: %v", err)
++    }
++    /* The reported blob is "string(algo) || body". Confirm
++     * both halves match what we registered. */
++    algo, blobBody, err := wolfssh.ReadSSHString(gotBlob)
++    if err != nil {
++        t.Fatalf("parse keyblob: %v", err)
++    }
++    if string(algo) != wolfssh.AlgSSHEd25519 {
++        t.Errorf("algo = %q, want ssh-ed25519", string(algo))
++    }
++    if !bytes.Equal(blobBody, keyBlob) {
++        t.Errorf("blob body mismatch")
++    }
++    if string(gotComment) != "wolfci-test@localhost" {
++        t.Errorf("comment = %q", string(gotComment))
++    }
++
++    /* --- sign round trip --------------------------------- */
++
++    challenge := []byte("wolfci-agent-test-challenge-bytes")
++    signReq := buildSignRequest(gotBlob, challenge)
++    signResp, err := agent.HandleMessage(signReq)
++    if err != nil {
++        t.Fatalf("HandleMessage(sign): %v", err)
++    }
++    if len(signResp) < 1 ||
++        signResp[0] != wolfssh.AgentMsgSignResponse {
++        t.Fatalf("sign response wrong msgID: %v",
++            signResp[:min(8, len(signResp))])
++    }
++    sigBlob, _, err := wolfssh.ReadSSHString(signResp[1:])
++    if err != nil {
++        t.Fatalf("read sig blob: %v", err)
++    }
++    sigAlgo, sigInner, err := wolfssh.ReadSSHString(sigBlob)
++    if err != nil {
++        t.Fatalf("parse sig blob: %v", err)
++    }
++    if string(sigAlgo) != wolfssh.AlgSSHEd25519 {
++        t.Errorf("sig algo = %q", string(sigAlgo))
++    }
++    sigBytes, _, err := wolfssh.ReadSSHString(sigInner)
++    if err != nil {
++        t.Fatalf("parse sig bytes: %v", err)
++    }
++    if len(sigBytes) != 64 {
++        t.Errorf("ed25519 sig is %d bytes, want 64",
++            len(sigBytes))
++    }
++    if !verify.verify(challenge, sigBytes) {
++        t.Errorf("signature did not verify against the "+
++            "registered identity")
++    }
++}
++
++/*
++ * TestAgent_SignRequestUnknownKeyFails locks in the failure
++ * path: a SIGN_REQUEST for a key the agent doesn't hold
++ * returns AgentMsgFailure rather than crashing or silently
++ * signing.
++ */
++func TestAgent_SignRequestUnknownKeyFails(t *testing.T) {
++    agent := wolfssh.NewAgent()
++    bogusBlob := encodeString(make([]byte, 32))
++    /* Wrap "ssh-ed25519" || bogusBlob to look like a real
++     * keyblob the SIGN_REQUEST would carry. */
++    fullBlob := append(
++        encodeString([]byte(wolfssh.AlgSSHEd25519)),
++        bogusBlob...)
++    req := buildSignRequest(fullBlob, []byte("data"))
++    resp, err := agent.HandleMessage(req)
++    if err != nil {
++        t.Fatalf("HandleMessage: %v", err)
++    }
++    if len(resp) != 1 || resp[0] != wolfssh.AgentMsgFailure {
++        t.Errorf("resp = %v, want single AgentMsgFailure "+
++            "byte", resp)
++    }
++}
++
++/*
++ * TestAgent_HandleFramedMessage_RoundTrip exercises the
++ * uint32-length-prefixed convenience entry point against the
++ * empty-list case: it should produce IDENTITIES_ANSWER with
++ * 0 keys, fully framed.
++ */
++func TestAgent_HandleFramedMessage_RoundTrip(t *testing.T) {
++    agent := wolfssh.NewAgent()
++    inner := []byte{wolfssh.AgentMsgRequestIdentities}
++    framed := append([]byte{0, 0, 0, byte(len(inner))}, inner...)
++    resp, err := agent.HandleFramedMessage(framed)
++    if err != nil {
++        t.Fatalf("HandleFramedMessage: %v", err)
++    }
++    if len(resp) < 9 {
++        t.Fatalf("framed resp too short: %v", resp)
++    }
++    length := binary.BigEndian.Uint32(resp[:4])
++    if int(length) != len(resp)-4 {
++        t.Errorf("framed length %d, body %d bytes",
++            length, len(resp)-4)
++    }
++    if resp[4] != wolfssh.AgentMsgIdentitiesAnswer {
++        t.Errorf("body msgID = %d, want IDENTITIES_ANSWER",
++            resp[4])
++    }
++    if num := binary.BigEndian.Uint32(resp[5:9]); num != 0 {
++        t.Errorf("framed empty-list reported %d keys", num)
++    }
++}
++
++/* ----- helpers --------------------------------------------- */
++
++/*
++ * encodeString wraps EncodeSSHString for one-shot inline use
++ * in test fixtures. Kept here so the test reads top to bottom
++ * without each step's serialisation noise.
++ */
++func encodeString(b []byte) []byte {
++    return wolfssh.EncodeSSHString(b)
++}
++
++/*
++ * buildSignRequest builds a wire SIGN_REQUEST body (no length
++ * prefix - HandleMessage takes the unframed payload).
++ */
++func buildSignRequest(keyBlob, challenge []byte) []byte {
++    var buf bytes.Buffer
++    buf.WriteByte(wolfssh.AgentMsgSignRequest)
++    buf.Write(wolfssh.EncodeSSHString(keyBlob))
++    buf.Write(wolfssh.EncodeSSHString(challenge))
++    /* flags */
++    var flags [4]byte
++    buf.Write(flags[:])
++    return buf.Bytes()
++}
++
++/*
++ * ed25519Verifier wraps a wolfCrypt Ed25519 key configured
++ * for verification. close() must be called to release the
++ * underlying wolfCrypt state.
++ */
++type ed25519Verifier struct {
++    key *gowolf.Ed25519_key
++}
++
++func (v *ed25519Verifier) verify(msg, sig []byte) bool {
++    var res int
++    rc := gowolf.Wc_ed25519_verify_msg(sig, len(sig),
++        msg, len(msg), &res, v.key)
++    return rc == 0 && res == 1
++}
++
++func (v *ed25519Verifier) close() {
++    if v.key != nil {
++        gowolf.Wc_ed25519_free(v.key)
++    }
++}
++
++/*
++ * newEd25519Identity mints a fresh Ed25519 keypair via
++ * wolfCrypt, returns the public-key bytes (32 raw bytes), a
++ * signing closure that uses Wc_ed25519_sign_msg on the
++ * private side, and a verifier holding the public key for
++ * the test to verify the agent's signatures with.
++ *
++ * The signing closure owns its own ed25519_key state so the
++ * test's verifier is fully separable; the cleanup t.Cleanup
++ * call below releases both.
++ */
++func newEd25519Identity(t *testing.T) ([]byte,
++    wolfssh.AgentSigner, *ed25519Verifier) {
++    t.Helper()
++    var rng gowolf.WC_RNG
++    if rc := gowolf.Wc_InitRng(&rng); rc != 0 {
++        t.Fatalf("Wc_InitRng: %d", rc)
++    }
++    t.Cleanup(func() { gowolf.Wc_FreeRng(&rng) })
++
++    var signerKey gowolf.Ed25519_key
++    if rc := gowolf.Wc_ed25519_init(&signerKey); rc != 0 {
++        t.Fatalf("Wc_ed25519_init (signer): %d", rc)
++    }
++    t.Cleanup(func() { gowolf.Wc_ed25519_free(&signerKey) })
++
++    if rc := gowolf.Wc_ed25519_make_key(&rng, 32,
++        &signerKey); rc != 0 {
++        t.Fatalf("Wc_ed25519_make_key: %d", rc)
++    }
++    pub := make([]byte, 32)
++    pubLen := 32
++    if rc := gowolf.Wc_ed25519_export_public(&signerKey, pub,
++        &pubLen); rc != 0 {
++        t.Fatalf("Wc_ed25519_export_public: %d", rc)
++    }
++    if pubLen != 32 {
++        t.Fatalf("ed25519 export pubLen = %d, want 32", pubLen)
++    }
++
++    /* Re-import the public bytes into a fresh key for the
++     * verifier - exercises the same wire shape an external
++     * client would see and keeps the signer/verifier keys
++     * independent (no shared mutable C state). */
++    verifyKey := &gowolf.Ed25519_key{}
++    if rc := gowolf.Wc_ed25519_init(verifyKey); rc != 0 {
++        t.Fatalf("Wc_ed25519_init (verifier): %d", rc)
++    }
++    t.Cleanup(func() { gowolf.Wc_ed25519_free(verifyKey) })
++    if rc := gowolf.Wc_ed25519_import_public(pub, len(pub),
++        verifyKey); rc != 0 {
++        t.Fatalf("Wc_ed25519_import_public: %d", rc)
++    }
++
++    sign := func(challenge []byte) ([]byte, error) {
++        sig := make([]byte, 64)
++        sigLen := 64
++        if rc := gowolf.Wc_ed25519_sign_msg(challenge,
++            len(challenge), sig, &sigLen,
++            &signerKey); rc != 0 {
++            return nil, &agentSignErr{rc: rc}
++        }
++        return sig[:sigLen], nil
++    }
++    return pub, sign, &ed25519Verifier{key: verifyKey}
++}
++
++/*
++ * agentSignErr lets the AgentSigner closure surface a numeric
++ * wolfCrypt return code as a Go error without dragging in
++ * fmt.
++ */
++type agentSignErr struct{ rc int }
++
++func (e *agentSignErr) Error() string {
++    return "wolfssh: agent: Wc_ed25519_sign_msg rc=" +
++        itoa(e.rc)
++}
++
++/*
++ * itoa is a fmt-free decimal integer formatter used by the
++ * one error path that needs it. Keeps the test surface free
++ * of fmt imports for a wrapper file that otherwise wouldn't
++ * need them.
++ */
++func itoa(n int) string {
++    if n == 0 {
++        return "0"
++    }
++    neg := false
++    if n < 0 {
++        neg = true
++        n = -n
++    }
++    var buf [16]byte
++    i := len(buf)
++    for n > 0 {
++        i--
++        buf[i] = byte('0' + n%10)
++        n /= 10
++    }
++    if neg {
++        i--
++        buf[i] = '-'
++    }
++    return string(buf[i:])
++}
++
++/*
++ * min returns the smaller of two ints. Go 1.21+ has a built-in,
++ * but go-wolfssl still builds against older toolchains in CI;
++ * a local copy keeps the test portable.
++ */
++func min(a, b int) int {
++    if a < b {
++        return a
++    }
++    return b
++}
