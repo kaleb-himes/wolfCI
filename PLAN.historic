@@ -4198,6 +4198,40 @@ completed and were moved here:
         exercises the success path: a clean sh inside the
         wrapper leaves build status BuildSuccess and the
         trailing echo runs normally.
+- [x] 18.24 Step library: nested node()
+        (internal/pipeline/steps_node.go). Failing test:
+        TestStep_NestedNodeReallocates runs a pipeline whose
+        outer agent is label 'A' and whose script block calls
+        node('B') { sh 'hostname' }; asserts the sh inside the
+        node('B') block ran on the label-B executor (using a
+        fake two-executor scheduler in the test). Mirrors how
+        master-job's parallel closures call node('macos') etc.
+        Done: nested node lives at
+        internal/pipeline/steps_node.go and exposes a new
+        NodeRouter interface (ExecutorForLabel(label) returns
+        the Executor to use). LocalExecutor gained a
+        matching NodeRouter field; non-LocalExecutor wrappers
+        can also opt into routing by implementing a
+        NodeRouter() NodeRouter method (the runtime checks for
+        that interface at scriptRuntime construction, behind
+        the existing *LocalExecutor type assertion). The
+        nativeNode step accepts (label, closure), resolves the
+        label through rt.nodeRouter, swaps rt.executor for the
+        closure duration, and restores via defer so the outer
+        executor is back in place after a normal return, a
+        throw, or a context cancel. Every executor-touching
+        step inside the closure (sh, withCredentials,
+        sshagent, archiveArtifacts, ...) picks up the new
+        executor through rt.executor and rt.workspace
+        unchanged. Gating: TestStep_NestedNodeReallocates
+        wires aExec + bExec keyed on labels "A" / "B" through
+        a mapRouter, sends sh 'outer-hostname' through the A
+        executor and sh 'hostname' through node('B') { ... };
+        asserts A saw exactly the outer call and B saw
+        exactly the inner one. TestStep_NestedNodeRestoresOnReturn
+        runs node('B') { sh 'inside-B' } then sh 'outside' in
+        the same script block and asserts the outer sh
+        re-routed back to A (i.e. the defer restored rt.executor).
 
 
 End of PLAN.historic.

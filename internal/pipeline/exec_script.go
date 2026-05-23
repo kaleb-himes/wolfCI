@@ -227,6 +227,12 @@ type scriptRuntime struct {
      * case. */
     dispatcher BuildDispatcher
 
+    /* nodeRouter resolves a label to an Executor for the
+     * 18.24+ node step. nil disables nested-node routing;
+     * the native errors out with an actionable message in
+     * that case. */
+    nodeRouter NodeRouter
+
     /* catchForced{Build,Stage} carry the 18.23 catchError
      * "this step / stage / build should be marked X" verdict
      * out of the script runtime so execStep can apply it
@@ -270,6 +276,17 @@ func newScriptRuntime(executor Executor) *scriptRuntime {
         rt.artifactsDir = le.ArtifactsDir
         rt.creds = le.Creds
         rt.dispatcher = le.Dispatcher
+        rt.nodeRouter = le.NodeRouter
+    }
+    /* Non-LocalExecutor implementations can opt into nested-
+     * node routing by exposing the router through this
+     * interface. Tests use it to wire a label->Executor map
+     * onto a fake executor without dragging LocalExecutor's
+     * /bin/sh implementation into the test surface. */
+    if nrp, ok := executor.(interface {
+        NodeRouter() NodeRouter
+    }); ok && rt.nodeRouter == nil {
+        rt.nodeRouter = nrp.NodeRouter()
     }
     rt.registerNatives()
     return rt

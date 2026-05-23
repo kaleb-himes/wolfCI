@@ -91,14 +91,6 @@ owner at the start of the phase):
   github-hook-for-GITScm-polling, poll-SCM, trigger-builds-
   remotely.
 
-- [ ] 18.24 Step library: nested node()
-        (internal/pipeline/steps_node.go). Failing test:
-        TestStep_NestedNodeReallocates runs a pipeline whose
-        outer agent is label 'A' and whose script block calls
-        node('B') { sh 'hostname' }; asserts the sh inside the
-        node('B') block ran on the label-B executor (using a
-        fake two-executor scheduler in the test). Mirrors how
-        master-job's parallel closures call node('macos') etc.
 - [ ] 18.25 currentBuild + previous-build API surface
         (internal/pipeline/builtins_currentbuild.go). Failing
         test: TestBuiltin_CurrentBuildPrev exposes

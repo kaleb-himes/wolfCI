@@ -145,6 +145,16 @@ type LocalExecutor struct {
      * which matches how Creds / Workspace handle the
      * no-runtime-wired case. */
     Dispatcher BuildDispatcher
+
+    /* NodeRouter is the seam the 18.24+ `node(label) { ... }`
+     * step uses to swap executors for a labeled body. nil
+     * means "no router wired" - the node native errors out
+     * with an actionable message in that case. The router
+     * resolves a label to whichever Executor the surrounding
+     * server has configured for that fleet; in tests, fakes
+     * carry a label->Executor map and assert per-executor
+     * call counts. */
+    NodeRouter NodeRouter
 }
 
 /* Sh runs script under /bin/sh -c and captures combined

@@ -75,6 +75,8 @@ func registerCoreSteps(rt *scriptRuntime) {
     registerBuildStep(rt)
     /* 18.23 catchError step. */
     registerCatchErrorStep(rt)
+    /* 18.24 nested node() step. */
+    registerNodeStep(rt)
 }
 
 /* ----- echo ------------------------------------------------- */
