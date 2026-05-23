@@ -3124,4 +3124,42 @@ Phase 17 complete; Current Phase remains Phase 17 for any
 follow-up polish iterations.
 
 
+## Phase 18 - Pipeline DSL + GHPRB master-job execution
+
+Phase 18 is still open in PLAN.md. The following sub-tasks
+completed and were moved here:
+
+- [x] 18.1 Credential record schema + on-disk sealed format.
+        Failing test (internal/credstore/format_test.go):
+        round-trip a SecretText, SshPrivateKey, and
+        UsernamePassword through Marshal/Unmarshal of the inner
+        JSON record, then through Seal/Unseal with a fixed
+        HKDF master key. Assert that flipping any byte in the
+        ciphertext makes Unseal return a non-nil error
+        (authentication tag rejects tampering).
+        Done: internal/credstore.Record + SecretTextPayload,
+        SshPrivateKeyPayload, UsernamePasswordPayload, plus
+        Marshal/Unmarshal (json.RawMessage payload so the
+        record carries any typed payload through). Seal
+        derives a 32-byte AES-256 key via
+        wolfcrypt.HKDFSHA256(IKM=masterSecret, salt=nil,
+        info=credID), draws a fresh 12-byte nonce from
+        wolfcrypt.RandBytes, and AES-256-GCM seals the
+        JSON-encoded record (nonce || ciphertext || tag).
+        Unseal is the inverse. Binding credID into the HKDF
+        info parameter means a ciphertext minted under id A
+        is rejected when opened under id B (GCM tag fails).
+        New primitives in internal/wolfcrypt/aead.go:
+        AESGCMSeal, AESGCMOpen, HKDFSHA256, all 1:1 wrappers
+        over go-wolfssl's Wc_AesGcm_Appended_Tag_* and Wc_HKDF
+        (no new patches - the go-wolfssl wrappers are already
+        carried in the vendored copy). Gates:
+        TestRecord_MarshalUnmarshalRoundTrip (all 3 types),
+        TestSeal_RoundTripsEveryType (all 3 types),
+        TestSeal_FreshNoncePerCall (two seals of identical
+        plaintext differ),
+        TestUnseal_RejectsTampering (every byte flip rejected),
+        TestUnseal_RejectsWrongCredID.
+
+
 End of PLAN.historic.

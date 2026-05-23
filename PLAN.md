@@ -91,14 +91,6 @@ owner at the start of the phase):
   github-hook-for-GITScm-polling, poll-SCM, trigger-builds-
   remotely.
 
-- [ ] 18.1 Credential record schema + on-disk sealed format.
-        Failing test (internal/credstore/format_test.go):
-        round-trip a SecretText, SshPrivateKey, and
-        UsernamePassword through Marshal/Unmarshal of the inner
-        JSON record, then through Seal/Unseal with a fixed
-        HKDF master key. Assert that flipping any byte in the
-        ciphertext makes Unseal return a non-nil error
-        (authentication tag rejects tampering).
 - [ ] 18.2 wolfCrypt seal/unseal primitive
         (internal/credstore/seal.go). Failing test:
         TestSeal_RoundTrip uses wc_HKDF + wc_AesGcmEncrypt
