@@ -91,14 +91,6 @@ owner at the start of the phase):
   github-hook-for-GITScm-polling, poll-SCM, trigger-builds-
   remotely.
 
-- [ ] 18.16 Step library: sh, echo, sleep, error
-        (internal/pipeline/steps_core.go). Failing test:
-        TestStep_ShReturnStatus exercises
-        `sh(returnStatus: true, script: 'exit 7')` and asserts
-        the integer return value. TestStep_ShReturnStdout
-        captures `sh(returnStdout: true, script: 'echo hi')`.
-        TestStep_Error makes the build fail. TestStep_Sleep
-        sleeps for a short duration and continues.
 - [ ] 18.17 Step library: cleanWs, dir, stash, unstash,
         archiveArtifacts (internal/pipeline/steps_workspace.go).
         Failing test: TestStep_StashUnstashRoundTrip stashes a

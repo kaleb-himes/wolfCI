@@ -185,93 +185,104 @@ func execStage(ctx context.Context, stage *Stage,
     return sr, nil
 }
 
-/* execStep dispatches one StepCall through the executor. The
- * 18.14 step library covers `sh` only; subsequent step-
- * library tasks (18.16-18.24) extend this dispatcher with
- * echo / sleep / error / cleanWs / stash / unstash /
- * archiveArtifacts / withCredentials / sshagent / load /
- * build / catchError / node.
+/* execStep dispatches one StepCall through the script
+ * runtime. The 18.16 refactor unifies the declarative-step
+ * path with the script-block path: every step becomes a
+ * synthetic CallExpr that the runtime evaluates against its
+ * native-step table (registered in steps_core.go). This lets
+ * `sh 'true'`, `sh(returnStatus: true, script: '...')`,
+ * `echo "hi"`, `sleep 50`, `error 'oops'`, and
+ * `script { body }` all share one dispatch + arg-coercion
+ * path. A throwSignal escaping the runtime turns into
+ * BuildFailure without propagating as an infrastructure
+ * error.
  */
 func execStep(ctx context.Context, step StepCall,
     executor Executor) (*StepRun, error) {
     sr := &StepRun{Name: step.Name, Status: BuildRunning}
-    switch step.Name {
-    case "sh":
-        script, err := stepStringArg(step, "script")
-        if err != nil {
-            sr.Status = BuildFailure
-            return sr, fmt.Errorf(
-                "pipeline.ExecDeclarative: sh step: %w", err)
-        }
-        code, out, err := executor.Sh(ctx, script)
-        sr.ExitCode = code
-        sr.Output = out
-        if err != nil {
-            sr.Status = BuildFailure
-            return sr, err
-        }
-        if code != 0 {
+    call, err := stepCallToCallExpr(step)
+    if err != nil {
+        sr.Status = BuildFailure
+        return sr, fmt.Errorf(
+            "pipeline.ExecDeclarative: step %q at %d:%d: %w",
+            step.Name, step.Pos.Line, step.Pos.Col, err)
+    }
+    rt := newScriptRuntime(executor)
+    env := newEnv(rt.globals)
+    v, evalErr := evalExpr(ctx, rt, env, call)
+    sr.Output = rt.outputString()
+    sr.ExitCode = rt.lastExitCode
+    if evalErr != nil {
+        if _, ok := evalErr.(*throwSignal); ok {
             sr.Status = BuildFailure
             return sr, nil
         }
-        sr.Status = BuildSuccess
-        return sr, nil
-    case "script":
-        /* The declarative parser captured the script body as
-         * raw tokens (StepCall.Block). 18.15 parses them as
-         * a script-subset AST and evaluates them under a
-         * fresh runtime; native echo/parallel are registered
-         * automatically. A throwSignal that reaches the top
-         * is treated as a build failure rather than an
-         * infrastructure error, so the build's err channel
-         * stays reserved for spawn/IO/parse failures. */
-        sf, err := ParseScriptTokens(step.Block)
-        if err != nil {
-            sr.Status = BuildFailure
-            return sr, fmt.Errorf(
-                "pipeline.ExecDeclarative: script step "+
-                    "parse: %w", err)
-        }
-        out, err := evalScriptBlock(ctx, executor, sf.Block)
-        sr.Output = out
-        if err != nil {
-            if _, ok := err.(*throwSignal); ok {
-                sr.Status = BuildFailure
-                return sr, nil
-            }
-            sr.Status = BuildFailure
-            return sr, err
-        }
-        sr.Status = BuildSuccess
-        return sr, nil
+        sr.Status = BuildFailure
+        return sr, evalErr
     }
-    sr.Status = BuildFailure
-    return sr, fmt.Errorf(
-        "pipeline.ExecDeclarative: unknown step %q at %d:%d "+
-            "(18.14/18.15 implement 'sh' and 'script' only)",
-        step.Name, step.Pos.Line, step.Pos.Col)
+    /* Some steps return a usable value (sh returnStatus, for
+     * example); a top-level integer return surfaces on the
+     * StepRun's ExitCode for downstream visibility even when
+     * the corresponding step didn't touch rt.lastExitCode.
+     * 18.14's test only checks ExitCode for failing sh, but
+     * future tests may want it for the returnStatus case
+     * directly. */
+    if n, ok := v.(*sNum); ok && sr.ExitCode == 0 {
+        sr.ExitCode = int(n.v)
+    }
+    sr.Status = BuildSuccess
+    return sr, nil
 }
 
-/* stepStringArg extracts a single string argument from a
- * StepCall. The 18.14 interpreter only needs to recognise the
- * naked form `sh '<script>'` and the paren'd form
- * `sh('<script>')` or `sh(script: '<script>')`. Each case
- * looks for the first TokString in the arg tokens; named-args
- * support is the simplest viable subset until 18.16 wires the
- * script-expression evaluator over StepCall.ArgTokens.
+/* stepCallToCallExpr lifts a parsed StepCall (from the
+ * declarative parser's captured token ranges) into the
+ * script-subset CallExpr the runtime evaluates. The
+ * conversion handles each ArgsKind plus the trailing-closure
+ * case (script { body }):
  *
- * The labelName parameter is used in error messages so the
- * caller can be specific about which step's args were
- * malformed.
+ *   ArgsNone:  CallExpr(IdentExpr(name), nil)
+ *   ArgsNaked: CallExpr(IdentExpr(name), [{Value: expr}])
+ *              with expr parsed from the captured token range
+ *   ArgsParen: CallExpr(IdentExpr(name), parsed arg list)
+ *
+ * HasBlock=true appends a ClosureExpr whose body is the
+ * captured block tokens parsed as a Block; the native
+ * receiving the call sees the closure as the last argument.
  */
-func stepStringArg(step StepCall, labelName string) (string,
-    error) {
-    for _, tok := range step.ArgTokens {
-        if tok.Kind == TokString {
-            return tok.Value, nil
+func stepCallToCallExpr(step StepCall) (*CallExpr, error) {
+    fn := &IdentExpr{Name: step.Name,
+        Pos: Position{Line: step.Pos.Line,
+            Col: step.Pos.Col}}
+    call := &CallExpr{Fn: fn,
+        Pos: Position{Line: step.Pos.Line,
+            Col: step.Pos.Col}}
+    switch step.ArgsKind {
+    case ArgsNone:
+        /* no args */
+    case ArgsNaked:
+        e, err := ParseExprTokens(step.ArgTokens)
+        if err != nil {
+            return nil, fmt.Errorf(
+                "parsing naked args: %w", err)
         }
+        call.Args = []CallArg{{Value: e}}
+    case ArgsParen:
+        a, err := ParseArgListTokens(step.ArgTokens)
+        if err != nil {
+            return nil, fmt.Errorf(
+                "parsing paren args: %w", err)
+        }
+        call.Args = a
     }
-    return "", fmt.Errorf(
-        "step %q at %d:%d: missing %s string argument",
-        step.Name, step.Pos.Line, step.Pos.Col, labelName)
+    if step.HasBlock {
+        sf, err := ParseScriptTokens(step.Block)
+        if err != nil {
+            return nil, fmt.Errorf(
+                "parsing block body: %w", err)
+        }
+        call.ClosureArg = &ClosureExpr{Body: sf.Block,
+            Pos: Position{Line: step.Pos.Line,
+                Col: step.Pos.Col}}
+    }
+    return call, nil
 }

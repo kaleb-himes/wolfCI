@@ -190,6 +190,17 @@ type scriptRuntime struct {
 
     echoMu  sync.Mutex
     echoBuf []string
+
+    /* lastExitCode tracks the most recent `sh` invocation's
+     * exit code so the declarative dispatcher in execStep can
+     * surface it on the StepRun even when sh threw on a
+     * non-zero exit (no returnStatus). Mutex-free because sh
+     * never runs in parallel branches in 18.16 - parallel
+     * runs closures, and closures invoke sh sequentially
+     * within their own goroutine; if a future step calls
+     * Sh concurrently from multiple branches we'll widen this
+     * to a per-goroutine carrier. */
+    lastExitCode int
 }
 
 func newScriptRuntime(executor Executor) *scriptRuntime {
@@ -212,10 +223,14 @@ func (rt *scriptRuntime) outputString() string {
 }
 
 func (rt *scriptRuntime) registerNatives() {
-    rt.globals.define("echo", &sNative{name: "echo",
-        fn: nativeEcho})
+    /* parallel lives here because it's part of how the script
+     * runtime drives execution (goroutine fan-out + sibling
+     * lifecycle). The step-library natives (sh / echo /
+     * sleep / error / script) are registered from
+     * steps_core.go so the step surface stays grouped. */
     rt.globals.define("parallel", &sNative{name: "parallel",
         fn: nativeParallel})
+    registerCoreSteps(rt)
 }
 
 /* ----- control-flow signals --------------------------------- */
@@ -546,20 +561,10 @@ func evalExpr(ctx context.Context, rt *scriptRuntime,
         if err != nil {
             return nil, err
         }
-        var args []scriptValue
-        for _, a := range x.Args {
-            v, err := evalExpr(ctx, rt, env, a.Value)
-            if err != nil {
-                return nil, err
-            }
-            args = append(args, v)
-        }
-        if x.ClosureArg != nil {
-            cl, err := evalExpr(ctx, rt, env, x.ClosureArg)
-            if err != nil {
-                return nil, err
-            }
-            args = append(args, cl)
+        args, err := collectCallArgs(ctx, rt, env, x.Args,
+            x.ClosureArg)
+        if err != nil {
+            return nil, err
         }
         return invokeCallable(ctx, rt, fn, args)
     case *CommandCallExpr:
@@ -916,21 +921,54 @@ func invokeClosure(ctx context.Context, rt *scriptRuntime,
     return &sNull{}, nil
 }
 
-/* ----- native functions ------------------------------------- */
+/* ----- call-arg collection ---------------------------------- */
 
-func nativeEcho(ctx context.Context, rt *scriptRuntime,
-    args []scriptValue) (scriptValue, error) {
-    if len(args) == 0 {
-        rt.appendEcho("")
-        return &sNull{}, nil
+/* collectCallArgs evaluates a CallExpr's arg list and any
+ * trailing closure into the value slice that invokeCallable
+ * expects. Groovy's named-arg convention: any args with a
+ * non-empty Name are gathered into a single map that becomes
+ * args[0]; positional args follow, and the trailing closure
+ * (if present) is appended as the last positional arg. This
+ * is the same shape Jenkins step functions receive, which
+ * lets the step-library natives in steps_core.go inspect
+ * args[0] uniformly (string for the naked form, map for the
+ * named-args form).
+ */
+func collectCallArgs(ctx context.Context, rt *scriptRuntime,
+    env *sEnv, callArgs []CallArg,
+    closureArg *ClosureExpr) ([]scriptValue, error) {
+    var named *sMap
+    var positional []scriptValue
+    for _, a := range callArgs {
+        v, err := evalExpr(ctx, rt, env, a.Value)
+        if err != nil {
+            return nil, err
+        }
+        if a.Name != "" {
+            if named == nil {
+                named = newMap()
+            }
+            named.set(a.Name, v)
+        } else {
+            positional = append(positional, v)
+        }
     }
-    parts := make([]string, 0, len(args))
-    for _, a := range args {
-        parts = append(parts, stringify(a))
+    var out []scriptValue
+    if named != nil {
+        out = append(out, named)
     }
-    rt.appendEcho(strings.Join(parts, " "))
-    return &sNull{}, nil
+    out = append(out, positional...)
+    if closureArg != nil {
+        cv, err := evalExpr(ctx, rt, env, closureArg)
+        if err != nil {
+            return nil, err
+        }
+        out = append(out, cv)
+    }
+    return out, nil
 }
+
+/* ----- native functions ------------------------------------- */
 
 /* nativeParallel runs each map value as a closure on its own
  * goroutine. The first error from any branch is preserved so

@@ -3701,4 +3701,71 @@ completed and were moved here:
         will build on).
 
 
+- [x] 18.16 Step library: sh, echo, sleep, error
+        (internal/pipeline/steps_core.go). Failing test:
+        TestStep_ShReturnStatus exercises
+        `sh(returnStatus: true, script: 'exit 7')` and
+        asserts the integer return value.
+        TestStep_ShReturnStdout captures
+        `sh(returnStdout: true, script: 'echo hi')`.
+        TestStep_Error makes the build fail. TestStep_Sleep
+        sleeps for a short duration and continues.
+        Done: internal/pipeline/steps_core.go adds the
+        native step library and registers it on the script
+        runtime via registerCoreSteps; the declarative
+        dispatcher (execStep) was refactored to a unified
+        path that converts every StepCall into a synthetic
+        CallExpr (via stepCallToCallExpr +
+        ParseExprTokens / ParseArgListTokens /
+        ParseScriptTokens) and evaluates it through the
+        same runtime that the script {} block uses. Result:
+        `sh 'true'`, `sh(returnStatus: true, script: '...')`,
+        `echo "hi"`, `sleep(time: 50, unit: 'MILLISECONDS')`,
+        `error 'msg'`, and `script { body }` all dispatch
+        through one path with one arg-coercion strategy.
+        Step semantics: sh defaults to echo-and-throw-on-
+        nonzero, returnStatus surfaces the exit code as an
+        sNum without throwing, returnStdout returns trimmed
+        stdout as an sStr (and suppresses the build-log
+        echo). The runtime's lastExitCode field records the
+        most recent sh exit code so the StepRun keeps an
+        accurate ExitCode even when sh threw, satisfying
+        the 18.14 failing-sh ExitCode=7 assertion under the
+        new dispatch path. sleep honours the named-arg form
+        (time + unit, with NANOSECONDS / MICROSECONDS /
+        MILLISECONDS / SECONDS / MINUTES / HOURS / DAYS
+        supported) and a bare-numeric shortcut that defaults
+        to milliseconds for testability; the wait respects
+        the passed ctx.Done(). error throws a
+        FlowInterruptedException sExcept so the script step
+        downgrades it to BuildFailure. script's native form
+        is `script(closure)` - the declarative dispatcher
+        wraps step.Block into a ClosureExpr that becomes
+        the trailing arg; nativeScript invokes the closure
+        via invokeClosure. Parser cleanup: parseOneArg now
+        accepts TokKeyword names as labelled args so
+        Groovy's keyword-as-label form (sh(script: ...),
+        sh(returnStatus: ...), parallel(failFast: ...))
+        works; this was the bug that surfaced as `expected
+        ) closing call at ... (got ":")` once the script
+        step started running the test's own arg list. New
+        helpers in parser_script.go: ParseExprTokens
+        (single-expression entry on a token slice),
+        ParseArgListTokens (arg-list entry with
+        bracketDepth pre-incremented so newlines act as
+        whitespace), and a shared ensureEOF that synthesizes
+        a trailing TokEOF when the caller's slice was
+        captured from inside a Jenkinsfile and lacks the
+        file-level sentinel. Gates: TestStep_ShReturnStatus
+        (the spec's name; rc=7 visible in step output),
+        TestStep_ShReturnStdout (got=hi after newline
+        trim), TestStep_Error (build FAILURE, statements
+        after error do not execute), TestStep_Sleep (>= 40
+        ms elapsed, before/after echoes in order), and
+        TestStep_EchoAtSteps (declarative-level
+        `echo 'top-level echo'` outside a script {} block
+        still produces captured output, locking in the
+        unified dispatch path).
+
+
 End of PLAN.historic.

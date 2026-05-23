@@ -472,21 +472,88 @@ func ParseScript(src []byte) (*ScriptFile, error) {
  * a uniform sentinel.
  */
 func ParseScriptTokens(tokens []Token) (*ScriptFile, error) {
-    if len(tokens) == 0 || tokens[len(tokens)-1].Kind != TokEOF {
-        line, col := 1, 1
-        if n := len(tokens); n > 0 {
-            line = tokens[n-1].Line
-            col = tokens[n-1].Col
-        }
-        tokens = append(tokens, Token{Kind: TokEOF,
-            Line: line, Col: col})
-    }
+    tokens = ensureEOF(tokens)
     p := &scriptParser{tokens: tokens}
     block, err := p.parseTopBlock()
     if err != nil {
         return nil, err
     }
     return &ScriptFile{Block: block}, nil
+}
+
+/* ParseExprTokens parses a single expression out of a token
+ * slice. Used by the declarative-step bridge in 18.16+ to
+ * lift a step's naked-args token range into an Expr the
+ * script runtime can evaluate uniformly.
+ */
+func ParseExprTokens(tokens []Token) (Expr, error) {
+    tokens = ensureEOF(tokens)
+    p := &scriptParser{tokens: tokens}
+    p.skipNL()
+    if p.atEOF() {
+        return nil, fmt.Errorf(
+            "pipeline.ParseExprTokens: empty input")
+    }
+    e, err := p.parseExpr()
+    if err != nil {
+        return nil, err
+    }
+    p.skipNL()
+    if !p.atEOF() {
+        tok := p.peek()
+        return nil, fmt.Errorf(
+            "pipeline.ParseExprTokens: trailing tokens after "+
+                "expression at %d:%d (got %q)",
+            tok.Line, tok.Col, tok.Value)
+    }
+    return e, nil
+}
+
+/* ParseArgListTokens parses a comma-separated argument list
+ * out of a token slice. The caller is responsible for
+ * stripping the surrounding parens before the call; the
+ * parser runs with bracketDepth pre-incremented so newlines
+ * inside the args behave as whitespace (matching the
+ * paren-content semantics of Groovy call syntax).
+ */
+func ParseArgListTokens(tokens []Token) ([]CallArg, error) {
+    tokens = ensureEOF(tokens)
+    p := &scriptParser{tokens: tokens, bracketDepth: 1}
+    p.skipWS()
+    if p.atEOF() {
+        return nil, nil
+    }
+    args, err := p.parseArgList()
+    if err != nil {
+        return nil, err
+    }
+    p.skipWS()
+    if !p.atEOF() {
+        tok := p.peek()
+        return nil, fmt.Errorf(
+            "pipeline.ParseArgListTokens: trailing tokens "+
+                "after arg list at %d:%d (got %q)",
+            tok.Line, tok.Col, tok.Value)
+    }
+    return args, nil
+}
+
+/* ensureEOF appends a synthetic TokEOF when one is missing so
+ * the parser's peek/advance helpers work uniformly whether the
+ * caller hands in a full Tokenize() output or a captured
+ * subrange.
+ */
+func ensureEOF(tokens []Token) []Token {
+    if len(tokens) > 0 && tokens[len(tokens)-1].Kind == TokEOF {
+        return tokens
+    }
+    line, col := 1, 1
+    if n := len(tokens); n > 0 {
+        line = tokens[n-1].Line
+        col = tokens[n-1].Col
+    }
+    return append(tokens, Token{Kind: TokEOF, Line: line,
+        Col: col})
 }
 
 /* ----- parser state ------------------------------------------- */
@@ -1604,8 +1671,12 @@ func (p *scriptParser) parseArgList() ([]CallArg, error) {
 }
 
 func (p *scriptParser) parseOneArg() (CallArg, error) {
-    /* Labelled arg: IDENT ":" expr. */
-    if p.peek().Kind == TokIdent &&
+    /* Labelled arg: <name> ":" expr. The name may be an IDENT
+     * or a keyword - Groovy lets you use reserved words as
+     * named-arg labels (sh(script: '...'), where 'script' is
+     * one of the declarative-pipeline keywords). */
+    head := p.peek()
+    if (head.Kind == TokIdent || head.Kind == TokKeyword) &&
         p.lookAhead(1).Kind == TokOperator &&
         p.lookAhead(1).Value == ":" {
         nameTok := p.advance()
