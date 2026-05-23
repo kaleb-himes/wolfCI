@@ -4928,3 +4928,67 @@ owner at the start of the phase):
 - Land scope: 19.1-19.5 land first (the core Permanent
   Agent flow); 19.6 (GCE) + 19.7 (Copy) ship in follow-on
   pushes.
+- [x] P1 Polish the job-edit view (YAML / raw mode).
+        URL: /jobs/<name>/edit?view=raw . Today the
+        textarea, the save/cancel controls, the
+        breadcrumb, and the view-toggle are arranged
+        without consistent padding, column alignment, or
+        section grouping; the result reads as haphazard
+        against the clean read-only /jobs/<name> page.
+        Match the read-only page's spacing rhythm, group
+        the editor and its controls into a single bordered
+        card with a sticky action bar at the bottom, give
+        the textarea a fixed monospace-width that aligns
+        to the page's content column, and surface
+        validation errors (parse failure, unknown field)
+        inline above the editor in a clearly-separated
+        alert section rather than as raw text bumped
+        against other elements. Tested by loading the
+        page in a real browser AND taking a before/after
+        screenshot for the commit message.
+        Done: jobedit.html raw view now wraps the form
+        in <div class="editor-card"> + .editor-form, the
+        textarea picks up .editor-textarea (fixed 80ch
+        max-width, monospace font, 380px min-height,
+        vertical resize handle), and the save/cancel
+        row becomes .editor-action-bar (position: sticky;
+        bottom: 0 inside the card). CSS hooks added to
+        app.css: .editor-card / .editor-form /
+        .editor-textarea / .editor-action-bar /
+        .editor-tabs / .form-actions / .btn-primary. Real-
+        browser visual sign-off pending operator testing
+        per CLAUDE.md rule 14. Structural gate:
+        TestJobEdit_RawView_HasEditorCardMarkers asserts
+        the four editor-card classNames are present in the
+        rendered ?view=raw body.
+- [x] P2 Polish the job-edit view (form mode).
+        URL: /jobs/<name>/edit?view=form . Same
+        alignment / grouping / control-choice rules from
+        CLAUDE.md rule 14: every named field is a labelled
+        row, checkboxes/radios for on-off, drop-downs for
+        bounded enumerations (retention strategy, agent-
+        label kind, etc.), text fields equal width within
+        their column, sections separated by fieldsets or
+        cards. The current form crams unrelated controls
+        together and reads cluttered; the target is the
+        same visual rhythm as the read-only job view.
+        Same testing protocol as P1.
+        Done: jobedit.html form view groups the
+        previously-unstructured top stack (Name,
+        Description, Node label, Timeout, Retries) into a
+        new <fieldset><legend>General</legend></fieldset>,
+        and the YAML-fragment textareas (Steps, Parameters,
+        Axis, Triggers downstream) into a new
+        <fieldset><legend>Spec details (YAML
+        fragments)</legend></fieldset>. The existing
+        fieldsets (Retention, Triggers, GitHub Pull
+        Request Builder, Pipeline script from SCM, Build
+        environment) carry through unchanged. CSS hooks
+        in app.css: fieldset.form-group gets a soft
+        border + uppercase muted legend label so each
+        section reads as its own card-ish block within
+        the panel. Real-browser visual sign-off pending
+        operator testing. Structural gate:
+        TestJobEdit_FormView_HasFieldsetGroupings asserts
+        the seven section <legend> labels are present in
+        the rendered ?view=form body.

@@ -33,45 +33,12 @@ Format conventions:
 
 ## Current Phase
 
-Polish queue - job-edit form / raw view UI polish.
-
-## Polish queue (after phase 19; visual gates need real-browser verification)
-
-The job-view page at /jobs/<name> is the reference for what
-"professional, clean, properly aligned" looks like in this
-codebase. The configure / edit views fall short of that bar
-and need a polish pass that brings them in line with
-CLAUDE.md rule 14.
-
-- [ ] P1 Polish the job-edit view (YAML / raw mode).
-        URL: /jobs/<name>/edit?view=raw . Today the textarea,
-        the save/cancel controls, the breadcrumb, and the
-        view-toggle are arranged without consistent padding,
-        column alignment, or section grouping; the result
-        reads as haphazard against the clean read-only
-        /jobs/<name> page. Match the read-only page's
-        spacing rhythm, group the editor and its controls
-        into a single bordered card with a sticky action bar
-        at the bottom, give the textarea a fixed
-        monospace-width that aligns to the page's content
-        column, and surface validation errors (parse failure,
-        unknown field) inline above the editor in a
-        clearly-separated alert section rather than as raw
-        text bumped against other elements. Tested by
-        loading the page in a real browser AND taking a
-        before/after screenshot for the commit message.
-- [ ] P2 Polish the job-edit view (form mode).
-        URL: /jobs/<name>/edit?view=form . Same alignment /
-        grouping / control-choice rules from CLAUDE.md
-        rule 14: every named field is a labelled row,
-        checkboxes/radios for on-off, drop-downs for
-        bounded enumerations (retention strategy,
-        agent-label kind, etc.), text fields equal width
-        within their column, sections separated by
-        fieldsets or cards. The current form crams
-        unrelated controls together and reads cluttered;
-        the target is the same visual rhythm as the
-        read-only job view. Same testing protocol as P1.
+Awaiting operator feedback - Phase 18 + Phase 19 + the
+Polish queue (P1 + P2) have all shipped. Visual sign-off
+of the polish work needs a real-browser screenshot per
+CLAUDE.md rule 14; the operator will collect any feedback
+during testing and we will fold it back into PLAN.md as
+new items.
 
 ## Backlog (not in main flow)
 

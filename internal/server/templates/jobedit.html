@@ -14,6 +14,9 @@
 <form method="POST" action="{{ .Action }}" class="job-form">
 <input type="hidden" name="view" value="form">
 
+<fieldset class="form-group">
+<legend>General</legend>
+
 <label for="f-name">Name</label>
 <input type="text" id="f-name" name="name" required
        value="{{ if .Job }}{{ .Job.Name }}{{ else }}{{ .Name }}{{ end }}"
@@ -34,6 +37,7 @@
 <label for="f-retries">Retries</label>
 <input type="number" id="f-retries" name="retries" min="0"
        value="{{ if .Job }}{{ .Job.Retries }}{{ else }}0{{ end }}">
+</fieldset>
 
 <fieldset class="form-group">
 <legend>Retention</legend>
@@ -72,18 +76,27 @@
 {{ end }}
 </fieldset>
 
-<label for="f-steps">Steps (YAML fragment)</label>
+<fieldset class="form-group">
+<legend>Spec details (YAML fragments)</legend>
+<p class="muted">Each textarea is a YAML list fragment - paste
+the entries verbatim. Empty means "no entries for this
+section". An invalid fragment fails the form save with the
+YAML parser's diagnostic so an operator can fix the
+typo.</p>
+
+<label for="f-steps">Steps</label>
 <textarea id="f-steps" name="steps_yaml" rows="8" placeholder="- name: build
   shell: make all">{{ stepsYAML .Job }}</textarea>
 
-<label for="f-params">Parameters (YAML fragment)</label>
+<label for="f-params">Parameters</label>
 <textarea id="f-params" name="parameters_yaml" rows="4">{{ parametersYAML .Job }}</textarea>
 
-<label for="f-axis">Axis (YAML fragment)</label>
+<label for="f-axis">Axis</label>
 <textarea id="f-axis" name="axis_yaml" rows="4">{{ axisYAML .Job }}</textarea>
 
-<label for="f-td">Triggers downstream (YAML fragment)</label>
+<label for="f-td">Triggers downstream</label>
 <textarea id="f-td" name="triggers_downstream_yaml" rows="4">{{ triggersDownstreamYAML .Job }}</textarea>
+</fieldset>
 
 <fieldset class="form-group">
 <legend>GitHub Pull Request Builder</legend>
@@ -183,15 +196,19 @@ Keep Jenkins build variables
 
 {{ else }}
 
-<form method="POST" action="{{ .Action }}">
+<div class="editor-card">
+<form method="POST" action="{{ .Action }}" class="editor-form">
 <input type="hidden" name="view" value="raw">
 <label for="spec">Spec (YAML)</label>
-<textarea id="spec" name="spec" rows="20" cols="80" required>{{ .Spec }}</textarea>
-<div class="form-actions">
+<textarea id="spec" name="spec" class="editor-textarea"
+          rows="20" required>{{ .Spec }}</textarea>
+<div class="editor-action-bar">
 <button type="submit">{{ if .IsNew }}Create{{ else }}Save{{ end }}</button>
 <a href="/jobs">Cancel</a>
 </div>
 </form>
+</div>
+
 <p class="muted">Expected schema: name, description, node_label,
 timeout (Go duration string like "5m"), retries, triggers,
 parameters, steps, axis, retention, upstream,

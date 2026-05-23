@@ -431,6 +431,219 @@ pre.log {
     margin-left: 6px;
 }
 
+/* Editor card (job-edit raw view, Polish queue P1).
+ *
+ * Wraps the YAML textarea + the save/cancel action bar in a
+ * single bordered card so the editor reads as one unit
+ * against the rest of the panel chrome, with the same
+ * spacing rhythm as the read-only /jobs/<name> page.
+ *
+ * The action bar is sticky-bottom so the save / cancel
+ * buttons stay reachable while scrolling a long YAML spec
+ * without forcing the operator back to the form bottom.
+ */
+.editor-card {
+    background: var(--panel-alt);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 16px 20px 0;
+    margin: 12px 0;
+}
+.editor-card .editor-form {
+    display: flex;
+    flex-direction: column;
+}
+.editor-textarea {
+    font-family: "SFMono-Regular", Menlo, Consolas, monospace;
+    font-size: 13px;
+    line-height: 1.45;
+    width: 100%;
+    /* Hard cap on width so the textarea never stretches into
+     * an unreadable 200-column ribbon on wide displays. The
+     * 80ch cap mirrors the 80-column wrap rule wolfCI source
+     * code follows. */
+    max-width: 80ch;
+    min-height: 380px;
+    margin-bottom: 0;
+    background: var(--panel);
+    color: var(--text);
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    padding: 10px 12px;
+    resize: vertical;
+}
+.editor-action-bar {
+    position: sticky;
+    bottom: 0;
+    background: var(--panel-alt);
+    border-top: 1px solid var(--border);
+    margin: 12px -20px 0;
+    padding: 12px 20px;
+    display: flex;
+    align-items: center;
+    gap: 12px;
+}
+.editor-action-bar button { margin: 0; }
+.editor-action-bar a {
+    color: var(--link);
+    text-decoration: none;
+    padding: 8px 12px;
+}
+.editor-action-bar a:hover { text-decoration: underline; }
+
+/* Editor tabs (Raw / Form). Existing markup; the rule here
+ * adds the tab-active visual since the template references
+ * the class.
+ */
+.editor-tabs {
+    display: flex;
+    gap: 4px;
+    margin: 0 0 12px;
+    border-bottom: 1px solid var(--border);
+}
+.editor-tabs .tab {
+    padding: 8px 14px;
+    color: var(--muted);
+    text-decoration: none;
+    font-size: 14px;
+    font-weight: 500;
+    border-bottom: 2px solid transparent;
+    margin-bottom: -1px;
+}
+.editor-tabs .tab:hover {
+    color: var(--text);
+}
+.editor-tabs .tab-active {
+    color: var(--text);
+    border-bottom-color: var(--accent);
+}
+
+/* Form-view fieldsets (Polish queue P2).
+ *
+ * The job-edit form view groups its controls into
+ * <fieldset class="form-group"> blocks (General, Retention,
+ * Triggers, Spec details, GHPRB, SCM, Build environment).
+ * The rule below gives every fieldset a soft border + a
+ * styled legend so each block reads as a distinct section
+ * instead of all the controls running together.
+ */
+fieldset.form-group {
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 12px 16px 8px;
+    margin: 16px 0;
+    background: var(--panel);
+}
+fieldset.form-group legend {
+    padding: 0 8px;
+    font-weight: 600;
+    color: var(--muted);
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    font-size: 12px;
+}
+fieldset.form-group .muted {
+    margin: 4px 0 12px;
+    font-size: 13px;
+}
+fieldset.form-group label.checkbox-row {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-weight: 400;
+    margin: 6px 0;
+}
+fieldset.form-group label.checkbox-row input[type="checkbox"] {
+    margin: 0;
+    width: auto;
+}
+
+/* Form actions row sits at the bottom of either view. */
+.form-actions {
+    margin-top: 16px;
+    display: flex;
+    align-items: center;
+    gap: 12px;
+}
+.form-actions a {
+    color: var(--link);
+    text-decoration: none;
+    padding: 8px 12px;
+}
+.form-actions a:hover { text-decoration: underline; }
+
+/* Primary button variant used by "New node" + landing cards. */
+.btn-primary {
+    display: inline-block;
+    background: var(--accent);
+    color: var(--accent-fg);
+    border: 1px solid var(--accent);
+    padding: 8px 16px;
+    border-radius: 4px;
+    text-decoration: none;
+    font-size: 14px;
+    font-weight: 500;
+}
+.btn-primary:hover { filter: brightness(1.08); }
+
+/* /nodes/new landing - three-card kind picker. */
+.node-kind-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+    gap: 16px;
+    margin: 12px 0 20px;
+}
+.node-kind-card {
+    display: block;
+    padding: 16px;
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    background: var(--panel-alt);
+    color: inherit;
+    text-decoration: none;
+}
+.node-kind-card:hover {
+    border-color: var(--accent);
+}
+.node-kind-card h3 {
+    margin: 0 0 8px;
+    font-size: 15px;
+    color: var(--text);
+    text-transform: none;
+    letter-spacing: 0;
+}
+.node-kind-card p {
+    margin: 0;
+    font-size: 13px;
+    line-height: 1.45;
+    color: var(--muted);
+}
+
+/* /nodes/<pending> attributes + connection command. */
+dl.node-attrs {
+    display: grid;
+    grid-template-columns: max-content 1fr;
+    gap: 6px 16px;
+    margin: 12px 0;
+}
+dl.node-attrs dt {
+    font-weight: 600;
+    color: var(--muted);
+}
+dl.node-attrs dd { margin: 0; }
+pre.cmd {
+    background: #0a0a0a;
+    color: #e6e6e6;
+    padding: 12px 16px;
+    border-radius: 4px;
+    border: 1px solid var(--border);
+    font-family: "SFMono-Regular", Menlo, Consolas, monospace;
+    font-size: 13px;
+    overflow-x: auto;
+    white-space: pre-wrap;
+    word-break: break-word;
+}
+
 /* Workspace preview */
 .workspace-preview {
     font-family: "SFMono-Regular", Menlo, Consolas, monospace;
