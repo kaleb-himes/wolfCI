@@ -91,13 +91,6 @@ owner at the start of the phase):
   github-hook-for-GITScm-polling, poll-SCM, trigger-builds-
   remotely.
 
-- [ ] 18.7 GHPRB poller debounce by (PR_id, head_sha). Failing
-        test: TestPoller_DebounceSameSHA polls the fake server
-        three times in a row with the same head; the second and
-        third polls emit zero events. A new commit (different
-        head_sha) on the same PR re-emits. State persists to
-        config-files/ghprb-state/<job_id>.yaml so a restart
-        does not re-fire.
 - [ ] 18.8 GHPRB poller integrates with scheduler. Failing test
         (internal/scheduler/ghprb_test.go):
         TestScheduler_GHPRBEnqueuesBuild: a Job whose trigger
