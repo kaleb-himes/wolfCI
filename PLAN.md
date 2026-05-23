@@ -91,17 +91,6 @@ owner at the start of the phase):
   github-hook-for-GITScm-polling, poll-SCM, trigger-builds-
   remotely.
 
-- [ ] 18.28 Build-environment toggles. Failing test:
-        TestJobEdit_BuildEnvRoundtrip POSTs a form with
-        prepare_environment_for_run = true,
-        keep_jenkins_environment_variables = true,
-        keep_jenkins_build_variables = true; the corresponding
-        BuildEnv flags appear in the job YAML and cause the
-        running build to inherit server-level env vars +
-        previous build vars accordingly. (Build vars
-        inheritance: a build started after a successful prior
-        build sees that build's exported env entries unless
-        the new build sets the same key.)
 - [ ] 18.29 UI: form fields for GHPRB trigger and Pipeline-
         from-SCM definition. Failing test:
         TestJobEdit_FormViewHasGHPRBSection asserts the

@@ -4395,6 +4395,63 @@ completed and were moved here:
         TestJobEdit_DiscardOldBuilds_RejectsUnknownStrategy
         confirms the form-rerender error path when strategy
         is not "log_rotation".
+- [x] 18.28 Build-environment toggles. Failing test:
+        TestJobEdit_BuildEnvRoundtrip POSTs a form with
+        prepare_environment_for_run = true,
+        keep_jenkins_environment_variables = true,
+        keep_jenkins_build_variables = true; the
+        corresponding BuildEnv flags appear in the job YAML
+        and cause the running build to inherit server-level
+        env vars + previous build vars accordingly.
+        Done: storage.Job gained an optional BuildEnv block
+        with three Jenkins-aligned bool fields
+        (PrepareEnvForRun,  KeepJenkinsEnvVars,
+        KeepJenkinsBuildVars). The block stays nil when none
+        of the three is on so the legacy YAML round-trip is
+        unchanged; turning any flag on materialises the
+        block. buildJobFromForm (internal/server/
+        jobform_builder.go) reads the three form fields via
+        a new isFormChecked helper that accepts the
+        on / true / 1 / yes shapes browsers and JS-driven
+        forms emit; missing values fall through to the legacy
+        unset behavior. scheduler.LocalExecutor
+        (internal/scheduler/local.go) now honors the flags
+        on each step's cmd.Env construction:
+          - job.BuildEnv == nil OR KeepJenkinsEnvVars == true:
+            os.Environ() is the base (preserves every
+            pre-18.28 test's expectations).
+          - KeepJenkinsEnvVars == false (with a non-nil
+            BuildEnv): drop host env, leaving only
+            WOLFCI_INPUTS + Step.Env + (if KeepJenkinsBuildVars)
+            prior exports.
+          - KeepJenkinsBuildVars == true AND num > 1:
+            loadPriorExportedEnv reads builds/<job>/<n-1>/
+            exported-env.json and the runner layers those KV
+            pairs between host env and Step.Env, so
+            Step.Env / job.Env overrides win on key
+            collisions (the spec's "unless the new build
+            sets the same key" semantic).
+        loadPriorExportedEnv tolerates a missing or
+        malformed file (returns nil), so a build whose
+        predecessor never wrote exports still runs cleanly.
+        Writing exported-env.json from a step is tracked in
+        the backlog; the file is the seam, and the gating
+        test seeds it directly to exercise the read path
+        without needing the writer yet. Gating:
+        TestJobEdit_BuildEnvRoundtrip posts the form with all
+        three flags = "on", confirms storage.Job.BuildEnv
+        carries the three fields true, and confirms the
+        marshalled YAML emits build_env: with the matching
+        keys. TestJobEdit_BuildEnv_BuildVarsInheritFromPriorBuild
+        seeds builds/envjob/1/exported-env.json with
+        WOLFCI_FROM_PRIOR=from-build-1, sets the per-job
+        .next-build-number counter to 1 (so the next Enqueue
+        returns 2, not colliding with the seeded prior),
+        spins up a real scheduler.Scheduler against a
+        scheduler.NewLocalExecutor, runs a job whose step
+        writes $WOLFCI_FROM_PRIOR to a marker file, and
+        asserts the marker contains from-build-1 - proving
+        the prior build's exported env actually propagated.
 
 
 End of PLAN.historic.

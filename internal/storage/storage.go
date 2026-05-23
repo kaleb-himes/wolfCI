@@ -129,6 +129,50 @@ type Job struct {
 	// job can post statuses to a different fork than the one
 	// it links from the badge.
 	GitHubProjectURL string `yaml:"github_project_url,omitempty"`
+
+	// BuildEnv carries the per-job build-environment toggles
+	// the 18.28 form surface introduced. The block is omitted
+	// from the YAML when every field is at its zero default
+	// (which preserves the legacy implicit behavior:
+	// os.Environ() is inherited, prior-build exported vars
+	// are not). Set explicitly to true to opt in.
+	BuildEnv *BuildEnv `yaml:"build_env,omitempty"`
+}
+
+// BuildEnv carries the build-environment-inheritance toggles
+// the 18.28 form surface exposes. The field names mirror the
+// Jenkins "Build Environment" block so an operator migrating
+// from Jenkins sees familiar terminology.
+//
+// Each field is opt-in; the zero value preserves the
+// pre-18.28 implicit behavior (host env inherited, prior
+// build exports ignored, no extra prep step). Nil pointer on
+// Job.BuildEnv is equivalent to the zero struct.
+type BuildEnv struct {
+	// PrepareEnvForRun enables a one-shot env-preparation
+	// step run before the job's own steps. Phase 18.28
+	// reserves the toggle; the actual prep work (e.g.
+	// sourcing a per-node .wolfcienv) lands when a node
+	// driver needs it.
+	PrepareEnvForRun bool `yaml:"prepare_environment_for_run,omitempty"`
+
+	// KeepJenkinsEnvVars controls whether the host process's
+	// env (os.Environ()) is layered under each step's
+	// command. Default true (matches Jenkins' "Keep Jenkins
+	// Environment Variables" default and the pre-18.28
+	// wolfCI behaviour). Set false to run with only the
+	// per-step Env overlay + WOLFCI_INPUTS + any prior-build
+	// inheritance, dropping every other host env entry.
+	KeepJenkinsEnvVars bool `yaml:"keep_jenkins_environment_variables,omitempty"`
+
+	// KeepJenkinsBuildVars enables inheritance of the prior
+	// build's exported env (read from
+	// builds/<job>/<n-1>/exported-env.json on the previous
+	// successful build's directory). The new build's
+	// Step.Env or job-level Env override any conflicting
+	// keys. Phase 18.28 reads the file; writing it from a
+	// step is tracked in the backlog.
+	KeepJenkinsBuildVars bool `yaml:"keep_jenkins_build_variables,omitempty"`
 }
 
 // GitHubPRBTrigger is the per-job GitHub Pull Request Builder

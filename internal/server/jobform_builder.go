@@ -236,6 +236,23 @@ func buildJobFromForm(r *http.Request) (*storage.Job, error) {
         job.Triggers = append(job.Triggers, trig)
     }
 
+    /* 18.28 BuildEnv toggles. Each field is opt-in; the
+     * block stays nil when none of the three is on so the
+     * legacy YAML round-trip is unchanged. Form checkboxes
+     * submit "true" / "on" when checked, nothing when not;
+     * accept either to be friendly to JS-driven forms that
+     * emit "true". */
+    prepEnv := isFormChecked(r.FormValue("prepare_environment_for_run"))
+    keepEnv := isFormChecked(r.FormValue("keep_jenkins_environment_variables"))
+    keepBuild := isFormChecked(r.FormValue("keep_jenkins_build_variables"))
+    if prepEnv || keepEnv || keepBuild {
+        job.BuildEnv = &storage.BuildEnv{
+            PrepareEnvForRun:     prepEnv,
+            KeepJenkinsEnvVars:   keepEnv,
+            KeepJenkinsBuildVars: keepBuild,
+        }
+    }
+
     /* Deep-list YAML fragments. Each unmarshal is into the
      * concrete slice type so a syntax error fails the form
      * with the schema-level reason instead of a wrapping
@@ -278,6 +295,19 @@ func contains(haystack []string, needle string) bool {
         if h == needle {
             return true
         }
+    }
+    return false
+}
+
+/* isFormChecked maps an HTML checkbox / boolean form value to
+ * a Go bool. HTML forms submit nothing when a checkbox is
+ * unchecked and "on" when checked; some JS-driven forms set
+ * "true" / "1" explicitly. Accept all three "on" / "true" /
+ * "1" forms so the builder is friendly to either path. */
+func isFormChecked(v string) bool {
+    switch strings.ToLower(strings.TrimSpace(v)) {
+    case "on", "true", "1", "yes":
+        return true
     }
     return false
 }

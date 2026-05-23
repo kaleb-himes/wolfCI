@@ -158,7 +158,34 @@ func (e *LocalExecutor) Execute(ctx context.Context, job *storage.Job, num int) 
 				envOverlay["WOLFCI_INPUTS"] = wolfciInputs
 			}
 		}
-		cmd.Env = mergeEnv(os.Environ(), envOverlay)
+		/* 18.28 BuildEnv toggles. The legacy default
+		 * (job.BuildEnv == nil) inherits os.Environ() and
+		 * ignores prior-build exports - preserving every
+		 * pre-18.28 test's expectations. When a BuildEnv
+		 * block is present:
+		 *
+		 *   - KeepJenkinsEnvVars=true: host env layered
+		 *     under (matches legacy behavior).
+		 *   - KeepJenkinsEnvVars=false: drop host env,
+		 *     leaving only WOLFCI_INPUTS + Step.Env +
+		 *     (if KeepJenkinsBuildVars) prior exports.
+		 *   - KeepJenkinsBuildVars=true: read prior
+		 *     successful build's exported-env.json from
+		 *     builds/<job>/<n-1>/exported-env.json and
+		 *     layer it BETWEEN host env and Step.Env (so
+		 *     Step.Env wins when both set the same key).
+		 */
+		var baseEnv []string
+		if job.BuildEnv == nil || job.BuildEnv.KeepJenkinsEnvVars {
+			baseEnv = os.Environ()
+		}
+		if job.BuildEnv != nil &&
+			job.BuildEnv.KeepJenkinsBuildVars && num > 1 {
+			prior := loadPriorExportedEnv(e.store.Root(),
+				job.Name, num-1)
+			baseEnv = mergeEnv(baseEnv, prior)
+		}
+		cmd.Env = mergeEnv(baseEnv, envOverlay)
 
 		runErr := cmd.Run()
 		if runErr != nil {
@@ -263,6 +290,30 @@ func writeResultJSON(dir string, result BuildResult) error {
 		return fmt.Errorf("write: %w", err)
 	}
 	return nil
+}
+
+// loadPriorExportedEnv reads builds/<job>/<num>/exported-env.json
+// and returns it as a Go map. A missing or malformed file
+// yields nil; the caller treats nil as "no prior exports"
+// without erroring the in-flight build. The file's expected
+// shape is a flat JSON object whose keys are env var names
+// and whose values are strings. Phase 18.28 reads this file
+// for the KeepJenkinsBuildVars=true path; writing it from a
+// step is tracked in the backlog.
+func loadPriorExportedEnv(rootDir, jobName string,
+	num int) map[string]string {
+
+	path := filepath.Join(rootDir, "builds", jobName,
+		strconv.Itoa(num), "exported-env.json")
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return nil
+	}
+	out := map[string]string{}
+	if err := json.Unmarshal(data, &out); err != nil {
+		return nil
+	}
+	return out
 }
 
 // mergeEnv layers overlay on top of base. base entries with keys
