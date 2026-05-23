@@ -6,7 +6,8 @@
 #   - scripts/test-check-ascii.sh        self-test for the ASCII gate
 #   - scripts/test-wolfssl-submodule.sh  wolfSSL submodule pin
 #   - scripts/test-wolfssh-submodule.sh  wolfssh submodule pin
-#   - go test ./internal/... ./cmd/... ./plugins/email-on-failure   Go unit tests
+#   - go test ./internal/... ./cmd/... ./plugins/email-on-failure ./tests/...
+#     Go unit tests plus the whole-binary e2e gates under tests/
 #   - scripts/test-build.sh              host-platform release build
 #   - scripts/test-install.sh            systemd unit + launchd plist
 #   - scripts/test-getting-started.sh    docs/GETTING-STARTED.md gate
@@ -23,11 +24,12 @@
 #   - scripts/test-build-wolfssh.sh: full wolfssh build (minutes).
 #     Same idea - run it explicitly when wolfssh changes.
 #
-# Why scope go test to ./internal/... rather than ./...:
+# Why scope go test to ./internal/... ./cmd/... ./tests/... rather
+# than ./...:
 #   The wolfSSL submodule under third_party/wolfssl contains paths
 #   (IDE project files, header trees) that confuse Go's package
 #   discovery. We restrict the Go test surface to wolfCI's own code
-#   under internal/ and cmd/.
+#   under internal/, cmd/, and tests/.
 
 set -eu
 
@@ -53,7 +55,7 @@ if [ -d third_party/go-wolfssl ] && [ -d third_party/go-wolfssl-patches ]; then
     fi
 fi
 
-go test ./internal/... ./cmd/... ./plugins/email-on-failure
+go test ./internal/... ./cmd/... ./plugins/email-on-failure ./tests/...
 
 scripts/test-build.sh
 scripts/test-install.sh

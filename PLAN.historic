@@ -241,6 +241,53 @@ completed and were moved here:
         directing the operator to --dry-run until 5.3 lands.
         Gate: TestConfig_RoundTrip, TestConfig_Defaults,
         TestLoadConfig_RejectsMissingFields, TestConfig_HasLabel.
+- [x] 5.2 Failing test (tests/agent_e2e_test.go): an agent
+        registers, receives a job, executes it, and returns the
+        result.
+        Sub-checkpoints:
+        - [x] 5.2a Protocol scaffold: api/v1/agent.proto with
+              the AgentService.Register RPC, scripts/gen-proto.sh
+              regen helper, generated agent.pb.go and
+              agent_grpc.pb.go, google.golang.org/grpc v1.56.3
+              and google.golang.org/protobuf v1.31.0 pinned in
+              go.mod for Go 1.18 compatibility.
+        - [x] 5.2b gRPC server: register the AgentService and
+              return a RegisterResponse for an incoming AgentInfo.
+              Done: internal/agentsvc.Server implements
+              wolfciv1.AgentServiceServer with an in-memory
+              registry and gRPC-status validation. Gate:
+              TestAgentService_RegisterRoundtrip (real gRPC over
+              plain TCP, ephemeral port) and
+              TestAgentService_Register_Validation.
+        - [x] 5.2c gRPC client + wolfSSL mTLS bridge: agent
+              dials the server, completes the mTLS handshake,
+              issues Register. Requires client-side wolfSSL in
+              internal/tlsutil.
+              Done: internal/tlsutil grew Dial (client side) and
+              ClientCAs/RootCAs/ServerName Config fields; the
+              server-side NewListener turns on
+              VERIFY_PEER | VERIFY_FAIL_IF_NO_PEER_CERT when
+              ClientCAs is non-empty. gRPC bridges via
+              grpc.WithContextDialer over insecure credentials
+              (encryption is below the gRPC transport).
+              testcerts.NewMTLSChain mints a CA + ServerAuth +
+              ClientAuth chain for tests. Gate:
+              TestAgentService_RegisterOverMTLS.
+        - [x] 5.2d End-to-end test (tests/agent_e2e_test.go):
+              spin up server, spin up agent, observe a Register
+              round trip, then drive a job through.
+              Done: TestAgentBinary_RegistersAndRunsJob in
+              tests/agent_e2e_test.go builds a fresh wolfci-agent
+              binary into the test temp dir, exec's it as a
+              subprocess pointed at an in-process agentsvc.Server
+              behind a wolfSSL mTLS listener, queues a
+              JobAssignment, and asserts the agent registers,
+              picks up the queued job, runs the shell step, and
+              reports BuildComplete with status "success".
+              scripts/test.sh now scopes go test to
+              ./internal/... ./cmd/... ./plugins/email-on-failure
+              ./tests/... so the e2e gate runs in the regular
+              suite.
 - [x] 5.3 Implement the agent protocol over gRPC + wolfSSL mTLS.
         Done for the wire and server sides: api/v1/agent.proto
         carries the Connect bidirectional stream (JobAssignment,
