@@ -111,6 +111,13 @@ type Job struct {
 	// Trigger.Config map[string]string cannot represent.
 	// Nil means GitHub PRB polling is not configured.
 	GitHubPRB *GitHubPRBTrigger `yaml:"github_prb_trigger,omitempty"`
+
+	// Env is a build-level env overlay applied to every Step's
+	// env at execution time. Populated by the scheduler at
+	// enqueue time for trigger sources that pass per-build
+	// context (e.g. GitHub PRB injects the ghprb* vars here in
+	// Phase 18.8). Normal job specs leave this empty.
+	Env map[string]string `yaml:"env,omitempty"`
 }
 
 // GitHubPRBTrigger is the per-job GitHub Pull Request Builder

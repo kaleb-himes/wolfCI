@@ -3339,4 +3339,64 @@ completed and were moved here:
         TestLoadState_MissingFileIsEmpty.
 
 
+- [x] 18.8 GHPRB poller integrates with scheduler. Failing test
+        (internal/scheduler/ghprb_test.go):
+        TestScheduler_GHPRBEnqueuesBuild: a Job whose trigger
+        config is github_prb, with a fake poller that pushes
+        one TriggerEvent, enqueues exactly one Build whose
+        Spec.Env carries every ghprb* var the master-job
+        Jenkinsfile references (see 18.9 for the list).
+        Done: scheduler.Scheduler.EnqueueGHPRB(job, event) is
+        the new entry point. It builds the ghprb env map via
+        ghprb.EnvForEvent(event, job.GitHubPRB.APICredentialsID),
+        clones job, sets clone.Env = env, and calls Enqueue.
+        Cloning rather than mutating the caller's job means the
+        per-build env never leaks back into the in-memory spec
+        the trigger source holds. storage.Job grew an Env
+        map[string]string field (yaml: env,omitempty) so the
+        spec snapshot the scheduler saves at enqueue time
+        carries the ghprb env vars verbatim; LoadSpecSnapshot
+        reads them back in the test. Gate:
+        TestScheduler_GHPRBEnqueuesBuild stands up a real
+        scheduler.Scheduler with an in-memory storage, calls
+        EnqueueGHPRB, reads the saved spec snapshot, and
+        asserts the ghprb* keys present.
+- [x] 18.9 ghprb* environment variable injection. Failing test:
+        TestBuild_GHPRBEnvVars exhaustively asserts that a
+        GHPRB-triggered build exposes:
+        ghprbActualCommit, ghprbActualCommitAuthor,
+        ghprbActualCommitAuthorEmail, ghprbAuthorRepoGitUrl,
+        ghprbCommentBody, ghprbCredentialsId,
+        ghprbGhRepository, ghprbPullAuthorEmail,
+        ghprbPullAuthorLogin, ghprbPullAuthorLoginMention,
+        ghprbPullDescription, ghprbPullId, ghprbPullLink,
+        ghprbPullLongDescription, ghprbPullTitle,
+        ghprbSourceBranch, ghprbTargetBranch,
+        ghprbTriggerAuthor, ghprbTriggerAuthorEmail,
+        ghprbTriggerAuthorLogin, ghprbTriggerAuthorLoginMention,
+        sha1, random_string. Source list:
+        third_party/testing/Jenkins/master-job/PRB.Jenkinsfile.
+        Done: internal/ghprb/env.go ships EnvForEvent which
+        returns the full 23-key map. TriggerEvent grew the rich
+        fields (AuthorEmail, SourceBranch, AuthorRepoGitURL,
+        PullTitle, PullDescription, PullLongDescription,
+        PullLink, GHRepository, CommentBody, CommitAuthor,
+        CommitAuthorEmail, TriggerAuthor, TriggerAuthorLogin,
+        TriggerAuthorEmail) so the helper has somewhere to read
+        them from; the minimal poller in 18.6 still only fills
+        the first four, and EnvForEvent emits empty strings for
+        the rest (Jenkins-style "unset variable -> empty" so
+        $var references in pipelines do not error out).
+        random_string is 16 hex chars of wolfCrypt CSPRNG bytes,
+        fresh per call (verified by a second-call inequality
+        assertion). The Login/Mention pair is also derived
+        deterministically: ghprbPullAuthorLoginMention is
+        "@" + Author, and ghprbTriggerAuthorLoginMention is
+        "@" + (TriggerAuthorLogin or Author when empty), so the
+        Jenkins ghprb plugin's PR-comment templates work
+        unchanged. Gates: TestBuild_GHPRBEnvVars (the spec's
+        name; pins every key to a known value),
+        TestEnvForEvent_PullID (int -> decimal string).
+
+
 End of PLAN.historic.

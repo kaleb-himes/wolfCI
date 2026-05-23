@@ -27,12 +27,43 @@ import (
 /* TriggerEvent is one open-PR signal the poller emits each time
  * GitHub reports the PR. The scheduler enqueues one build per
  * TriggerEvent (after the debounce in Phase 18.7).
+ *
+ * The first four fields (PRID, HeadSHA, Author, TargetBranch)
+ * are populated by the minimal Poller in 18.6. The richer
+ * fields below back the full ghprb* env var set EnvForEvent
+ * builds in 18.9; fields the poller has not yet learned to
+ * fetch from GitHub are left empty - EnvForEvent emits the
+ * env key with an empty value so the Jenkinsfile-style $var
+ * references still expand to the empty string (matching
+ * Jenkins's "unset variable -> empty" behavior in shell steps)
+ * rather than triggering a "key not found" path that would
+ * surface as a parse error.
  */
 type TriggerEvent struct {
     PRID         int
     HeadSHA      string
     Author       string
     TargetBranch string
+
+    /* Rich fields populated by future poller enhancements
+     * and by 18.8's scheduler integration when the upstream
+     * caller (admin "ok to test" comment receiver, future
+     * webhook handler) has the data on hand.
+     */
+    AuthorEmail         string
+    SourceBranch        string
+    AuthorRepoGitURL    string
+    PullTitle           string
+    PullDescription     string
+    PullLongDescription string
+    PullLink            string
+    GHRepository        string
+    CommentBody         string
+    CommitAuthor        string
+    CommitAuthorEmail   string
+    TriggerAuthor       string
+    TriggerAuthorLogin  string
+    TriggerAuthorEmail  string
 }
 
 /* Poller queries one GitHub repository's open PR list. Each

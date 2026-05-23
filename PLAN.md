@@ -91,28 +91,6 @@ owner at the start of the phase):
   github-hook-for-GITScm-polling, poll-SCM, trigger-builds-
   remotely.
 
-- [ ] 18.8 GHPRB poller integrates with scheduler. Failing test
-        (internal/scheduler/ghprb_test.go):
-        TestScheduler_GHPRBEnqueuesBuild: a Job whose trigger
-        config is github_prb, with a fake poller that pushes
-        one TriggerEvent, enqueues exactly one Build whose
-        Spec.Env carries every ghprb* var the master-job
-        Jenkinsfile references (see 18.9 for the list).
-- [ ] 18.9 ghprb* environment variable injection. Failing test:
-        TestBuild_GHPRBEnvVars exhaustively asserts that a
-        GHPRB-triggered build exposes:
-        ghprbActualCommit, ghprbActualCommitAuthor,
-        ghprbActualCommitAuthorEmail, ghprbAuthorRepoGitUrl,
-        ghprbCommentBody, ghprbCredentialsId,
-        ghprbGhRepository, ghprbPullAuthorEmail,
-        ghprbPullAuthorLogin, ghprbPullAuthorLoginMention,
-        ghprbPullDescription, ghprbPullId, ghprbPullLink,
-        ghprbPullLongDescription, ghprbPullTitle,
-        ghprbSourceBranch, ghprbTargetBranch,
-        ghprbTriggerAuthor, ghprbTriggerAuthorEmail,
-        ghprbTriggerAuthorLogin, ghprbTriggerAuthorLoginMention,
-        sha1, random_string. Source list:
-        third_party/testing/Jenkins/master-job/PRB.Jenkinsfile.
 - [ ] 18.10 GitHub commit-status POST. Failing test
         (internal/github/status_test.go):
         TestPostStatus_RoundTrip drives an httptest server,
