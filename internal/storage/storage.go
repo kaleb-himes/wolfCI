@@ -102,6 +102,54 @@ type Job struct {
 	// walks this slice and enqueues each named job, passing
 	// artifacts as declared. Phase 15.1.
 	TriggersDownstream []TriggerSpec `yaml:"triggers_downstream,omitempty"`
+
+	// GitHubPRB carries the GitHub Pull Request Builder trigger
+	// configuration when set. Phase 18.5 decision: the existing
+	// `triggers: []` field stays as the list of cron/webhook/scm
+	// sources; GitHub PRB lives in its own top-level subtree
+	// because its config carries lists and booleans the legacy
+	// Trigger.Config map[string]string cannot represent.
+	// Nil means GitHub PRB polling is not configured.
+	GitHubPRB *GitHubPRBTrigger `yaml:"github_prb_trigger,omitempty"`
+}
+
+// GitHubPRBTrigger is the per-job GitHub Pull Request Builder
+// configuration: which GitHub repo to poll, how to talk to the
+// GitHub API, which authors are allowed to trigger a build, and
+// how often to poll. Phase 18.6+ consumes this to drive a poller
+// that emits TriggerEvents and enqueues builds with the right
+// ghprb* env vars (Phase 18.9).
+type GitHubPRBTrigger struct {
+	// APICredentialsID names the secret-text credential in
+	// internal/credstore that holds the GitHub API token.
+	// Required.
+	APICredentialsID string `yaml:"api_credentials_id"`
+
+	// GHProjectURL is the canonical URL of the GitHub repo,
+	// e.g. https://github.com/wolfSSL/wolfssl/. Required.
+	GHProjectURL string `yaml:"gh_project_url"`
+
+	// AdminUsers is the allowlist of GitHub login names whose
+	// PRs auto-build without requiring an "ok to test" comment.
+	// PRs from anyone else are queued behind an admin comment.
+	AdminUsers []string `yaml:"admin_users,omitempty"`
+
+	// BranchesToBuild is the list of refspecs to match against
+	// the PR's target branch (e.g. "*/master", "*/release-*").
+	// Empty means every branch matches.
+	BranchesToBuild []string `yaml:"branches_to_build,omitempty"`
+
+	// PollIntervalSeconds is the poll cadence in seconds. Zero
+	// means "use the default" (300 seconds, decided in PLAN.md
+	// Phase 18 decisions); the scheduler applies the default at
+	// dispatch time.
+	PollIntervalSeconds int `yaml:"poll_interval_seconds,omitempty"`
+
+	// BuildMergeRef toggles between checking out refs/pull/N/merge
+	// (the GitHub-computed merge of the PR head into the base,
+	// true) and checking out refs/pull/N/head (the PR commit
+	// itself, false). Default false.
+	BuildMergeRef bool `yaml:"build_merge_ref,omitempty"`
 }
 
 // TriggerSpec is one outgoing edge in the downstream trigger

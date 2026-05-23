@@ -91,19 +91,6 @@ owner at the start of the phase):
   github-hook-for-GITScm-polling, poll-SCM, trigger-builds-
   remotely.
 
-- [ ] 18.5 GHPRB job-config schema. Extend the Job YAML to
-        accept a triggers.github_prb subtree:
-            triggers:
-              github_prb:
-                api_credentials_id: <cred-id>     # secret-text
-                gh_project_url: https://github.com/...
-                admin_users: [ wolfSSL-Bot, kaleb-himes, ... ]
-                branches_to_build: [ "*/master" ]
-                poll_interval_seconds: 300
-                build_merge_ref: true        # refs/pull/N/merge
-        Failing test (internal/jobspec/parse_test.go):
-        TestParse_GitHubPRBTrigger parses a YAML fragment and
-        round-trips the struct.
 - [ ] 18.6 GHPRB poller scaffold (internal/ghprb/poller.go).
         Failing test:
         TestPoller_DiscoversNewPR seeds a fake GitHub HTTP

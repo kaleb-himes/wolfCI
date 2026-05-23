@@ -3249,4 +3249,41 @@ completed and were moved here:
         TestCtl_CredAdd_RequiresStdinForSecretText.
 
 
+- [x] 18.5 GHPRB job-config schema. Extend the Job YAML to
+        accept a triggers.github_prb subtree:
+            triggers:
+              github_prb:
+                api_credentials_id: <cred-id>     # secret-text
+                gh_project_url: https://github.com/...
+                admin_users: [ wolfSSL-Bot, kaleb-himes, ... ]
+                branches_to_build: [ "*/master" ]
+                poll_interval_seconds: 300
+                build_merge_ref: true        # refs/pull/N/merge
+        Failing test (internal/jobspec/parse_test.go):
+        TestParse_GitHubPRBTrigger parses a YAML fragment and
+        round-trips the struct.
+        Done: storage.Job grows a sibling top-level field
+        GitHubPRB (yaml key github_prb_trigger) carrying a
+        GitHubPRBTrigger struct with APICredentialsID,
+        GHProjectURL, AdminUsers []string,
+        BranchesToBuild []string, PollIntervalSeconds int, and
+        BuildMergeRef bool. Schema deviation noted in the test
+        and the new type's doc comment: the spec sketched a
+        `triggers: github_prb: ...` map shape, but the
+        existing `triggers: []Trigger` list cannot accept both
+        a list and a map in the same YAML key without a
+        custom dynamic UnmarshalYAML. A sibling top-level key
+        carries the same data with no breaking change to the
+        existing trigger schema. Default PollIntervalSeconds
+        stays zero in the YAML; the scheduler applies the
+        300-second default at dispatch time per the locked-in
+        Phase 18 decision. Gates:
+        TestParse_GitHubPRBTrigger (the spec's name; YAML
+        round-trip through Save + LoadJob plus a marshaled-
+        YAML check that the new top-level key appears),
+        TestParse_GitHubPRBTrigger_DefaultPollInterval (omitting
+        poll_interval_seconds preserves the zero so the
+        scheduler can apply the default).
+
+
 End of PLAN.historic.
