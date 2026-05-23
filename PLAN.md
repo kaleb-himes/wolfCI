@@ -91,14 +91,6 @@ owner at the start of the phase):
   github-hook-for-GITScm-polling, poll-SCM, trigger-builds-
   remotely.
 
-- [ ] 18.10 GitHub commit-status POST. Failing test
-        (internal/github/status_test.go):
-        TestPostStatus_RoundTrip drives an httptest server,
-        sends pending / success / failure / error states under
-        a chosen context with a target_url, asserts the right
-        POST body and Authorization: Bearer header. HTTPS
-        transport is the wolfSSL TLS http client from Phase 1
-        (DO NOT use net/http defaults).
 - [ ] 18.11 Pipeline DSL lexer (internal/pipeline/lexer.go).
         Failing test: TestLexer_TokenizeMasterJob feeds the
         whole master-job PRB.Jenkinsfile in and asserts a

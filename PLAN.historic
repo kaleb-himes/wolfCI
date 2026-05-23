@@ -3399,4 +3399,31 @@ completed and were moved here:
         TestEnvForEvent_PullID (int -> decimal string).
 
 
+- [x] 18.10 GitHub commit-status POST. Failing test
+        (internal/github/status_test.go):
+        TestPostStatus_RoundTrip drives an httptest server,
+        sends pending / success / failure / error states under
+        a chosen context with a target_url, asserts the right
+        POST body and Authorization: Bearer header. HTTPS
+        transport is the wolfSSL TLS http client from Phase 1
+        (DO NOT use net/http defaults).
+        Done: internal/github.StatusClient posts to
+        /repos/{owner}/{repo}/statuses/{sha} with a JSON body
+        carrying state, context, target_url, description.
+        State is strongly typed (StatusState) with the four
+        legal values (pending/success/failure/error) exported
+        as constants so a typo at the call site fails to
+        compile rather than producing a 422 from GitHub.
+        NewStatusClient takes a *http.Client; production wiring
+        passes a wolfSSL-backed client (when the wolfSSL TLS
+        RoundTripper lands), tests inject httptest.Server's
+        Client. Token authenticates via Authorization: Bearer
+        <token>. Non-2xx responses propagate as errors with a
+        truncated body so a rate-limit HTML page does not
+        flood logs. Gates: TestPostStatus_RoundTrip (the spec's
+        name; all four states as sub-tests, full path + auth
+        + body assertions), TestPostStatus_RejectsBadState,
+        TestPostStatus_PropagatesNon2xx.
+
+
 End of PLAN.historic.
