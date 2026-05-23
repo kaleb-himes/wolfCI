@@ -4574,6 +4574,103 @@ completed and were moved here:
         received exactly one status POST whose body
         contains "state":"success" and
         "context":"PRB-master-job".
+- [x] 18.31 Parse-smoke test across third_party/testing.
+        Failing test (tests/jenkinsfile_parse_smoke_test.go):
+        walks third_party/testing/Jenkins for every file
+        named *.Jenkinsfile or Jenkinsfile, runs each
+        through internal/pipeline.Parse, asserts zero parse
+        errors. Files known to use plugin-provided steps
+        that we intentionally defer (docker.image,
+        copyArtifacts, etc.) are still expected to PARSE -
+        the steps are registered as no-op stubs in this
+        test only, so the parser sees a known step name.
+        The list of "execute-able" pipelines (a subset that
+        18.30-style integration tests cover) is recorded in
+        docs/pipeline-coverage.md.
+        Done: tests/jenkinsfile_parse_smoke_test.go walks
+        third_party/testing/Jenkins, runs every
+        *.Jenkinsfile / Jenkinsfile (79 files at landing
+        time) through pipeline.Parse, and reports one
+        t.Errorf per failing file plus a final
+        N-parsed/M-failed summary. Three parser tweaks
+        cleared the corpus: (1) parsePipelineBlock now
+        accepts environment / triggers / parameters /
+        tools / libraries as forward-compat opaque sections
+        (skipBracedSection matches brace depth so braces
+        inside string literals do not fool the matcher),
+        (2) parseAgent accepts `label <ident>` as well as
+        `label '<string>'` so Jenkinsfiles that use a
+        top-level def binding for the label (e.g. `def
+        servernode = 'linux-cloud-node'; agent { label
+        servernode }`) parse, (3) parseWhen no longer
+        errors on non-expression conditions (anyOf / allOf
+        / triggeredBy / branch / changeset / ...) - the
+        body is consumed as opaque so the stage parses; the
+        runtime treats those when conditions as "always
+        true" until a phase needs them. docs/pipeline-
+        coverage.md captures the parse vs execute split:
+        the parse-smoke gate covers every corpus file;
+        executable coverage is the master-job 18.30
+        integration test; the rest of the corpus + the
+        deferred plugin steps / sections live in the
+        backlog table.
+
+## Phase 18 - Pipeline DSL + GHPRB master-job execution
+
+Goal: parse and execute a declarative-pipeline Jenkinsfile of the
+shape used in
+third_party/testing/Jenkins/master-job/PRB.Jenkinsfile, drive it
+from a GHPRB trigger that polls GitHub for new PRs, and report
+status back to GitHub. By the end of this phase the master-job
+Jenkinsfile must run against a fake GitHub server and fake child
+jobs in an integration test, and every .Jenkinsfile under
+third_party/testing/Jenkins must at least PARSE without error.
+
+Decisions locked in for Phase 18 (confirmed with the project
+owner at the start of the phase):
+
+- DSL approach: hand-rolled Groovy subset lexer + parser +
+  interpreter in Go, targeting the subset actually used in
+  third_party/testing/Jenkins. The existing Jenkinsfiles run
+  verbatim - no translation.
+- Credential storage: config-files/credentials/<id>.sealed,
+  each file an AES-256-GCM ciphertext over a small JSON record
+  ({type, payload, created_at, label}). Per-credential nonce
+  (random 12 bytes), authentication tag appended. The seal key
+  is derived via HKDF-SHA256 from a server master secret stored
+  under config-files/server.yaml ("credential_master_secret:")
+  with the credential id as the HKDF info parameter. Cred types
+  supported by 18: secret-text, ssh-private-key,
+  username-password. wolfCrypt-native primitives only
+  (wc_AesGcm* + wc_HKDF), no OpenSSL-compat anywhere.
+- ssh-agent: wolfssh-based SSH agent protocol implementation.
+  Before any sshagent step work, inspect third_party/wolfssh
+  for agent-protocol support; if missing, ADD the wrapper to
+  third_party/go-wolfssl/wolfssh/ (and to the patch series
+  under third_party/go-wolfssl-patches/). No fallback to
+  OpenSSH's ssh-agent binary - wolfCI must be self-contained.
+- GHPRB poll rate: per-job, with pollIntervalSeconds in the
+  job YAML, default 300. Polling is the only trigger source
+  this phase (webhooks deferred to backlog).
+- Plugin-provided steps used only by non-master Jenkinsfiles
+  (docker.image, copyArtifacts) are DEFERRED. They live in a
+  follow-on phase. Phase 18 ships enough DSL to run the
+  master-job and to PARSE every other Jenkinsfile in
+  third_party/testing/Jenkins; execute-able coverage of the
+  downstream files comes later.
+- Out of scope for Phase 18 (per the screenshot review): block
+  build if certain jobs are running, do-not-allow-concurrent-
+  builds, do-not-resume-on-controller-restart, use-default-
+  load-balancer, permission-to-copy-artifact, pipeline-speed
+  override, use-snapshots, preserve-stashes, rebuild-options
+  (any), parameterized projects, throttle-builds, override-
+  build-parameters, properties-file/content,
+  script-file/content, groovy-script and groovy-sandbox (any
+  inline Groovy outside the pipeline {} top level),
+  additional-classpath, load-from-controller,
+  build-after-other-projects, build-periodically,
+  github-hook-for-GITScm-polling, poll-SCM,
+  trigger-builds-remotely.
 
 
 End of PLAN.historic.

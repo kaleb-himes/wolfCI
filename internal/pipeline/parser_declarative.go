@@ -426,14 +426,67 @@ func (p *parser) parsePipelineBlock() (*PipelineBlock, error) {
                 return nil, err
             }
             pb.Post = postb
+        case "environment", "triggers", "parameters",
+            "tools", "libraries":
+            /* 18.31 parse-smoke gate: every Jenkinsfile in
+             * third_party/testing/Jenkins must parse, even
+             * the ones using sections wolfCI does not yet
+             * execute. The contents are skipped (matched
+             * brace depth) so the parser stays
+             * forwards-compatible; runtime support for each
+             * lands when a corresponding gating phase
+             * needs it (env-block exports, scm/cron
+             * triggers, parameters{} declarations, etc.). */
+            p.advance()
+            if err := p.skipBracedSection(
+                sec.Value); err != nil {
+                return nil, err
+            }
         default:
             return nil, fmt.Errorf(
                 "pipeline.Parse: unknown pipeline section %q "+
                     "at %d:%d (18.12 supports agent, options, "+
-                    "stages, post)",
+                    "stages, post; 18.31 added "+
+                    "environment, triggers, parameters, "+
+                    "tools, libraries as opaque)",
                 sec.Value, sec.Line, sec.Col)
         }
     }
+}
+
+/* skipBracedSection consumes a `{ ... }` block, tracking
+ * nesting depth so braces inside string literals do not
+ * fool the matcher. Used by the 18.31 forward-compat
+ * sections (environment / triggers / etc.) whose contents
+ * we accept but do not yet model in the AST. */
+func (p *parser) skipBracedSection(name string) error {
+    p.skipNewlines()
+    if p.peek().Kind != TokLBrace {
+        return fmt.Errorf(
+            "pipeline.Parse: expected '{' after %q at %d:%d",
+            name, p.peek().Line, p.peek().Col)
+    }
+    p.advance()
+    depth := 1
+    for depth > 0 {
+        tok := p.peek()
+        if tok.Kind == TokEOF {
+            return fmt.Errorf(
+                "pipeline.Parse: unterminated %q section",
+                name)
+        }
+        if tok.Kind == TokLBrace {
+            depth++
+        } else if tok.Kind == TokRBrace {
+            depth--
+            if depth == 0 {
+                p.advance()
+                break
+            }
+        }
+        p.advance()
+    }
+    return nil
 }
 
 /* parseAgent parses the body of `agent ...` (caller consumed
@@ -477,13 +530,24 @@ func (p *parser) parseAgent() (*AgentBlock, error) {
     p.advance() /* 'label' */
     p.skipNewlines()
     val := p.peek()
-    if val.Kind != TokString {
+    switch val.Kind {
+    case TokString:
+        p.advance()
+        ab.Label = val.Value
+    case TokIdent:
+        /* `label someVar` where someVar is a top-level
+         * `def` binding. The parser accepts the bare ident
+         * as an opaque label - executors that need to
+         * resolve it can look the binding up at runtime;
+         * the 18.31 parse-smoke gate only needs us to
+         * accept the shape without erroring. */
+        p.advance()
+        ab.Label = val.Value
+    default:
         return nil, fmt.Errorf(
-            "pipeline.Parse: expected string after 'label' "+
-                "at %d:%d", val.Line, val.Col)
+            "pipeline.Parse: expected string or identifier "+
+                "after 'label' at %d:%d", val.Line, val.Col)
     }
-    p.advance()
-    ab.Label = val.Value
     p.skipNewlines()
     if p.peek().Kind != TokRBrace {
         return nil, fmt.Errorf(
@@ -687,31 +751,53 @@ func (p *parser) parseWhen() (*WhenBlock, error) {
     }
     p.skipNewlines()
     head := p.peek()
-    if head.Kind != TokKeyword || head.Value != "expression" {
-        return nil, fmt.Errorf(
-            "pipeline.Parse: expected 'expression' inside "+
-                "when {} at %d:%d (18.12 supports the "+
-                "expression form only)",
-            head.Line, head.Col)
-    }
-    p.advance() /* 'expression' */
-    bodyOpen, err := p.expectLBrace("expression")
-    if err != nil {
-        return nil, err
-    }
-    body, err := p.captureUntil(TokRBrace, bodyOpen, "{")
-    if err != nil {
-        return nil, err
-    }
-    wb := &WhenBlock{ExpressionBody: body,
+    wb := &WhenBlock{
         Pos: Position{Line: openTok.Line, Col: openTok.Col}}
-    p.skipNewlines()
-    if p.peek().Kind != TokRBrace {
-        return nil, fmt.Errorf(
-            "pipeline.Parse: expected } to close when at "+
-                "%d:%d", p.peek().Line, p.peek().Col)
+    if head.Kind == TokKeyword && head.Value == "expression" {
+        p.advance() /* 'expression' */
+        bodyOpen, err := p.expectLBrace("expression")
+        if err != nil {
+            return nil, err
+        }
+        body, err := p.captureUntil(TokRBrace, bodyOpen, "{")
+        if err != nil {
+            return nil, err
+        }
+        wb.ExpressionBody = body
+        p.skipNewlines()
+        if p.peek().Kind != TokRBrace {
+            return nil, fmt.Errorf(
+                "pipeline.Parse: expected } to close when "+
+                    "at %d:%d",
+                p.peek().Line, p.peek().Col)
+        }
+        p.advance()
+        return wb, nil
     }
-    p.advance()
+    /* 18.31 forward-compat: when-conditions wolfCI does not
+     * yet evaluate (anyOf, allOf, triggeredBy, branch,
+     * environment, changeset, ...) parse as opaque so the
+     * Jenkinsfile-corpus smoke test sees zero parse errors.
+     * The stage's predicate evaluates to true for now;
+     * proper routing lands when a phase needs it. */
+    depth := 1
+    for depth > 0 {
+        tok := p.peek()
+        if tok.Kind == TokEOF {
+            return nil, fmt.Errorf(
+                "pipeline.Parse: unterminated when block")
+        }
+        if tok.Kind == TokLBrace {
+            depth++
+        } else if tok.Kind == TokRBrace {
+            depth--
+            if depth == 0 {
+                p.advance()
+                break
+            }
+        }
+        p.advance()
+    }
     return wb, nil
 }
 
