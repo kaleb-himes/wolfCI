@@ -91,15 +91,6 @@ owner at the start of the phase):
   github-hook-for-GITScm-polling, poll-SCM, trigger-builds-
   remotely.
 
-- [ ] 18.25 currentBuild + previous-build API surface
-        (internal/pipeline/builtins_currentbuild.go). Failing
-        test: TestBuiltin_CurrentBuildPrev exposes
-        currentBuild.getDisplayName(),
-        currentBuild.getPreviousBuild(),
-        previousBuild.getBuildVariables(),
-        previousBuild.rawBuild.getEnvironment(). Same shape as
-        jenkinsUtils.groovy uses (getLastBuild,
-        commitHashForBuild). Backed by Phase 4's job/build store.
 - [ ] 18.26 Pipeline-script-from-SCM job definition. Failing
         test (internal/jobspec/scm_test.go):
         TestJob_PipelineScriptFromSCM loads a job whose

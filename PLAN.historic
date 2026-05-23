@@ -4232,6 +4232,64 @@ completed and were moved here:
         runs node('B') { sh 'inside-B' } then sh 'outside' in
         the same script block and asserts the outer sh
         re-routed back to A (i.e. the defer restored rt.executor).
+- [x] 18.25 currentBuild + previous-build API surface
+        (internal/pipeline/builtins_currentbuild.go). Failing
+        test: TestBuiltin_CurrentBuildPrev exposes
+        currentBuild.getDisplayName(),
+        currentBuild.getPreviousBuild(),
+        previousBuild.getBuildVariables(),
+        previousBuild.rawBuild.getEnvironment(). Same shape as
+        jenkinsUtils.groovy uses (getLastBuild,
+        commitHashForBuild). Backed by Phase 4's job/build
+        store.
+        Done: builtins live at
+        internal/pipeline/builtins_currentbuild.go. A new
+        BuildInfo struct carries the metadata a build exposes
+        (JobName, Number, DisplayName, Result, Variables,
+        Environment, PreviousBuildNumber); BuildInfoProvider
+        is the seam the runtime consults
+        (CurrentBuild() + LookupBuild(jobName, number)).
+        Production wiring lives outside the pipeline package
+        (a future adapter reads builds/<job>/<n>/ from disk);
+        the gating test passes a tiny in-memory mapBuildInfo.
+        LocalExecutor gained a BuildInfo field, and the
+        scriptRuntime inherits the provider via the same
+        opt-in interface pattern node-router uses (a non-
+        LocalExecutor wrapper can implement BuildInfo()
+        BuildInfoProvider to wire the provider). After
+        registerCoreSteps, registerCurrentBuild attaches a
+        synthesized sMap to rt.globals["currentBuild"] when a
+        provider is wired; without a provider the global is
+        omitted and any reference surfaces the usual
+        undefined-identifier error - matching the "seam
+        wired = feature on" pattern across the step library.
+        buildInfoToValue builds the sMap with: bare-field
+        aliases (number, displayName, result, projectName,
+        fullProjectName), method getters (getNumber,
+        getDisplayName, getResult, getProjectName,
+        getFullProjectName, getBuildVariables,
+        getEnvironment), and the recursive getPreviousBuild
+        accessor (looks up the prev build via the provider,
+        renders it through the same buildInfoToValue so the
+        previousBuild surface mirrors currentBuild's). The
+        Jenkins rawBuild indirection points at the same sMap
+        so previousBuild.rawBuild.getEnvironment() resolves
+        through memberAccess(rawBuild) -> the same map ->
+        getEnvironment() -> the environment map without extra
+        plumbing. stringMapToScript renders Go
+        map[string]string into the sMap the API needs.
+        Gating: TestBuiltin_CurrentBuildPrev wires current=#2
+        (PreviousBuildNumber=1) + previous=#1 with
+        Variables[X]="from-#1" + Environment[GIT_COMMIT]=
+        "abc123" and asserts the three values land in the
+        workspace via per-helper output files. The pipeline
+        uses printf '%s' '...' (not echo) so the leading '#'
+        in the display name does not trip shell comment
+        parsing. TestBuiltin_CurrentBuildNoPrev exercises the
+        Number=1, PreviousBuildNumber=0 case: getPreviousBuild
+        returns null, the `prev == null ?` ternary picks
+        'none', and the workspace marker confirms the null-
+        short-circuit path.
 
 
 End of PLAN.historic.

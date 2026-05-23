@@ -155,6 +155,12 @@ type LocalExecutor struct {
      * carry a label->Executor map and assert per-executor
      * call counts. */
     NodeRouter NodeRouter
+
+    /* BuildInfo backs the 18.25+ `currentBuild` /
+     * `currentBuild.getPreviousBuild()` builtins. nil
+     * disables the global; production wiring supplies an
+     * adapter that reads builds/<job>/<n>/ from disk. */
+    BuildInfo BuildInfoProvider
 }
 
 /* Sh runs script under /bin/sh -c and captures combined

@@ -233,6 +233,10 @@ type scriptRuntime struct {
      * that case. */
     nodeRouter NodeRouter
 
+    /* builds backs the 18.25+ currentBuild / previousBuild
+     * builtins. nil disables those globals. */
+    builds BuildInfoProvider
+
     /* catchForced{Build,Stage} carry the 18.23 catchError
      * "this step / stage / build should be marked X" verdict
      * out of the script runtime so execStep can apply it
@@ -277,6 +281,7 @@ func newScriptRuntime(executor Executor) *scriptRuntime {
         rt.creds = le.Creds
         rt.dispatcher = le.Dispatcher
         rt.nodeRouter = le.NodeRouter
+        rt.builds = le.BuildInfo
     }
     /* Non-LocalExecutor implementations can opt into nested-
      * node routing by exposing the router through this
@@ -287,6 +292,14 @@ func newScriptRuntime(executor Executor) *scriptRuntime {
         NodeRouter() NodeRouter
     }); ok && rt.nodeRouter == nil {
         rt.nodeRouter = nrp.NodeRouter()
+    }
+    /* Same opt-in pattern for the currentBuild builtin so
+     * non-LocalExecutor fakes can wire a BuildInfoProvider
+     * without dragging the rest of LocalExecutor with them. */
+    if bp, ok := executor.(interface {
+        BuildInfo() BuildInfoProvider
+    }); ok && rt.builds == nil {
+        rt.builds = bp.BuildInfo()
     }
     rt.registerNatives()
     return rt
@@ -428,6 +441,11 @@ func (rt *scriptRuntime) registerNatives() {
         rt.globals.define(typeName, &sStr{v: typeName})
     }
     registerCoreSteps(rt)
+    /* 18.25 currentBuild / previousBuild builtins. The
+     * registration is a no-op when the runtime has no
+     * BuildInfoProvider wired, matching the rest of the
+     * "seam wired = feature on" pattern. */
+    registerCurrentBuild(rt)
 }
 
 /* ----- control-flow signals --------------------------------- */
