@@ -4023,6 +4023,74 @@ completed and were moved here:
         lives in-process as a goroutine, and the spawned
         shells discover it via the standard SSH_AUTH_SOCK env
         the wolfCI runtime injects.
+- [x] 18.21 Step library: load
+        (internal/pipeline/steps_load.go). Failing test:
+        TestStep_LoadHelperGroovy loads
+        third_party/testing/Jenkins/jenkins-functions/
+        jenkinsUtils.groovy from a build workspace, then
+        calls each of its top-level helpers (cleanupName,
+        getJobResultName, commitHashForBuild, getLastBuild,
+        checkIfPassed, shouldTestRetry) with synthesized
+        inputs and asserts the right outputs.
+        Done: load step lives at
+        internal/pipeline/steps_load.go. The native reads a
+        Groovy file from the build workspace (absolute paths
+        honored verbatim, relative paths join with
+        rt.workspace), parses it with the existing
+        ParseScript entry point, evaluates the body in a
+        fresh env (loadedEnv) that is a child of rt.globals,
+        and returns an sMap whose keys are the loaded
+        script's top-level def-function names and whose
+        values are the matching closures. The trailing
+        `return this` idiom works because we pre-define
+        `this` as a sentinel sNull in loadedEnv and tolerate
+        retSignal on the way out (its value is discarded -
+        we snapshot closures from loadedEnv directly).
+        Closures capture loadedEnv lexically so a later
+        `utils.getJobResultName('step1')` call resolves
+        cleanupName through loadedEnv and env via
+        rt.globals (Groovy's assignment-without-`def` walks
+        to root, which is rt.globals). Companion changes in
+        exec_script.go: (1) memberAccess gained dispatch
+        tables for sStr (replaceAll, contains, startsWith,
+        endsWith, trim, toString, length / size), sList
+        (join, size, length, isEmpty, toString), and
+        sExcept (message, type, getMessage, toString) so
+        chained method calls like
+        name.replaceAll('/','_').replaceAll('-','_').
+        replaceAll(' ','_') and ex.toString().contains(s)
+        work; (2) instanceofCheck grew handling for sList
+        vs Collection / List / ArrayList / Iterable, sMap
+        vs Map / HashMap / LinkedHashMap, sStr vs String /
+        CharSequence / GString, sNum vs Number / Integer /
+        Long, sBool vs Boolean, plus sExcept vs Exception /
+        Throwable / RuntimeException, and registerNatives
+        pre-bound those type-name identifiers as sStr
+        globals so `x instanceof Exception` resolves at
+        eval time without each Jenkinsfile pre-declaring
+        them; (3) invokeClosure gained Groovy's implicit-
+        return-of-last-expression semantics so map-literal
+        closures like [getEnvironment: { -> fakeRawEnv }]
+        return their last-expression value instead of
+        sNull, which is what
+        build.rawBuild.getEnvironment() requires; (4)
+        evalExpr's MapExpr case stopped looking up bare-
+        ident map keys via env.lookup and started using the
+        ident's spelling directly (Groovy syntax for
+        string-valued keys), so `env = [JOB_NAME: 'demo-job']`
+        no longer trips the "undefined identifier JOB_NAME"
+        error introduced by the type-name pre-bindings.
+        Gating: TestStep_LoadHelperGroovy copies the real
+        jenkinsUtils.groovy into a temp workspace, runs a
+        pipeline that synthesizes inputs for each helper
+        (sMap-of-closures stand-ins for the build /
+        rawBuild / getEnvironment chain; an explicit
+        Exception with one of the canned retry-trigger
+        strings in its message), invokes each helper
+        through `utils.<name>(...)`, and asserts six per-
+        helper output files match the expected results
+        ("a_b_c_d", "RESULT_demo_job_step1", "abc123",
+        "null", "false", "true").
 
 
 End of PLAN.historic.

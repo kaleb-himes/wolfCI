@@ -69,6 +69,8 @@ func registerCoreSteps(rt *scriptRuntime) {
     registerCredsSteps(rt)
     /* 18.20 sshagent step library. */
     registerSshSteps(rt)
+    /* 18.21 load step library. */
+    registerLoadSteps(rt)
 }
 
 /* ----- echo ------------------------------------------------- */

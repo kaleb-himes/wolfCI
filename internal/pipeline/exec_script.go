@@ -43,6 +43,7 @@ package pipeline
 import (
     "context"
     "fmt"
+    "regexp"
     "strconv"
     "strings"
     "sync"
@@ -339,6 +340,34 @@ func (rt *scriptRuntime) registerNatives() {
      * steps_core.go so the step surface stays grouped. */
     rt.globals.define("parallel", &sNative{name: "parallel",
         fn: nativeParallel})
+    /* Common Java type identifiers pre-bound as string values
+     * so `x instanceof Exception` and friends resolve at eval
+     * time without each Jenkinsfile having to declare them.
+     * instanceofCheck consults the string name; the binding's
+     * actual runtime value is just the type's spelling. */
+    for _, typeName := range []string{
+        "Exception",
+        "RuntimeException",
+        "Throwable",
+        "Error",
+        "Collection",
+        "List",
+        "ArrayList",
+        "Iterable",
+        "Map",
+        "HashMap",
+        "LinkedHashMap",
+        "String",
+        "CharSequence",
+        "GString",
+        "Number",
+        "Integer",
+        "Long",
+        "Boolean",
+        "Object",
+    } {
+        rt.globals.define(typeName, &sStr{v: typeName})
+    }
     registerCoreSteps(rt)
 }
 
@@ -635,15 +664,30 @@ func evalExpr(ctx context.Context, rt *scriptRuntime,
     case *MapExpr:
         m := newMap()
         for _, en := range x.Entries {
-            kv, err := evalExpr(ctx, rt, env, en.Key)
-            if err != nil {
-                return nil, err
+            /* Bare-ident map keys are Groovy syntax for a
+             * string-valued key matching the ident's spelling
+             * (`[foo: 1]` is the same as `["foo": 1]`).
+             * Evaluating the ident as a binding would
+             * surprise callers and break unquoted keys that
+             * happen to share names with the runtime's
+             * predefined type identifiers (Exception, etc.).
+             * StringLit and NumberLit keys evaluate normally
+             * so `["x": 1]` and `[1: "a"]` still work. */
+            var keyStr string
+            if id, ok := en.Key.(*IdentExpr); ok {
+                keyStr = id.Name
+            } else {
+                kv, err := evalExpr(ctx, rt, env, en.Key)
+                if err != nil {
+                    return nil, err
+                }
+                keyStr = stringify(kv)
             }
             vv, err := evalExpr(ctx, rt, env, en.Value)
             if err != nil {
                 return nil, err
             }
-            m.set(stringify(kv), vv)
+            m.set(keyStr, vv)
         }
         return m, nil
     case *ClosureExpr:
@@ -868,23 +912,68 @@ func equals(l, r scriptValue) bool {
     return false
 }
 
+/* instanceofCheck evaluates `l instanceof r`. The RHS is the
+ * type identifier the parser captured; the runtime exposes
+ * common Java type names as sStr globals (Exception,
+ * RuntimeException, Throwable, Collection, List, Map, String,
+ * Integer, Number, Boolean) so the natural Jenkinsfile syntax
+ * `x instanceof Exception` resolves at evalExpr-time without
+ * the caller having to pre-bind anything.
+ *
+ * Coverage rules:
+ *   - sExcept: matches "Exception", "Throwable", or any string
+ *     equal to its typ field. RuntimeException matches against
+ *     either its typ or the literal "RuntimeException" since
+ *     the helper code routes generically on that name.
+ *   - sList:   matches "Collection", "List", "ArrayList",
+ *     "Iterable" - all idiomatic Java aliases for an iterable
+ *     sequence; jenkinsUtils.shouldTestRetry uses
+ *     "Collection" specifically.
+ *   - sMap:    matches "Map", "HashMap", "LinkedHashMap".
+ *   - sStr:    matches "String", "CharSequence".
+ *   - sNum:    matches "Number", "Integer", "Long".
+ *   - sBool:   matches "Boolean".
+ *
+ * Anything else surfaces as false; richer subtyping rules land
+ * if a future Jenkinsfile needs them. */
 func instanceofCheck(l, r scriptValue) scriptValue {
-    /* For 18.15 the RHS arrives as an IdentExpr that was
-     * evaluated to whatever binding the name resolved to.
-     * Practically jenkinsUtils-style code wants
-     * `x instanceof Exception` to work even when Exception
-     * has no runtime binding - the parser already accepted
-     * `instanceof <Type>` as a binary, so we tolerate either
-     * (a) an exception value's typ matching the lookup-failed
-     * RHS by name (NOT reachable here since unresolved idents
-     * error in evalExpr) or (b) a string-typed type name
-     * passed in directly. The simple subset compares the LHS
-     * to a string spelling of the type when r is a string;
-     * otherwise it returns false. Richer type-routing lands
-     * in a follow-on. */
-    if rs, ok := r.(*sStr); ok {
-        if ex, ok := l.(*sExcept); ok {
-            return &sBool{v: ex.typ == rs.v}
+    rs, ok := r.(*sStr)
+    if !ok {
+        return &sBool{v: false}
+    }
+    typeName := rs.v
+    switch lv := l.(type) {
+    case *sExcept:
+        if lv.typ == typeName {
+            return &sBool{v: true}
+        }
+        switch typeName {
+        case "Exception", "Throwable", "RuntimeException":
+            return &sBool{v: true}
+        }
+    case *sList:
+        switch typeName {
+        case "Collection", "List", "ArrayList", "Iterable":
+            return &sBool{v: true}
+        }
+    case *sMap:
+        switch typeName {
+        case "Map", "HashMap", "LinkedHashMap":
+            return &sBool{v: true}
+        }
+    case *sStr:
+        switch typeName {
+        case "String", "CharSequence", "GString":
+            return &sBool{v: true}
+        }
+    case *sNum:
+        switch typeName {
+        case "Number", "Integer", "Long":
+            return &sBool{v: true}
+        }
+    case *sBool:
+        if typeName == "Boolean" {
+            return &sBool{v: true}
         }
     }
     return &sBool{v: false}
@@ -892,19 +981,218 @@ func instanceofCheck(l, r scriptValue) scriptValue {
 
 func memberAccess(obj scriptValue, name string) (scriptValue,
     error) {
-    if m, ok := obj.(*sMap); ok {
-        if v, ok := m.values[name]; ok {
+    switch o := obj.(type) {
+    case *sMap:
+        if v, ok := o.values[name]; ok {
             return v, nil
         }
         return &sNull{}, nil
+    case *sExcept:
+        return exceptMember(o, name)
+    case *sStr:
+        return stringMember(o, name)
+    case *sList:
+        return listMember(o, name)
     }
-    if ex, ok := obj.(*sExcept); ok {
-        switch name {
-        case "message":
-            return &sStr{v: ex.msg}, nil
-        case "type":
-            return &sStr{v: ex.typ}, nil
-        }
+    return &sNull{}, nil
+}
+
+/* exceptMember dispatches member access on a script exception
+ * value. The supported surface mirrors what jenkinsUtils.groovy
+ * style helpers actually call: `message` / `getMessage()`
+ * (the human-readable text the catch handler logs),
+ * `toString()` (the "Type: msg" form Java's Throwable.toString
+ * produces - matches what `text = jobOrException.toString()`
+ * in shouldTestRetry searches against), and the bare `type`
+ * shortcut for the few helpers that route on exception type. */
+func exceptMember(ex *sExcept, name string) (scriptValue, error) {
+    switch name {
+    case "message":
+        return &sStr{v: ex.msg}, nil
+    case "type":
+        return &sStr{v: ex.typ}, nil
+    case "getMessage":
+        msg := ex.msg
+        return &sNative{name: "getMessage",
+            fn: func(ctx context.Context, rt *scriptRuntime,
+                _ []scriptValue) (scriptValue, error) {
+                return &sStr{v: msg}, nil
+            }}, nil
+    case "toString":
+        msg := ex.msg
+        typ := ex.typ
+        return &sNative{name: "toString",
+            fn: func(ctx context.Context, rt *scriptRuntime,
+                _ []scriptValue) (scriptValue, error) {
+                if msg != "" {
+                    return &sStr{v: typ + ": " + msg}, nil
+                }
+                return &sStr{v: typ}, nil
+            }}, nil
+    }
+    return &sNull{}, nil
+}
+
+/* stringMember dispatches method-style access on a string
+ * value (e.g. `name.replaceAll("/", "_")`). Returns an sNative
+ * the surrounding CallExpr invokes; the closure captures the
+ * receiver so the resulting native does not depend on dispatch
+ * threading the receiver through args.
+ *
+ * Methods covered (smallest set the master-job + jenkinsUtils
+ * helpers actually use):
+ *
+ *   replaceAll(regex, replacement)  Java-style regex replace
+ *   contains(substring)             plain substring check
+ *   toString()                      identity, for Groovy
+ *                                   `${x.toString()}` paths
+ *   length()                        rune count
+ *   startsWith / endsWith / trim    small ergonomics for the
+ *                                   step libraries to come
+ */
+func stringMember(s *sStr, name string) (scriptValue, error) {
+    v := s.v
+    switch name {
+    case "replaceAll":
+        return &sNative{name: "replaceAll",
+            fn: func(ctx context.Context, rt *scriptRuntime,
+                args []scriptValue) (scriptValue, error) {
+                if len(args) != 2 {
+                    return nil, fmt.Errorf(
+                        "String.replaceAll: expected 2 args, "+
+                            "got %d", len(args))
+                }
+                pat, ok := args[0].(*sStr)
+                if !ok {
+                    return nil, fmt.Errorf(
+                        "String.replaceAll: regex arg must "+
+                            "be a string (got %T)", args[0])
+                }
+                repl, ok := args[1].(*sStr)
+                if !ok {
+                    return nil, fmt.Errorf(
+                        "String.replaceAll: replacement arg "+
+                            "must be a string (got %T)",
+                        args[1])
+                }
+                re, err := regexp.Compile(pat.v)
+                if err != nil {
+                    return nil, fmt.Errorf(
+                        "String.replaceAll: bad regex %q: %w",
+                        pat.v, err)
+                }
+                return &sStr{
+                    v: re.ReplaceAllString(v, repl.v)}, nil
+            }}, nil
+    case "contains":
+        return &sNative{name: "contains",
+            fn: func(ctx context.Context, rt *scriptRuntime,
+                args []scriptValue) (scriptValue, error) {
+                if len(args) != 1 {
+                    return nil, fmt.Errorf(
+                        "String.contains: expected 1 arg")
+                }
+                ss, ok := args[0].(*sStr)
+                if !ok {
+                    return nil, fmt.Errorf(
+                        "String.contains: arg must be a " +
+                            "string")
+                }
+                return &sBool{
+                    v: strings.Contains(v, ss.v)}, nil
+            }}, nil
+    case "startsWith":
+        return &sNative{name: "startsWith",
+            fn: func(ctx context.Context, rt *scriptRuntime,
+                args []scriptValue) (scriptValue, error) {
+                ss, _ := args[0].(*sStr)
+                if ss == nil {
+                    return &sBool{v: false}, nil
+                }
+                return &sBool{
+                    v: strings.HasPrefix(v, ss.v)}, nil
+            }}, nil
+    case "endsWith":
+        return &sNative{name: "endsWith",
+            fn: func(ctx context.Context, rt *scriptRuntime,
+                args []scriptValue) (scriptValue, error) {
+                ss, _ := args[0].(*sStr)
+                if ss == nil {
+                    return &sBool{v: false}, nil
+                }
+                return &sBool{
+                    v: strings.HasSuffix(v, ss.v)}, nil
+            }}, nil
+    case "trim":
+        return &sNative{name: "trim",
+            fn: func(ctx context.Context, rt *scriptRuntime,
+                _ []scriptValue) (scriptValue, error) {
+                return &sStr{v: strings.TrimSpace(v)}, nil
+            }}, nil
+    case "toString":
+        return &sNative{name: "toString",
+            fn: func(ctx context.Context, rt *scriptRuntime,
+                _ []scriptValue) (scriptValue, error) {
+                return &sStr{v: v}, nil
+            }}, nil
+    case "length", "size":
+        n := int64(len([]rune(v)))
+        return &sNative{name: name,
+            fn: func(ctx context.Context, rt *scriptRuntime,
+                _ []scriptValue) (scriptValue, error) {
+                return &sNum{v: n}, nil
+            }}, nil
+    }
+    return &sNull{}, nil
+}
+
+/* listMember dispatches method-style access on a list value.
+ * Coverage focuses on the Jenkins helper surface jenkinsUtils
+ * actually reaches for: `join` for the rawLog concat path
+ * inside shouldTestRetry, plus the size / toString /
+ * isEmpty pair so list-shaped log results carry the obvious
+ * accessors. */
+func listMember(l *sList, name string) (scriptValue, error) {
+    items := l.items
+    switch name {
+    case "join":
+        return &sNative{name: "join",
+            fn: func(ctx context.Context, rt *scriptRuntime,
+                args []scriptValue) (scriptValue, error) {
+                sep := ""
+                if len(args) >= 1 {
+                    if s, ok := args[0].(*sStr); ok {
+                        sep = s.v
+                    }
+                }
+                parts := make([]string, 0, len(items))
+                for _, it := range items {
+                    parts = append(parts, stringify(it))
+                }
+                return &sStr{
+                    v: strings.Join(parts, sep)}, nil
+            }}, nil
+    case "size", "length":
+        n := int64(len(items))
+        return &sNative{name: name,
+            fn: func(ctx context.Context, rt *scriptRuntime,
+                _ []scriptValue) (scriptValue, error) {
+                return &sNum{v: n}, nil
+            }}, nil
+    case "isEmpty":
+        empty := len(items) == 0
+        return &sNative{name: "isEmpty",
+            fn: func(ctx context.Context, rt *scriptRuntime,
+                _ []scriptValue) (scriptValue, error) {
+                return &sBool{v: empty}, nil
+            }}, nil
+    case "toString":
+        s := stringify(l)
+        return &sNative{name: "toString",
+            fn: func(ctx context.Context, rt *scriptRuntime,
+                _ []scriptValue) (scriptValue, error) {
+                return &sStr{v: s}, nil
+            }}, nil
     }
     return &sNull{}, nil
 }
@@ -1020,12 +1308,37 @@ func invokeClosure(ctx context.Context, rt *scriptRuntime,
             child.define(p.Name, v)
         }
     }
-    err := evalBlock(ctx, rt, child, cl.body)
-    if r, ok := err.(*retSignal); ok {
-        return r.value, nil
+    /* Groovy closures + Groovy `def`-functions implicitly
+     * return the value of their last expression statement.
+     * Walk the body so the last ExprStmt's expression is
+     * captured directly, while ReturnStmt / throw / break /
+     * continue still short-circuit via their signal errors.
+     * A body that ends with a non-expression statement (an
+     * if/while without a trailing expression, an assignment
+     * etc.) keeps the old behavior and returns sNull. */
+    if cl.body == nil || len(cl.body.Statements) == 0 {
+        return &sNull{}, nil
     }
-    if err != nil {
-        return nil, err
+    last := len(cl.body.Statements) - 1
+    for i, st := range cl.body.Statements {
+        if i == last {
+            if es, ok := st.(*ExprStmt); ok {
+                v, err := evalExpr(ctx, rt, child, es.X)
+                if err != nil {
+                    if r, ok := err.(*retSignal); ok {
+                        return r.value, nil
+                    }
+                    return nil, err
+                }
+                return v, nil
+            }
+        }
+        if err := evalStmt(ctx, rt, child, st); err != nil {
+            if r, ok := err.(*retSignal); ok {
+                return r.value, nil
+            }
+            return nil, err
+        }
     }
     return &sNull{}, nil
 }

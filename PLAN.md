@@ -91,15 +91,6 @@ owner at the start of the phase):
   github-hook-for-GITScm-polling, poll-SCM, trigger-builds-
   remotely.
 
-- [ ] 18.21 Step library: load
-        (internal/pipeline/steps_load.go). Failing test:
-        TestStep_LoadHelperGroovy loads
-        third_party/testing/Jenkins/jenkins-functions/
-        jenkinsUtils.groovy from a build workspace, then calls
-        each of its top-level helpers (cleanupName,
-        getJobResultName, commitHashForBuild, getLastBuild,
-        checkIfPassed, shouldTestRetry) with synthesized
-        inputs and asserts the right outputs.
 - [ ] 18.22 Step library: build (downstream job dispatch)
         (internal/pipeline/steps_build.go). Failing test:
         TestStep_BuildTriggersDownstream invokes
