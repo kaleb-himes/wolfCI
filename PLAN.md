@@ -91,15 +91,6 @@ owner at the start of the phase):
   github-hook-for-GITScm-polling, poll-SCM, trigger-builds-
   remotely.
 
-- [ ] 18.22 Step library: build (downstream job dispatch)
-        (internal/pipeline/steps_build.go). Failing test:
-        TestStep_BuildTriggersDownstream invokes
-        `build job: 'child-1', parameters: [string(name: 'P',
-        value: 'v')]` with propagate: false, asserts a child
-        Build is enqueued under the wolfCI scheduler, runs to
-        completion, and the returned object exposes
-        .getResult() = 'SUCCESS'. Second test: propagate: true
-        + child fails -> parent build fails.
 - [ ] 18.23 Step library: catchError
         (internal/pipeline/steps_catcherr.go). Failing test:
         TestStep_CatchErrorRecords wraps a failing sh in

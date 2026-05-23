@@ -137,6 +137,14 @@ type LocalExecutor struct {
      * that needs one errors out with an actionable message
      * rather than panicking. */
     Creds *credstore.Store
+
+    /* Dispatcher is the seam the 18.22+ build step uses to
+     * enqueue downstream jobs onto the wolfCI scheduler. nil
+     * means "no dispatcher wired" - the build step errors
+     * out with an actionable message rather than panicking,
+     * which matches how Creds / Workspace handle the
+     * no-runtime-wired case. */
+    Dispatcher BuildDispatcher
 }
 
 /* Sh runs script under /bin/sh -c and captures combined

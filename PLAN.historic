@@ -4091,6 +4091,64 @@ completed and were moved here:
         helper output files match the expected results
         ("a_b_c_d", "RESULT_demo_job_step1", "abc123",
         "null", "false", "true").
+- [x] 18.22 Step library: build (downstream job dispatch)
+        (internal/pipeline/steps_build.go). Failing test:
+        TestStep_BuildTriggersDownstream invokes
+        `build job: 'child-1', parameters: [string(name: 'P',
+        value: 'v')]` with propagate: false, asserts a child
+        Build is enqueued under the wolfCI scheduler, runs to
+        completion, and the returned object exposes
+        .getResult() = 'SUCCESS'. Second test: propagate: true
+        + child fails -> parent build fails.
+        Done: build step lives at
+        internal/pipeline/steps_build.go. The native parses
+        named args (job, parameters, propagate, wait), unrolls
+        the `parameters: [string(name: ..., value: ...)]` list
+        through unrollBuildParams into the wire-format
+        []BuildParam, then enqueues via the runtime's
+        BuildDispatcher seam. propagate: true (default) throws
+        an Error when the child returns non-SUCCESS so the
+        surrounding stage marks the parent FAILURE; propagate:
+        false returns the result object so the script can
+        decide. wait: false short-circuits with a NOT_BUILT
+        placeholder for fire-and-forget dispatches. The
+        returned object is an sMap with the Jenkins-shaped
+        accessor surface .getResult() / .getNumber() /
+        .getProjectName() / .getFullProjectName() and the
+        matching bare-field aliases (.result, .number,
+        .projectName, .fullProjectName) so both Jenkinsfile
+        idioms (method-call form and property-access form)
+        work. The pipeline package gains a new file
+        internal/pipeline/dispatcher.go defining the
+        BuildDispatcher interface, BuildParam, and
+        ChildBuildResult types; pipeline.LocalExecutor /
+        scriptRuntime get a Dispatcher field threaded through
+        newScriptRuntime so the build native can reach the
+        seam from any depth. The string(...) constructor in
+        steps_creds.go now propagates every input key through
+        to its returned descriptor map (not just credentialsId
+        / variable), so string(name: 'P', value: 'v') as a
+        build-parameter descriptor carries name + value
+        alongside the _credType marker. Gating:
+        TestStep_BuildTriggersDownstream wires a real
+        scheduler.Scheduler in front of a fake Executor,
+        defines a child-1 job in temp storage, runs a parent
+        pipeline whose script block calls build job:
+        'child-1', parameters: [string(name: 'P', value:
+        'v')], propagate: false, and asserts the parent build
+        finished SUCCESS, the fake executor recorded exactly
+        one dispatch of child-1, and the result object's
+        .getResult() / .getNumber() / .getProjectName() match
+        SUCCESS / 1 / child-1. TestStep_BuildPropagatesFailure
+        exercises the propagate=true default: a fake executor
+        that returns FAILURE for child-fails causes the
+        parent build to fail. The test-local
+        schedulerDispatcher adapter (lives in
+        steps_build_test.go) is the inline implementation of
+        BuildDispatcher; production wiring in cmd/wolfci
+        builds the same shape against the real
+        scheduler+storage when the master-job pipeline phase
+        lands.
 
 
 End of PLAN.historic.

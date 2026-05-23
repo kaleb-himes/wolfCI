@@ -71,6 +71,8 @@ func registerCoreSteps(rt *scriptRuntime) {
     registerSshSteps(rt)
     /* 18.21 load step library. */
     registerLoadSteps(rt)
+    /* 18.22 build (downstream dispatch) step. */
+    registerBuildStep(rt)
 }
 
 /* ----- echo ------------------------------------------------- */

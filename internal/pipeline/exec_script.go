@@ -221,6 +221,12 @@ type scriptRuntime struct {
      * time. nil when the caller didn't wire one. */
     creds *credstore.Store
 
+    /* dispatcher is the build-step seam from 18.22 onward.
+     * nil when the executor did not supply one; the build
+     * native errors out with an actionable message in that
+     * case. */
+    dispatcher BuildDispatcher
+
     /* secretMu guards envExtra and masks, which
      * withCredentials pushes onto a stack for the duration
      * of a closure body and pops on exit. Pop is keyed on
@@ -250,6 +256,7 @@ func newScriptRuntime(executor Executor) *scriptRuntime {
         rt.stashDir = le.StashDir
         rt.artifactsDir = le.ArtifactsDir
         rt.creds = le.Creds
+        rt.dispatcher = le.Dispatcher
     }
     rt.registerNatives()
     return rt

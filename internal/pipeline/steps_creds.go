@@ -53,17 +53,31 @@ func registerCredsSteps(rt *scriptRuntime) {
             fn: nativeWithCredentials})
 }
 
-/* nativeStringCred is the Groovy `string(credentialsId: ...,
- * variable: ...)` constructor used inside the withCredentials
- * bindings list. Returns a tagged sMap that
- * nativeWithCredentials inspects to decide which credstore
- * record to unseal and which env variable to expose. */
+/* nativeStringCred is the Groovy `string(...)` constructor used
+ * by two surfaces:
+ *
+ *   1. Inside `withCredentials([...])` the
+ *      `string(credentialsId: '...', variable: '...')` form
+ *      tags a secret-text binding descriptor; nativeWithCreden-
+ *      tials reads _credType + credentialsId + variable.
+ *   2. Inside `build job: '...', parameters: [...]` the
+ *      `string(name: '...', value: '...')` form is a typed
+ *      parameter; nativeBuild's unrollBuildParams reads name +
+ *      value.
+ *
+ * The two forms share the function name because that is how
+ * Jenkins itself routes them - the surrounding step decides
+ * which keys to honor. To keep one constructor authoritative,
+ * we propagate every input key through to the returned map
+ * (with the _credType marker added) so both consumers see the
+ * keys they need without each having its own constructor. */
 func nativeStringCred(ctx context.Context, rt *scriptRuntime,
     args []scriptValue) (scriptValue, error) {
     if len(args) == 0 {
         return nil, fmt.Errorf(
             "string: no arguments " +
-                "(expected credentialsId and variable)")
+                "(expected credentialsId+variable, or " +
+                "name+value)")
     }
     m, ok := args[0].(*sMap)
     if !ok {
@@ -73,11 +87,11 @@ func nativeStringCred(ctx context.Context, rt *scriptRuntime,
     }
     out := newMap()
     out.set("_credType", &sStr{v: "string"})
-    if v, ok := m.values["credentialsId"]; ok {
-        out.set("credentialsId", v)
-    }
-    if v, ok := m.values["variable"]; ok {
-        out.set("variable", v)
+    for _, k := range m.keys {
+        if k == "_credType" {
+            continue
+        }
+        out.set(k, m.values[k])
     }
     return out, nil
 }
