@@ -4822,3 +4822,41 @@ owner at the start of the phase):
         confirms the SERVER_HOST:PORT placeholder + the
         AgentEndpoint configuration diagnostic surface
         when the field is empty.
+- [x] 19.6 GCE config form. /nodes/new/gce renders
+        project_id + zone + machine_type + image +
+        network + labels (multi-line) + max_instances.
+        POST saves a gce.Config the existing gce.Provisioner
+        consumes; wiring the saved configs into the
+        scheduler's overflow path is a separate follow-on.
+        Failing test (internal/server/nodes_new_gce_test.go):
+        TestNodesNewGCE_FormHasFields asserts the rendered
+        form carries the seven inputs.
+        TestNodesNewGCE_PostCreatesConfig posts a sample
+        config and asserts the file lands on disk and
+        round-trips through gce.LoadConfig.
+        Done: handleNodesNew dispatches the "gce" sub to
+        handleNodesNewGCE (renders on GET, validates +
+        saves on POST). gce.Config gained an optional
+        MaxInstances field (yaml: max_instances,omitempty;
+        zero means "no cap" - scheduler-side enforcement
+        lands when the overflow router consults the
+        configs). The form template renders nine inputs
+        (name, project_id, zone, machine_type, image,
+        service_account_key, network, labels textarea,
+        max_instances) and re-renders with the operator's
+        typed input + the validation error on a bad POST.
+        Saved at <storage-root>/nodes/gce/<name>.yaml so
+        the pending-agent + GCE-pool persistence share one
+        parent dir (nodes/) without colliding. Gating:
+        TestNodesNewGCE_FormHasFields confirms every named
+        input + the form action.
+        TestNodesNewGCE_PostCreatesConfig posts a complete
+        pool (project=my-gcp-project-12345, zone=
+        us-central1-a, machine_type=e2-medium,
+        image=debian-12, sa.json, labels=linux-cloud-node /
+        linux / build, max_instances=10) and asserts the
+        303 to /nodes/gce/linux-cloud-pool + the saved
+        YAML round-trips through gce.LoadConfig.
+        TestNodesNewGCE_PostRejectsMissingProject omits
+        project_id, asserts the 200 form rerender with
+        the project_id diagnostic.

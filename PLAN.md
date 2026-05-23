@@ -65,18 +65,6 @@ owner at the start of the phase):
 - Land scope: 19.1-19.5 land first (the core Permanent Agent
   flow); 19.6 (GCE) + 19.7 (Copy) ship in follow-on pushes.
 
-- [ ] 19.6 GCE config form. /nodes/new/gce renders project_id +
-        zone + machine_type + image + network + labels
-        (multi-line) + max_instances. POST saves a gce.Config
-        the existing gce.Provisioner consumes; wiring the
-        saved configs into the scheduler's overflow path is
-        a separate follow-on. Failing test
-        (internal/server/nodes_new_gce_test.go):
-        TestNodesNewGCE_FormHasFields asserts the rendered
-        form carries the seven inputs.
-        TestNodesNewGCE_PostCreatesConfig posts a sample
-        config and asserts the file lands on disk and
-        round-trips through gce.LoadConfig.
 - [ ] 19.7 Copy existing node. /nodes/new?copy=<id> pre-fills
         the Permanent Agent form with the source's labels +
         executors so the operator can edit before saving.

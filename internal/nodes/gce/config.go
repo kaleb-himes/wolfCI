@@ -46,6 +46,15 @@ type Config struct {
 	// Labels are advertised by every node this provisioner
 	// creates. Used by the scheduler to match Job.node_label.
 	Labels []string `yaml:"labels,omitempty"`
+
+	// MaxInstances caps how many VMs this provisioner is
+	// allowed to keep alive simultaneously. Zero (the YAML-
+	// omitted default) means "no cap" - the scheduler boots
+	// instances as long as work is queued. Surfaced for the
+	// 19.6 form so an operator can put a budget guard on a
+	// pool; the scheduler-side enforcement lands when the
+	// overflow router consults the configs.
+	MaxInstances int `yaml:"max_instances,omitempty"`
 }
 
 // LoadConfig reads a Config from disk and validates that every

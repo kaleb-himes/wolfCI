@@ -7,6 +7,7 @@ import (
 	"html/template"
 	"io/fs"
 	"net/http"
+	"path/filepath"
 	"sort"
 	"strconv"
 	"strings"
@@ -18,6 +19,7 @@ import (
 	"github.com/kaleb-himes/wolfCI/internal/agentsvc"
 	"github.com/kaleb-himes/wolfCI/internal/auth"
 	"github.com/kaleb-himes/wolfCI/internal/credstore"
+	"github.com/kaleb-himes/wolfCI/internal/nodes/gce"
 	"github.com/kaleb-himes/wolfCI/internal/storage"
 )
 
@@ -354,9 +356,116 @@ func (s *Server) handleNodesNew(w http.ResponseWriter,
 			})
 	case "permanent":
 		s.handleNodesNewPermanent(w, r)
+	case "gce":
+		s.handleNodesNewGCE(w, r)
 	default:
 		http.NotFound(w, r)
 	}
+}
+
+// handleNodesNewGCE renders + processes the
+// /nodes/new/gce form (PLAN.md 19.6). GET renders the form;
+// POST validates the inputs through gce.Config.Validate,
+// writes the YAML to <storage-root>/nodes/gce/<name>.yaml,
+// and redirects to /nodes/gce/<name>.
+func (s *Server) handleNodesNewGCE(w http.ResponseWriter,
+	r *http.Request) {
+
+	switch r.Method {
+	case http.MethodGet:
+		s.renderNodesNewGCE(w, "", &gce.Config{})
+	case http.MethodPost:
+		if err := r.ParseForm(); err != nil {
+			http.Error(w, "bad request",
+				http.StatusBadRequest)
+			return
+		}
+		name := strings.TrimSpace(r.FormValue("name"))
+		cfg := &gce.Config{
+			ProjectID: strings.TrimSpace(
+				r.FormValue("project_id")),
+			Zone: strings.TrimSpace(r.FormValue("zone")),
+			MachineType: strings.TrimSpace(
+				r.FormValue("machine_type")),
+			ServiceAccountKey: strings.TrimSpace(
+				r.FormValue("service_account_key")),
+			Image: strings.TrimSpace(r.FormValue("image")),
+			Network: strings.TrimSpace(
+				r.FormValue("network")),
+			Labels: splitLines(r.FormValue("labels")),
+		}
+		if v := strings.TrimSpace(
+			r.FormValue("max_instances")); v != "" {
+			n, err := strconv.Atoi(v)
+			if err != nil || n < 0 {
+				s.renderNodesNewGCEWithName(w,
+					"max_instances must be a non-negative "+
+						"integer", name, cfg)
+				return
+			}
+			cfg.MaxInstances = n
+		}
+		if name == "" {
+			s.renderNodesNewGCEWithName(w,
+				"name is required", name, cfg)
+			return
+		}
+		if err := cfg.Validate(); err != nil {
+			s.renderNodesNewGCEWithName(w, err.Error(),
+				name, cfg)
+			return
+		}
+		path := s.gcePoolPath(name)
+		if err := cfg.Save(path); err != nil {
+			s.renderNodesNewGCEWithName(w,
+				"save: "+err.Error(), name, cfg)
+			return
+		}
+		http.Redirect(w, r, "/nodes/gce/"+name,
+			http.StatusSeeOther)
+	default:
+		http.Error(w, "method not allowed",
+			http.StatusMethodNotAllowed)
+	}
+}
+
+// gcePoolPath returns the canonical on-disk path for a GCE
+// pool's YAML. Lives under <storage-root>/nodes/gce/ so the
+// nodes/<pending>/pending.yaml records and the GCE pool
+// configs share one parent dir (nodes/) without colliding.
+func (s *Server) gcePoolPath(name string) string {
+	return filepath.Join(s.opts.Storage.Root(), "nodes",
+		"gce", name+".yaml")
+}
+
+// renderNodesNewGCE renders the GCE form for the GET path
+// (empty error, empty pre-fill).
+func (s *Server) renderNodesNewGCE(w http.ResponseWriter,
+	errMsg string, cfg *gce.Config) {
+	s.renderNodesNewGCEWithName(w, errMsg, "", cfg)
+}
+
+// renderNodesNewGCEWithName renders the GCE form with the
+// supplied error + pre-filled values. Used on POST
+// validation failure so the operator's typed input survives
+// the re-render.
+func (s *Server) renderNodesNewGCEWithName(
+	w http.ResponseWriter, errMsg, name string,
+	cfg *gce.Config) {
+	s.render(w, "nodes_new_gce.html",
+		map[string]interface{}{
+			"Title":             "New GCE pool",
+			"Error":             errMsg,
+			"Name":              name,
+			"ProjectID":         cfg.ProjectID,
+			"Zone":              cfg.Zone,
+			"MachineType":       cfg.MachineType,
+			"ServiceAccountKey": cfg.ServiceAccountKey,
+			"Image":             cfg.Image,
+			"Network":           cfg.Network,
+			"LabelsText":        strings.Join(cfg.Labels, "\n"),
+			"MaxInstances":      cfg.MaxInstances,
+		})
 }
 
 // handleNodesNewPermanent renders + processes the

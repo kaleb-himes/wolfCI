@@ -1,0 +1,79 @@
+{{ define "content" }}
+<section class="panel">
+<h2>New Google Compute Engine pool</h2>
+
+<p class="muted">Configure a pool of ephemeral VMs wolfCI
+spins up on demand. The scheduler routes jobs whose
+<code>node_label</code> matches one of the pool's labels to
+this pool; the GCE Provisioner boots a fresh instance per
+job and tears it down when the build finishes.</p>
+
+{{ if .Error }}<p class="error">{{ .Error }}</p>{{ end }}
+
+<form method="POST" action="/nodes/new/gce" class="job-form">
+
+<label for="f-name">Pool name</label>
+<input type="text" id="f-name" name="name" required
+       placeholder="e.g. linux-cloud-builders"
+       value="{{ .Name }}">
+<p class="muted">Becomes the YAML filename under
+<code>nodes/gce/&lt;name&gt;.yaml</code>. Alphanumeric,
+dash, underscore, optional internal dots.</p>
+
+<label for="f-project">GCP project ID</label>
+<input type="text" id="f-project" name="project_id" required
+       placeholder="my-gcp-project-12345"
+       value="{{ .ProjectID }}">
+
+<label for="f-zone">Zone</label>
+<input type="text" id="f-zone" name="zone" required
+       placeholder="us-central1-a"
+       value="{{ .Zone }}">
+
+<label for="f-mt">Machine type</label>
+<input type="text" id="f-mt" name="machine_type" required
+       placeholder="e2-medium"
+       value="{{ .MachineType }}">
+
+<label for="f-image">Image</label>
+<input type="text" id="f-image" name="image" required
+       placeholder="projects/debian-cloud/global/images/family/debian-12"
+       value="{{ .Image }}">
+
+<label for="f-sak">Service account key (path)</label>
+<input type="text" id="f-sak" name="service_account_key" required
+       placeholder="/etc/wolfci/gcp-service-account.json"
+       value="{{ .ServiceAccountKey }}">
+<p class="muted">Absolute path on the wolfCI server to the
+JSON key file Google issued for the service account that has
+<code>compute.instances.create</code> and
+<code>compute.instances.delete</code>.</p>
+
+<label for="f-network">Network</label>
+<input type="text" id="f-network" name="network"
+       placeholder="default (leave blank for the default VPC)"
+       value="{{ .Network }}">
+
+<label for="f-labels">Labels (one per line)</label>
+<textarea id="f-labels" name="labels" rows="4"
+          placeholder="linux-cloud-node
+linux
+build">{{ .LabelsText }}</textarea>
+<p class="muted">Jobs match these against their
+<code>node_label</code>. The Provisioner stamps every booted
+VM with the union of these labels.</p>
+
+<label for="f-max">Max instances</label>
+<input type="number" id="f-max" name="max_instances" min="0"
+       placeholder="0 = unlimited"
+       value="{{ if .MaxInstances }}{{ .MaxInstances }}{{ end }}">
+<p class="muted">Cap on simultaneously-alive VMs from this
+pool. 0 (the default) means no cap.</p>
+
+<div class="form-actions">
+<button type="submit">Save</button>
+<a href="/nodes/new">Cancel</a>
+</div>
+</form>
+</section>
+{{ end }}
