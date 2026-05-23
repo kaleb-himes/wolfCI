@@ -161,6 +161,17 @@ type LocalExecutor struct {
      * disables the global; production wiring supplies an
      * adapter that reads builds/<job>/<n>/ from disk. */
     BuildInfo BuildInfoProvider
+
+    /* InitialEnv carries env vars the pipeline should see
+     * from the first statement on. 18.30 uses this to feed
+     * the ghprb* / GH_STATUS_BASE keys to the master-job
+     * Jenkinsfile so its `env.ghprbActualCommit` lookups
+     * resolve and its trailing `sh "curl ..."` step picks up
+     * the values through shell expansion. The runtime
+     * exposes the same map as an `env` sMap global AND
+     * layers each KEY=VALUE under every sh step's process
+     * env so both surfaces see the same data. */
+    InitialEnv map[string]string
 }
 
 /* Sh runs script under /bin/sh -c and captures combined

@@ -4510,6 +4510,70 @@ completed and were moved here:
         lightweight=on) and asserts every value landed in
         the saved storage.Job.GitHubPRBTrigger /
         storage.Job.Pipeline.SCMConfig fields after LoadJob.
+- [x] 18.30 End-to-end: master-job PRB.Jenkinsfile drives a
+        fake-PR fan-out. Failing test
+        (tests/prb_master_job_test.go): spins up a wolfCI
+        server, a fake GitHub API server, a local git
+        fixture repo that contains a vendored copy of the
+        master-job Jenkinsfile under
+        Jenkins/master-job/PRB.Jenkinsfile and a stub
+        jenkinsUtils.groovy, three fake child jobs
+        ("Group1", "Group2", "Group3") that each just echo
+        their name. The fake GitHub server publishes one
+        open PR. The wolfCI poller fires, the master job
+        runs, fans out via parallel to all three children,
+        all succeed, the master posts a "success" status
+        under context "PRB-master-job" to the fake GitHub
+        server, and tests/prb_master_job_test.go asserts
+        every link in the chain (poll observed, three
+        children dispatched with the right ghprb* env,
+        master status posted).
+        Done: the gating test at tests/prb_master_job_test.go
+        wires every piece end to end. A fake GitHub API
+        server (httptest.Server) serves /repos/wolfssl/
+        wolfssl/pulls (one open PR) and records POSTs to
+        /repos/.../statuses/<sha>. A local git fixture
+        (seedGitFixture initialises with `git init -b
+        master`) carries a simplified master-job Jenkinsfile
+        that fans out via parallel { build job: 'Group<N>',
+        propagate: false } and posts the final status via
+        sh "curl ...". Three child jobs in storage echo
+        "child=<name> pr=$ghprbPullId" into a per-build
+        marker.txt. ghprb.Poller.Poll() against the fake
+        GitHub URL returns the TriggerEvent;
+        ghprb.EnvForEvent produces the ghprb* map; the
+        test adds GH_STATUS_BASE pointing at the fake
+        server. internal/jobspec.RunFromSCM clones the
+        local fixture and runs the Jenkinsfile through
+        pipeline.ExecDeclarative with a
+        pipeline.LocalExecutor whose new InitialEnv field
+        carries the same map so Groovy code can read
+        env.ghprbActualCommit and the trailing sh step gets
+        the same vars through shell expansion. A test-local
+        prbDispatcher satisfies pipeline.BuildDispatcher:
+        it clones each child job, overlays childEnv (the
+        same ghprb* map) onto clone.Env, and enqueues
+        through the real scheduler.Scheduler; the
+        scheduler.LocalExecutor now merges Job.Env under
+        Step.Env (one of two new runtime hooks 18.30 added:
+        the other is pipeline.LocalExecutor.InitialEnv +
+        the matching `env`-global + envExtra population in
+        newScriptRuntime so Groovy env.<KEY> + sh shell
+        expansion both see the same map). Two more steps-
+        library additions were needed for the master
+        Jenkinsfile to execute: sList.each (iterates a
+        list and invokes a closure per item) + sList.collect
+        (analogous, builds a new list); both live in
+        listMember alongside the 18.21 join / size /
+        isEmpty / toString surface. Assertions: poller
+        returned exactly one TriggerEvent with the expected
+        PRID + HeadSHA; each of the three child marker
+        files carries child=<name> AND pr=<prID> (proving
+        the dispatch landed AND the ghprb env propagated
+        through the cloned Job.Env); the fake GitHub server
+        received exactly one status POST whose body
+        contains "state":"success" and
+        "context":"PRB-master-job".
 
 
 End of PLAN.historic.

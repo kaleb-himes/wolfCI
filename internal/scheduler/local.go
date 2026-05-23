@@ -143,7 +143,19 @@ func (e *LocalExecutor) Execute(ctx context.Context, job *storage.Job, num int) 
 		}
 		cmd.Stdout = stepOut
 		cmd.Stderr = stepOut
-		envOverlay := step.Env
+		/* Layer Job.Env under Step.Env so step-level keys
+		 * win when both set the same name. Job.Env is the
+		 * per-build context the scheduler injects (e.g.
+		 * GHPRB ghprb* vars per PLAN.md 18.8); Step.Env is
+		 * the per-step override the operator typed into the
+		 * job spec. */
+		envOverlay := map[string]string{}
+		for k, v := range job.Env {
+			envOverlay[k] = v
+		}
+		for k, v := range step.Env {
+			envOverlay[k] = v
+		}
 		if wolfciInputs != "" {
 			if envOverlay == nil {
 				envOverlay = map[string]string{}

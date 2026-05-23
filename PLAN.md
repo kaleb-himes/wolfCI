@@ -91,22 +91,6 @@ owner at the start of the phase):
   github-hook-for-GITScm-polling, poll-SCM, trigger-builds-
   remotely.
 
-- [ ] 18.30 End-to-end: master-job PRB.Jenkinsfile drives a
-        fake-PR fan-out. Failing test
-        (tests/prb_master_job_test.go): spins up a wolfCI
-        server, a fake GitHub API server, a local git fixture
-        repo that contains a vendored copy of the master-job
-        Jenkinsfile under Jenkins/master-job/PRB.Jenkinsfile
-        and a stub jenkinsUtils.groovy, three fake child jobs
-        ("Group1", "Group2", "Group3") that each just echo
-        their name. The fake GitHub server publishes one open
-        PR. The wolfCI poller fires, the master job runs,
-        fans out via parallel to all three children, all
-        succeed, the master posts a "success" status under
-        context "PRB-master-job" to the fake GitHub server,
-        and tests/prb_master_job_test.go asserts every link in
-        the chain (poll observed, three children dispatched
-        with the right ghprb* env, master status posted).
 - [ ] 18.31 Parse-smoke test across third_party/testing.
         Failing test (tests/jenkinsfile_parse_smoke_test.go):
         walks third_party/testing/Jenkins for every file

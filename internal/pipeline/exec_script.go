@@ -237,6 +237,13 @@ type scriptRuntime struct {
      * builtins. nil disables those globals. */
     builds BuildInfoProvider
 
+    /* initialEnv carries the LocalExecutor.InitialEnv map
+     * from construction. registerInitialEnv reads it after
+     * registerNatives so the `env` global lands AFTER the
+     * step natives but BEFORE the first script statement
+     * runs. */
+    initialEnv map[string]string
+
     /* catchForced{Build,Stage} carry the 18.23 catchError
      * "this step / stage / build should be marked X" verdict
      * out of the script runtime so execStep can apply it
@@ -282,6 +289,21 @@ func newScriptRuntime(executor Executor) *scriptRuntime {
         rt.dispatcher = le.Dispatcher
         rt.nodeRouter = le.NodeRouter
         rt.builds = le.BuildInfo
+        /* 18.30 InitialEnv: define `env` as an sMap so
+         * Groovy code can read env.<KEY>, and stamp the
+         * same map onto the runtime's envExtra stack so
+         * every sh step inherits the values via shell
+         * expansion. Stamped here (not on every step) so
+         * the layering interacts cleanly with the 18.18+
+         * pushSecrets stack: caller frames live above
+         * InitialEnv on the stack. */
+        if len(le.InitialEnv) > 0 {
+            rt.initialEnv = make(map[string]string,
+                len(le.InitialEnv))
+            for k, v := range le.InitialEnv {
+                rt.initialEnv[k] = v
+            }
+        }
     }
     /* Non-LocalExecutor implementations can opt into nested-
      * node routing by exposing the router through this
@@ -446,6 +468,20 @@ func (rt *scriptRuntime) registerNatives() {
      * BuildInfoProvider wired, matching the rest of the
      * "seam wired = feature on" pattern. */
     registerCurrentBuild(rt)
+    /* 18.30 InitialEnv: when the executor passed a map,
+     * define `env` on globals as an sMap AND prime
+     * rt.envExtra so sh steps inherit the same values
+     * through their process env. The caller's withCredentials
+     * frames still push on top of envExtra later, so the
+     * layering matches the rest of the secret stack. */
+    if len(rt.initialEnv) > 0 {
+        envMap := newMap()
+        for k, v := range rt.initialEnv {
+            envMap.set(k, &sStr{v: v})
+            rt.envExtra = append(rt.envExtra, k+"="+v)
+        }
+        rt.globals.define("env", envMap)
+    }
 }
 
 /* ----- control-flow signals --------------------------------- */
@@ -1232,6 +1268,52 @@ func stringMember(s *sStr, name string) (scriptValue, error) {
 func listMember(l *sList, name string) (scriptValue, error) {
     items := l.items
     switch name {
+    case "each":
+        return &sNative{name: "each",
+            fn: func(ctx context.Context, rt *scriptRuntime,
+                args []scriptValue) (scriptValue, error) {
+                if len(args) == 0 {
+                    return nil, fmt.Errorf(
+                        "List.each: missing closure")
+                }
+                cl, ok := args[len(args)-1].(*sClosure)
+                if !ok {
+                    return nil, fmt.Errorf(
+                        "List.each: arg must be a closure")
+                }
+                for _, it := range items {
+                    if _, err := invokeClosure(ctx, rt,
+                        cl, []scriptValue{it}); err != nil {
+                        return nil, err
+                    }
+                }
+                return &sNull{}, nil
+            }}, nil
+    case "collect":
+        return &sNative{name: "collect",
+            fn: func(ctx context.Context, rt *scriptRuntime,
+                args []scriptValue) (scriptValue, error) {
+                if len(args) == 0 {
+                    return nil, fmt.Errorf(
+                        "List.collect: missing closure")
+                }
+                cl, ok := args[len(args)-1].(*sClosure)
+                if !ok {
+                    return nil, fmt.Errorf(
+                        "List.collect: arg must be a closure")
+                }
+                outItems := make([]scriptValue, 0,
+                    len(items))
+                for _, it := range items {
+                    v, err := invokeClosure(ctx, rt, cl,
+                        []scriptValue{it})
+                    if err != nil {
+                        return nil, err
+                    }
+                    outItems = append(outItems, v)
+                }
+                return &sList{items: outItems}, nil
+            }}, nil
     case "join":
         return &sNative{name: "join",
             fn: func(ctx context.Context, rt *scriptRuntime,
