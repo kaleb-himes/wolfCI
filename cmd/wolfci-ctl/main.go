@@ -59,6 +59,11 @@ var subcommands = map[string]*subcommand{
 		synopsis: "build operations (log)",
 		run:      runBuildGroup,
 	},
+	"cred": {
+		name:     "cred",
+		synopsis: "credential store operations (add, list, rm)",
+		run:      runCredGroup,
+	},
 }
 
 // runBuildGroup dispatches `wolfci-ctl build <verb>`.

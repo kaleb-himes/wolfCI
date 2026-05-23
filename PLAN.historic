@@ -3220,4 +3220,33 @@ completed and were moved here:
         TestStore_ReopensExistingIndex.
 
 
+- [x] 18.4 wolfci-ctl credential subcommands. Failing test
+        (cmd/wolfci-ctl): TestCtl_CredentialLifecycle exercises
+        `wolfci-ctl cred add --id X --type secret-text` (reads
+        secret from stdin), `wolfci-ctl cred list`,
+        `wolfci-ctl cred rm X`. Reuses internal/credstore from
+        18.3.
+        Done: cmd/wolfci-ctl/cred.go adds the cred subcommand
+        group with three verbs (add, list, rm). All three load
+        a server.yaml via --server-config (default
+        config-files/server.yaml) and pick up the new
+        credential_master_secret (hex-encoded) and
+        credential_dir fields server.ServerConfig now carries.
+        cred add reads the secret value from stdin: for
+        secret-text the body minus trailing newline is the
+        Secret; for ssh-private-key the body is the PEM blob
+        verbatim (multi-line preserved); for username-password
+        --username is required and stdin carries the password.
+        Empty stdin is rejected for every type. cred list
+        prints a fixed-width id / type / label table sorted by
+        id. cred rm calls Store.Delete. The cred subcommand
+        operates on local files only - it does not talk to the
+        wolfCI server over gRPC, mirroring the Jenkins
+        controller-side credentials.xml model and keeping the
+        master secret off any network. Gates:
+        TestCtl_CredentialLifecycle (the spec's name; adds a
+        secret-text, lists, removes, re-lists),
+        TestCtl_CredAdd_RequiresStdinForSecretText.
+
+
 End of PLAN.historic.

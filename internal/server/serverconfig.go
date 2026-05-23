@@ -77,6 +77,23 @@ type ServerConfig struct {
      * out-of-band via cron).
      */
     RetentionSweepInterval string `yaml:"retention_sweep_interval,omitempty"`
+
+    /* CredentialMasterSecret is the hex-encoded server-wide
+     * master secret used for HKDF-derived AES-256-GCM seal keys
+     * in internal/credstore (PLAN.md Phase 18 decisions).
+     * Recommended size: 32 bytes (64 hex chars). The wolfci-ctl
+     * cred subcommands and the pipeline withCredentials step
+     * both read this value via LoadServerConfig.
+     */
+    CredentialMasterSecret string `yaml:"credential_master_secret,omitempty"`
+
+    /* CredentialDir is the directory that holds the sealed
+     * credential files and their index.yaml. Empty value means
+     * the credstore is disabled - the wolfci-ctl cred
+     * subcommands will refuse to run rather than silently writing
+     * sealed files to an unrelated path.
+     */
+    CredentialDir string `yaml:"credential_dir,omitempty"`
 }
 
 /* DefaultServerConfig returns a ServerConfig with the optional

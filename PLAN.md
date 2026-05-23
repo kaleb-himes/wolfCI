@@ -91,12 +91,6 @@ owner at the start of the phase):
   github-hook-for-GITScm-polling, poll-SCM, trigger-builds-
   remotely.
 
-- [ ] 18.4 wolfci-ctl credential subcommands. Failing test
-        (cmd/wolfci-ctl): TestCtl_CredentialLifecycle exercises
-        `wolfci-ctl cred add --id X --type secret-text` (reads
-        secret from stdin), `wolfci-ctl cred list`,
-        `wolfci-ctl cred rm X`. Reuses internal/credstore from
-        18.3.
 - [ ] 18.5 GHPRB job-config schema. Extend the Job YAML to
         accept a triggers.github_prb subtree:
             triggers:
