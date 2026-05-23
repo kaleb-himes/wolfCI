@@ -326,7 +326,8 @@ func (s *Server) handleNodeRoutes(w http.ResponseWriter, r *http.Request) {
 
 // handleNodesNew dispatches the /nodes/new* family. sub is
 // the path tail after /nodes/new (empty for the landing
-// page).
+// page, "permanent" for the Permanent Agent form, "gce"
+// for the GCE form when 19.6 lands).
 func (s *Server) handleNodesNew(w http.ResponseWriter,
 	r *http.Request, sub string) {
 
@@ -341,9 +342,99 @@ func (s *Server) handleNodesNew(w http.ResponseWriter,
 			map[string]interface{}{
 				"Title": "New node",
 			})
+	case "permanent":
+		s.handleNodesNewPermanent(w, r)
 	default:
 		http.NotFound(w, r)
 	}
+}
+
+// handleNodesNewPermanent renders + processes the
+// /nodes/new/permanent form (PLAN.md 19.3). GET renders the
+// form; POST validates the inputs, saves a PendingAgent,
+// and redirects to /nodes/<name>.
+func (s *Server) handleNodesNewPermanent(
+	w http.ResponseWriter, r *http.Request) {
+
+	switch r.Method {
+	case http.MethodGet:
+		s.renderNodesNewPermanent(w, "", "", nil, 1, "")
+	case http.MethodPost:
+		if err := r.ParseForm(); err != nil {
+			http.Error(w, "bad request",
+				http.StatusBadRequest)
+			return
+		}
+		name := strings.TrimSpace(r.FormValue("name"))
+		labelsRaw := r.FormValue("labels")
+		execStr := strings.TrimSpace(
+			r.FormValue("executors"))
+		description := r.FormValue("description")
+
+		executors := 1
+		if execStr != "" {
+			n, err := strconv.Atoi(execStr)
+			if err != nil || n < 1 {
+				s.renderNodesNewPermanent(w,
+					"executors must be a positive integer",
+					name, splitLines(labelsRaw),
+					1, description)
+				return
+			}
+			executors = n
+		}
+		labels := splitLines(labelsRaw)
+		pa := &storage.PendingAgent{
+			Name:        name,
+			Labels:      labels,
+			Executors:   executors,
+			Description: description,
+		}
+		if err := s.opts.Storage.SaveAgent(pa); err != nil {
+			s.renderNodesNewPermanent(w, err.Error(), name,
+				labels, executors, description)
+			return
+		}
+		http.Redirect(w, r, "/nodes/"+name,
+			http.StatusSeeOther)
+	default:
+		http.Error(w, "method not allowed",
+			http.StatusMethodNotAllowed)
+	}
+}
+
+// renderNodesNewPermanent renders the Permanent Agent form
+// with optional error + pre-filled values (used on POST
+// validation failure so the operator's typed input survives
+// the re-render).
+func (s *Server) renderNodesNewPermanent(
+	w http.ResponseWriter, errMsg, name string,
+	labels []string, executors int, description string) {
+
+	s.render(w, "nodes_new_permanent.html",
+		map[string]interface{}{
+			"Title":       "New permanent agent",
+			"Error":       errMsg,
+			"Name":        name,
+			"LabelsText":  strings.Join(labels, "\n"),
+			"Executors":   executors,
+			"Description": description,
+		})
+}
+
+// splitLines breaks a multi-line textarea value into a list
+// of trimmed non-empty entries. Operators paste with extra
+// blank lines or trailing whitespace; the storage layer
+// expects clean strings, so the trim happens here once.
+func splitLines(s string) []string {
+	var out []string
+	for _, line := range strings.Split(s, "\n") {
+		line = strings.TrimSpace(line)
+		if line != "" {
+			out = append(out, line)
+		}
+	}
+	return out
 }
 
 // handleNodeDetail renders the per-agent page: display name,

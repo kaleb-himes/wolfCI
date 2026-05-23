@@ -65,16 +65,6 @@ owner at the start of the phase):
 - Land scope: 19.1-19.5 land first (the core Permanent Agent
   flow); 19.6 (GCE) + 19.7 (Copy) ship in follow-on pushes.
 
-- [ ] 19.3 /nodes/new/permanent form. Failing test
-        (internal/server/nodes_new_permanent_test.go):
-        TestNodesNewPermanent_FormHasFields asserts the
-        rendered form has inputs for name (text), labels
-        (multi-line textarea), executors (number, default
-        1), and description (text). A second test
-        TestNodesNewPermanent_PostCreatesPending POSTs the
-        form and asserts a PendingAgent landed in storage
-        with the supplied values, then asserts the response
-        redirects to /nodes/<name>.
 - [ ] 19.4 Agent-side claim on Register. When the agent
         calls AgentSvc.Register with an agent_id matching a
         PendingAgent record, the registry's AgentInfo

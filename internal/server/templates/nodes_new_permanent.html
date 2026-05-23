@@ -1,0 +1,49 @@
+{{ define "content" }}
+<section class="panel">
+<h2>New permanent agent</h2>
+
+<p class="muted">A permanent agent is a Linux, Windows, or
+macOS machine you connect manually by running
+<code>wolfci-agent</code> on the remote host. Save the slot
+here; the next page shows the exact command to copy onto the
+remote machine.</p>
+
+{{ if .Error }}<p class="error">{{ .Error }}</p>{{ end }}
+
+<form method="POST" action="/nodes/new/permanent" class="job-form">
+
+<label for="f-name">Name</label>
+<input type="text" id="f-name" name="name" required
+       placeholder="e.g. linux-builder-1"
+       value="{{ .Name }}">
+<p class="muted">Becomes the <code>agent_id</code> the remote
+<code>wolfci-agent</code> passes to Register. Alphanumeric,
+dash, underscore, optional internal dots.</p>
+
+<label for="f-labels">Labels (one per line)</label>
+<textarea id="f-labels" name="labels" rows="4"
+          placeholder="linux
+build
+x86_64">{{ .LabelsText }}</textarea>
+<p class="muted">Jobs match these strings against their
+<code>node_label</code> setting. Common conventions: OS
+(linux / windows / macos), arch (x86_64 / arm64), purpose
+(build / test / gpu).</p>
+
+<label for="f-executors">Executors</label>
+<input type="number" id="f-executors" name="executors"
+       min="1" required value="{{ .Executors }}">
+<p class="muted">Number of jobs the agent runs in parallel.
+Default 1.</p>
+
+<label for="f-desc">Description</label>
+<textarea id="f-desc" name="description" rows="3"
+          placeholder="optional, e.g. shop linux box, dedicated to nightly builds">{{ .Description }}</textarea>
+
+<div class="form-actions">
+<button type="submit">Save</button>
+<a href="/nodes/new">Cancel</a>
+</div>
+</form>
+</section>
+{{ end }}

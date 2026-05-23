@@ -4719,3 +4719,31 @@ owner at the start of the phase):
         primary-button row above the node table linking to
         /nodes/new. Both gating tests green; full suite
         clean.
+- [x] 19.3 /nodes/new/permanent form. Failing test
+        (internal/server/nodes_new_permanent_test.go):
+        TestNodesNewPermanent_FormHasFields asserts the
+        rendered form has inputs for name (text), labels
+        (multi-line textarea), executors (number, default
+        1), and description (text). A second test
+        TestNodesNewPermanent_PostCreatesPending POSTs the
+        form and asserts a PendingAgent landed in storage
+        with the supplied values, then asserts the
+        response redirects to /nodes/<name>.
+        Done: handleNodesNew dispatches the "permanent"
+        sub to handleNodesNewPermanent (renders on GET,
+        validates + saves + redirects on POST). The form
+        renders four fields (name, labels textarea,
+        executors number defaulting to 1, description) and
+        re-renders with the operator's typed input + the
+        validation error on a bad POST. splitLines breaks
+        the labels textarea into trimmed non-empty entries.
+        Gating tests green:
+        TestNodesNewPermanent_FormHasFields (GET renders
+        every input + the default 1),
+        TestNodesNewPermanent_PostCreatesPending (POST with
+        linux / build / x86_64 labels + executors=4 lands a
+        PendingAgent and 303s to /nodes/linux-builder-1),
+        plus TestNodesNewPermanent_PostRejectsBadName
+        (POST with foo/bar 200s the form re-render with
+        the "path separator" diagnostic and persists
+        nothing).
