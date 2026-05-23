@@ -3591,4 +3591,44 @@ completed and were moved here:
         error-path sanity check.
 
 
+- [x] 18.14 Pipeline interpreter - declarative top level
+        (internal/pipeline/exec_declarative.go). Failing test:
+        TestExec_SingleStageSh runs
+        `pipeline { agent { label '' }
+                    stages { stage('S') { steps { sh 'true' } } } }`
+        and asserts BuildStatus = SUCCESS, one stage, one
+        step. agent label '' resolves to the local executor
+        in tests.
+        Done: internal/pipeline.ExecDeclarative walks a parsed
+        PipelineFile, executes each stage's StepCall list
+        through a supplied Executor, and returns a Build /
+        StageRun / StepRun tree with BuildStatus per node
+        (BuildPending, BuildRunning, BuildSuccess,
+        BuildFailure). Sequential fail-fast semantics: the
+        first failing step stops its stage, the first failing
+        stage stops the build (catchError / parallel /
+        post {} land in their own follow-on tasks). The
+        Executor interface exposes Sh(ctx, script) ->
+        (exitCode, output, err), where a non-zero exit code
+        surfaces via the int return rather than err so
+        runtime infrastructure failures (process couldn't be
+        spawned) stay distinguishable from "script ran and
+        failed". LocalExecutor implements Sh via
+        /bin/sh -c <script> with combined stdout+stderr
+        capture; tests inject it directly, and richer agent-
+        dispatch (label routing, wolfci-agent transport) is a
+        follow-on. The 18.14 step library covers `sh` only -
+        unknown step names error out with a position-pinned
+        message - and stepStringArg extracts the first
+        TokString token from a StepCall's ArgTokens to feed
+        the executor, deferring full expression evaluation to
+        18.15 / 18.16. Gates: TestExec_SingleStageSh (the
+        spec's name), TestExec_FailingShStepFailsBuild
+        (non-zero exit fails the stage AND the build, with
+        ExitCode propagated to StepRun), and
+        TestExec_SubsequentStagesSkippedOnFailure (after
+        stage A fails, stage B does not run; build.Stages
+        contains exactly one entry).
+
+
 End of PLAN.historic.

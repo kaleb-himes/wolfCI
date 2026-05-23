@@ -1,0 +1,249 @@
+/* internal/pipeline/exec_declarative.go - PLAN.md 18.14.
+ *
+ * Walks a parsed declarative-pipeline AST (from
+ * parser_declarative.go) and executes its stages and steps,
+ * producing a Build record. The agent-dispatch story for
+ * non-empty labels is a follow-on; for 18.14 the empty agent
+ * label `''` resolves to the supplied Executor in tests, and
+ * the only step implemented is `sh`. Subsequent phases extend
+ * the step library (18.16+) and richer execution policies
+ * (catchError, parallel, post {}, etc.).
+ *
+ * Sequential, fail-fast semantics: stages run in order; the
+ * first failing stage stops the build and subsequent stages
+ * do not execute. Inside a stage, the first failing step
+ * stops the stage. Phase 18.23 introduces catchError so
+ * individual steps can opt out of fail-fast.
+ *
+ * The Executor abstraction lets the test runner (and the
+ * later GHPRB master-job integration test in 18.30) inject a
+ * fake instead of /bin/sh. The default LocalExecutor invokes
+ * /bin/sh -c on the host process; agent dispatch over the
+ * existing wolfci-agent transport is a follow-on phase.
+ */
+package pipeline
+
+import (
+    "bytes"
+    "context"
+    "fmt"
+    "os/exec"
+)
+
+/* BuildStatus enumerates the terminal states a build, stage,
+ * or step can settle into. Pending/Running are interior
+ * states the interpreter uses while a unit is in flight;
+ * the externally visible terminal states are Success and
+ * Failure (and, in a follow-on, Aborted / Unstable).
+ */
+type BuildStatus int
+
+const (
+    BuildPending BuildStatus = iota
+    BuildRunning
+    BuildSuccess
+    BuildFailure
+)
+
+/* String returns a stable label for a BuildStatus. */
+func (s BuildStatus) String() string {
+    switch s {
+    case BuildPending:
+        return "PENDING"
+    case BuildRunning:
+        return "RUNNING"
+    case BuildSuccess:
+        return "SUCCESS"
+    case BuildFailure:
+        return "FAILURE"
+    }
+    return "UNKNOWN"
+}
+
+/* Build is the top-level record of a pipeline run. */
+type Build struct {
+    Status BuildStatus
+    Stages []*StageRun
+}
+
+/* StageRun records one stage's execution. */
+type StageRun struct {
+    Name   string
+    Status BuildStatus
+    Steps  []*StepRun
+}
+
+/* StepRun records one step invocation's result. */
+type StepRun struct {
+    Name     string
+    Status   BuildStatus
+    ExitCode int
+    Output   string
+}
+
+/* Executor is the abstraction over "the agent that runs the
+ * step". Tests inject a fake; production wires a wolfci-agent
+ * client. For 18.14 only Sh is needed; later phases extend
+ * the interface (or split it) as new step kinds land.
+ */
+type Executor interface {
+    /* Sh runs script under /bin/sh and returns its exit code
+     * and combined stdout+stderr. err is non-nil only on
+     * infrastructure failures (process couldn't be spawned,
+     * killed by signal); a non-zero exit code is reported via
+     * the int return, not via err. */
+    Sh(ctx context.Context, script string) (int, string, error)
+}
+
+/* LocalExecutor implements Executor by invoking /bin/sh on the
+ * current process. Used in tests and as the default for the
+ * empty-label agent.
+ */
+type LocalExecutor struct{}
+
+/* Sh runs script under /bin/sh -c and captures combined
+ * output. A non-zero shell exit surfaces as the int return,
+ * not an error; only spawn/IO failures produce err != nil.
+ */
+func (e *LocalExecutor) Sh(ctx context.Context,
+    script string) (int, string, error) {
+    cmd := exec.CommandContext(ctx, "/bin/sh", "-c", script)
+    var buf bytes.Buffer
+    cmd.Stdout = &buf
+    cmd.Stderr = &buf
+    err := cmd.Run()
+    if err != nil {
+        if ee, ok := err.(*exec.ExitError); ok {
+            return ee.ExitCode(), buf.String(), nil
+        }
+        return -1, buf.String(), err
+    }
+    return 0, buf.String(), nil
+}
+
+/* ExecDeclarative runs the supplied PipelineFile's pipeline
+ * block top to bottom and returns the resulting Build. The
+ * returned err is non-nil ONLY on infrastructure failures
+ * (nil pipeline, unknown step, unparseable args); a build
+ * that ran fully but ended in failure surfaces via
+ * Build.Status = BuildFailure with err == nil.
+ */
+func ExecDeclarative(ctx context.Context, file *PipelineFile,
+    executor Executor) (*Build, error) {
+    if file == nil || file.Pipeline == nil {
+        return nil, fmt.Errorf(
+            "pipeline.ExecDeclarative: nil pipeline block")
+    }
+    build := &Build{Status: BuildRunning}
+    if file.Pipeline.Stages == nil {
+        /* No stages: a pipeline with no work is trivially
+         * successful. */
+        build.Status = BuildSuccess
+        return build, nil
+    }
+    for _, st := range file.Pipeline.Stages.Stages {
+        sr, err := execStage(ctx, st, executor)
+        build.Stages = append(build.Stages, sr)
+        if err != nil {
+            build.Status = BuildFailure
+            return build, err
+        }
+        if sr.Status != BuildSuccess {
+            build.Status = BuildFailure
+            return build, nil
+        }
+    }
+    build.Status = BuildSuccess
+    return build, nil
+}
+
+/* execStage runs one stage's step list with the supplied
+ * executor. */
+func execStage(ctx context.Context, stage *Stage,
+    executor Executor) (*StageRun, error) {
+    sr := &StageRun{Name: stage.Name, Status: BuildRunning}
+    if stage.Steps == nil {
+        /* An empty stage (no steps {} body) is trivially
+         * successful. Parallel-only and post-only stages
+         * land here too until 18.15 wires them up. */
+        sr.Status = BuildSuccess
+        return sr, nil
+    }
+    for _, step := range stage.Steps.Steps {
+        rr, err := execStep(ctx, step, executor)
+        sr.Steps = append(sr.Steps, rr)
+        if err != nil {
+            sr.Status = BuildFailure
+            return sr, err
+        }
+        if rr.Status != BuildSuccess {
+            sr.Status = BuildFailure
+            return sr, nil
+        }
+    }
+    sr.Status = BuildSuccess
+    return sr, nil
+}
+
+/* execStep dispatches one StepCall through the executor. The
+ * 18.14 step library covers `sh` only; subsequent step-
+ * library tasks (18.16-18.24) extend this dispatcher with
+ * echo / sleep / error / cleanWs / stash / unstash /
+ * archiveArtifacts / withCredentials / sshagent / load /
+ * build / catchError / node.
+ */
+func execStep(ctx context.Context, step StepCall,
+    executor Executor) (*StepRun, error) {
+    sr := &StepRun{Name: step.Name, Status: BuildRunning}
+    switch step.Name {
+    case "sh":
+        script, err := stepStringArg(step, "script")
+        if err != nil {
+            sr.Status = BuildFailure
+            return sr, fmt.Errorf(
+                "pipeline.ExecDeclarative: sh step: %w", err)
+        }
+        code, out, err := executor.Sh(ctx, script)
+        sr.ExitCode = code
+        sr.Output = out
+        if err != nil {
+            sr.Status = BuildFailure
+            return sr, err
+        }
+        if code != 0 {
+            sr.Status = BuildFailure
+            return sr, nil
+        }
+        sr.Status = BuildSuccess
+        return sr, nil
+    }
+    sr.Status = BuildFailure
+    return sr, fmt.Errorf(
+        "pipeline.ExecDeclarative: unknown step %q at %d:%d "+
+            "(18.14 implements 'sh' only)",
+        step.Name, step.Pos.Line, step.Pos.Col)
+}
+
+/* stepStringArg extracts a single string argument from a
+ * StepCall. The 18.14 interpreter only needs to recognise the
+ * naked form `sh '<script>'` and the paren'd form
+ * `sh('<script>')` or `sh(script: '<script>')`. Each case
+ * looks for the first TokString in the arg tokens; named-args
+ * support is the simplest viable subset until 18.16 wires the
+ * script-expression evaluator over StepCall.ArgTokens.
+ *
+ * The labelName parameter is used in error messages so the
+ * caller can be specific about which step's args were
+ * malformed.
+ */
+func stepStringArg(step StepCall, labelName string) (string,
+    error) {
+    for _, tok := range step.ArgTokens {
+        if tok.Kind == TokString {
+            return tok.Value, nil
+        }
+    }
+    return "", fmt.Errorf(
+        "step %q at %d:%d: missing %s string argument",
+        step.Name, step.Pos.Line, step.Pos.Col, labelName)
+}

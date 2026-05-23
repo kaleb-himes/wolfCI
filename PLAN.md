@@ -91,13 +91,6 @@ owner at the start of the phase):
   github-hook-for-GITScm-polling, poll-SCM, trigger-builds-
   remotely.
 
-- [ ] 18.14 Pipeline interpreter - declarative top level
-        (internal/pipeline/exec_declarative.go). Failing test:
-        TestExec_SingleStageSh runs
-        `pipeline { agent { label '' }
-                    stages { stage('S') { steps { sh 'true' } } } }`
-        and asserts BuildStatus = SUCCESS, one stage, one step.
-        agent label '' resolves to the local executor in tests.
 - [ ] 18.15 Pipeline interpreter - script {} block execution
         (internal/pipeline/exec_script.go). Failing test:
         TestExec_ScriptParallel runs a script block that builds
