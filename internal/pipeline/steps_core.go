@@ -48,7 +48,10 @@ import (
 
 /* registerCoreSteps installs the 18.16 step library on the
  * supplied runtime. Called from scriptRuntime.registerNatives
- * during runtime construction. */
+ * during runtime construction. Subsequent step-library phases
+ * (18.17+) chain into their own registerXxxSteps from this
+ * single entry point so the native surface stays discoverable
+ * in one place. */
 func registerCoreSteps(rt *scriptRuntime) {
     rt.globals.define("sh",
         &sNative{name: "sh", fn: nativeSh})
@@ -60,6 +63,8 @@ func registerCoreSteps(rt *scriptRuntime) {
         &sNative{name: "error", fn: nativeError})
     rt.globals.define("script",
         &sNative{name: "script", fn: nativeScript})
+    /* 18.17 workspace step library. */
+    registerWorkspaceSteps(rt)
 }
 
 /* ----- echo ------------------------------------------------- */

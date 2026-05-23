@@ -3768,4 +3768,61 @@ completed and were moved here:
         unified dispatch path).
 
 
+- [x] 18.17 Step library: cleanWs, dir, stash, unstash,
+        archiveArtifacts (internal/pipeline/steps_workspace.go).
+        Failing test: TestStep_StashUnstashRoundTrip stashes
+        a file in stage A, runs an intervening cleanWs,
+        unstashes in stage B, asserts the file is back.
+        TestStep_ArchiveArtifacts saves a file under
+        builds/<job>/<n>/artifacts/.
+        Done: internal/pipeline/steps_workspace.go registers
+        five new natives (cleanWs / dir / stash / unstash /
+        archiveArtifacts) via registerWorkspaceSteps, which
+        steps_core.go chains into from registerCoreSteps so
+        the native surface still has one entry point. The
+        workspace machinery lives on the runtime as three
+        path fields (workspace, stashDir, artifactsDir) that
+        newScriptRuntime inherits from a *LocalExecutor; the
+        LocalExecutor itself gained matching exported fields
+        (Workspace, StashDir, ArtifactsDir) and the Sh method
+        now sets cmd.Dir to Workspace when it is non-empty.
+        Empty workspace fields preserve the 18.14-18.16 test
+        surface unchanged (sh runs in the test process's
+        cwd); workspace-touching natives error out with an
+        actionable message when invoked without a configured
+        workspace. Step semantics: cleanWs wipes every entry
+        inside the workspace dir while keeping the dir
+        itself; dir(path, closure) creates path (mkdir -p)
+        and runs the trailing closure with both
+        rt.workspace AND the LocalExecutor's Workspace
+        swapped, restoring both on the way out so subsequent
+        sh and workspace steps land in the outer directory;
+        stash copies workspace files matching an `includes`
+        glob (default "**") into <stashDir>/<name>/,
+        excluding any path matching the `excludes` glob;
+        unstash mirrors the named stash bundle back into the
+        workspace; archiveArtifacts copies matching files
+        into the runtime's ArtifactsDir. Glob semantics:
+        "**" is a catch-all; comma-separated sub-patterns
+        are each tried against the file's path relative to
+        the workspace AND against its basename via
+        filepath.Match, which covers the simple Jenkinsfile
+        forms ("*.txt", "file.txt", "src/**/foo.go") well
+        enough for 18.17 - richer ant-style globs land when
+        a Jenkinsfile we need to run actually uses them.
+        Gates: TestStep_StashUnstashRoundTrip (the spec's
+        name; stage A writes file.txt, stashes 'data',
+        cleanWs wipes it; stage B unstashes 'data' and the
+        script step cat's it back into the echo log with the
+        original "hello" content), TestStep_ArchiveArtifacts
+        (sh produces result.txt, archiveArtifacts copies it
+        into the artifacts dir, test reads it back),
+        TestStep_CleanWsWipesWorkspace (pre-seeded
+        stale.txt is gone after the step; the workspace
+        dir itself survives), and TestStep_DirSwitchesWorkingDir
+        (dir('sub') { sh '...' } writes the marker into
+        workspace/sub/, confirming both the cwd swap and the
+        implicit cleanup on closure exit).
+
+
 End of PLAN.historic.

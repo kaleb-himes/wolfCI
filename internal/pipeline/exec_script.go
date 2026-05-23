@@ -201,11 +201,32 @@ type scriptRuntime struct {
      * Sh concurrently from multiple branches we'll widen this
      * to a per-goroutine carrier. */
     lastExitCode int
+
+    /* workspace / stashDir / artifactsDir mirror the same
+     * fields on LocalExecutor for the 18.17 workspace step
+     * library. They're read by cleanWs / dir / stash /
+     * unstash / archiveArtifacts. Empty when the caller
+     * supplied a bare &LocalExecutor{} (the 18.14-18.16
+     * tests do this); the workspace-touching natives error
+     * out with an actionable message in that case. */
+    workspace    string
+    stashDir     string
+    artifactsDir string
 }
 
 func newScriptRuntime(executor Executor) *scriptRuntime {
     rt := &scriptRuntime{executor: executor}
     rt.globals = newEnv(nil)
+    /* Inherit workspace info from the LocalExecutor concrete
+     * type when present. A custom Executor implementation
+     * outside this package can satisfy this by wrapping a
+     * LocalExecutor; richer plumbing (e.g. a remote-agent
+     * executor) lands when that executor exists. */
+    if le, ok := executor.(*LocalExecutor); ok {
+        rt.workspace = le.Workspace
+        rt.stashDir = le.StashDir
+        rt.artifactsDir = le.ArtifactsDir
+    }
     rt.registerNatives()
     return rt
 }

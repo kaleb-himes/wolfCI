@@ -95,19 +95,44 @@ type Executor interface {
     Sh(ctx context.Context, script string) (int, string, error)
 }
 
-/* LocalExecutor implements Executor by invoking /bin/sh on the
- * current process. Used in tests and as the default for the
- * empty-label agent.
+/* LocalExecutor implements Executor by invoking /bin/sh on
+ * the current process. Used in tests and as the default for
+ * the empty-label agent. The optional Workspace / StashDir /
+ * ArtifactsDir fields plumb the 18.17 workspace-step library:
+ *
+ *   Workspace    - shell commands run with this as the
+ *                  working directory; cleanWs / dir / stash
+ *                  / unstash / archiveArtifacts all read it
+ *                  through the script runtime.
+ *   StashDir     - per-build dir holding `stash` bundles
+ *                  (kept outside Workspace so cleanWs does
+ *                  not wipe them).
+ *   ArtifactsDir - `archiveArtifacts` copies matching files
+ *                  here, the moral equivalent of
+ *                  `builds/<job>/<n>/artifacts/`.
+ *
+ * Each is optional; the empty-value default keeps the 18.14
+ * test surface working (no workspace -> cmd.Dir unset -> sh
+ * uses the test's current directory).
  */
-type LocalExecutor struct{}
+type LocalExecutor struct {
+    Workspace    string
+    StashDir     string
+    ArtifactsDir string
+}
 
 /* Sh runs script under /bin/sh -c and captures combined
  * output. A non-zero shell exit surfaces as the int return,
  * not an error; only spawn/IO failures produce err != nil.
+ * When Workspace is set the command runs with that as its
+ * working directory; otherwise the process's cwd is used.
  */
 func (e *LocalExecutor) Sh(ctx context.Context,
     script string) (int, string, error) {
     cmd := exec.CommandContext(ctx, "/bin/sh", "-c", script)
+    if e.Workspace != "" {
+        cmd.Dir = e.Workspace
+    }
     var buf bytes.Buffer
     cmd.Stdout = &buf
     cmd.Stderr = &buf

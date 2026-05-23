@@ -91,13 +91,6 @@ owner at the start of the phase):
   github-hook-for-GITScm-polling, poll-SCM, trigger-builds-
   remotely.
 
-- [ ] 18.17 Step library: cleanWs, dir, stash, unstash,
-        archiveArtifacts (internal/pipeline/steps_workspace.go).
-        Failing test: TestStep_StashUnstashRoundTrip stashes a
-        file in stage A, runs an intervening cleanWs, unstashes
-        in stage B, asserts the file is back.
-        TestStep_ArchiveArtifacts saves a file under
-        builds/<job>/<n>/artifacts/.
 - [ ] 18.18 Step library: withCredentials (secret-text only for
         this task) (internal/pipeline/steps_creds.go). Failing
         test: TestStep_WithCredentialsSecretText loads a
