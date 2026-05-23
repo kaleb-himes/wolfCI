@@ -91,13 +91,6 @@ owner at the start of the phase):
   github-hook-for-GITScm-polling, poll-SCM, trigger-builds-
   remotely.
 
-- [ ] 18.6 GHPRB poller scaffold (internal/ghprb/poller.go).
-        Failing test:
-        TestPoller_DiscoversNewPR seeds a fake GitHub HTTP
-        server (httptest) with one open PR; the poller queries
-        /repos/{owner}/{repo}/pulls and emits exactly one
-        TriggerEvent with the right PR id, head SHA, author,
-        and target branch. No real network calls.
 - [ ] 18.7 GHPRB poller debounce by (PR_id, head_sha). Failing
         test: TestPoller_DebounceSameSHA polls the fake server
         three times in a row with the same head; the second and

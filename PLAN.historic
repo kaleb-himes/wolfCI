@@ -3286,4 +3286,28 @@ completed and were moved here:
         scheduler can apply the default).
 
 
+- [x] 18.6 GHPRB poller scaffold (internal/ghprb/poller.go).
+        Failing test:
+        TestPoller_DiscoversNewPR seeds a fake GitHub HTTP
+        server (httptest) with one open PR; the poller queries
+        /repos/{owner}/{repo}/pulls and emits exactly one
+        TriggerEvent with the right PR id, head SHA, author,
+        and target branch. No real network calls.
+        Done: internal/ghprb.Poller does one /pulls fetch and
+        returns one TriggerEvent per open PR. New(baseURL,
+        token, owner, repo, client) - the client is injectable
+        so tests use httptest.Server.Client() and production
+        callers can later swap in a wolfSSL-backed
+        RoundTripper. Token, when non-empty, is sent as
+        Authorization: Bearer <token>. The poller decodes a
+        subset of GitHub's PR JSON (number, state, head.sha,
+        user.login, base.ref) and filters out non-open PRs
+        defensively even though ?state=open is on the URL.
+        Gates: TestPoller_DiscoversNewPR (the spec's name;
+        observed path, observed auth header, full event
+        round-trip), TestPoller_SkipsClosedPRs (defensive
+        state filter), TestPoller_ErrorOnNon200 (429 from a
+        fake "rate limited" server propagates).
+
+
 End of PLAN.historic.
