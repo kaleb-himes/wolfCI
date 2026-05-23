@@ -311,6 +311,35 @@ completed and were moved here:
         flow through a real wolfSSL mTLS gRPC server. Follow-on:
         stream LogChunks back during execution (currently only
         the final BuildComplete is sent).
+- [x] 5.4 GCE provisioner (internal/nodes/gce): uses the Google
+        Cloud Go SDK to launch an instance with a startup script
+        that runs wolfci-agent and joins the server.
+        Sub-checkpoints:
+        - [x] 5.4a Provisioner interface + Config layer + fake
+              backend for tests. internal/nodes defines Node,
+              Provisioner, ErrNoSuchNode, ErrNotImplemented.
+              internal/nodes/fake.Provisioner is an in-memory
+              backend. internal/nodes/gce.Config round-trips
+              YAML at config-files/nodes/gce.yaml with
+              project_id, zone, machine_type,
+              service_account_key, image, network, labels.
+              internal/nodes/gce.Provisioner is a stub that
+              returns nodes.ErrNotImplemented from Provision
+              and Terminate. Gate:
+              TestFake_ProvisionTerminate, TestFake_ListLive,
+              TestConfig_RoundTrip,
+              TestLoadConfig_RejectsMissingRequiredFields.
+        - [x] 5.4b Real GCE driver against
+              google.golang.org/api/compute/v1.
+              Superseded: Phase 5.6 (see entry below) shipped the
+              real driver - gce.Provisioner.Provision builds a
+              compute.Instance, calls Instances.Insert, polls
+              ZoneOperations until DONE; Terminate is the
+              symmetric Delete. Gates live with 5.6.
+              The original 5.4b bullet was kept open as a
+              forward reference until the loop reached this
+              point; the closing-out moves the parent 5.4 here
+              and cites 5.6 as the implementation of record.
 - [x] 5.6 Implement the GCE driver against the real API behind
         the nodes.Provisioner interface the fake satisfies.
         Live test (internal/nodes/gce/live_test.go) is a
