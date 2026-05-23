@@ -1,0 +1,40 @@
+{{ define "content" }}
+<section class="panel">
+<h2>New node</h2>
+
+<p class="muted">Pick how the new node will run. Each option
+takes you to a form for the type-specific configuration.</p>
+
+<div class="node-kind-grid">
+
+<a class="node-kind-card" href="/nodes/new/permanent">
+<h3>Permanent Agent</h3>
+<p>A Linux, Windows, or macOS box you connect manually by
+running <code>wolfci-agent</code> on the remote machine. wolfCI
+pre-registers the slot with the labels and executor count you
+choose here, then shows you the connection command to copy
+across.</p>
+</a>
+
+<a class="node-kind-card" href="/nodes/new/gce">
+<h3>Google Compute Engine</h3>
+<p>A pool of ephemeral VMs wolfCI spins up on demand for jobs
+needing one of the pool's labels. You configure the GCP
+project, zone, machine type, image, and labels here; the
+scheduler provisions and terminates instances against that
+config.</p>
+</a>
+
+<a class="node-kind-card" href="/nodes/new?copy=">
+<h3>Copy existing node</h3>
+<p>Duplicate the configuration of a node you already have set
+up, then edit before saving. Useful for cloning a permanent
+agent's labels into a sibling box without retyping every
+field.</p>
+</a>
+
+</div>
+
+<p class="form-actions"><a href="/nodes">Back to nodes</a></p>
+</section>
+{{ end }}

@@ -280,7 +280,9 @@ func (s *Server) handleNodes(w http.ResponseWriter, r *http.Request) {
 
 // handleNodeRoutes dispatches everything under /nodes/, which
 // covers /nodes/<agent-id> (detail GET), /nodes/<agent-id>/disable
-// (POST), and /nodes/<agent-id>/enable (POST). PLAN.md 12.7.
+// (POST), /nodes/<agent-id>/enable (POST), and the 19.2+
+// /nodes/new* family (landing page, permanent-agent form,
+// GCE form, copy form). PLAN.md 12.7 + 19.2.
 func (s *Server) handleNodeRoutes(w http.ResponseWriter, r *http.Request) {
 	rest := strings.TrimPrefix(r.URL.Path, "/nodes/")
 	if rest == "" {
@@ -288,16 +290,28 @@ func (s *Server) handleNodeRoutes(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	parts := strings.SplitN(rest, "/", 2)
-	agentID := parts[0]
-	if agentID == "" {
+	first := parts[0]
+	if first == "" {
 		http.NotFound(w, r)
 		return
 	}
-	action := ""
+	rest2 := ""
 	if len(parts) == 2 {
-		action = parts[1]
+		rest2 = parts[1]
 	}
 
+	/* 19.2+ /nodes/new family. Routed before agent-id
+	 * detail so a literal pending agent named "new" cannot
+	 * be created (validatePendingAgentName allows "new" as
+	 * a shape, but the route would shadow this handler and
+	 * confuse operators; reserve it). */
+	if first == "new" {
+		s.handleNodesNew(w, r, rest2)
+		return
+	}
+
+	agentID := first
+	action := rest2
 	switch {
 	case action == "" && r.Method == http.MethodGet:
 		s.handleNodeDetail(w, r, agentID)
@@ -305,6 +319,28 @@ func (s *Server) handleNodeRoutes(w http.ResponseWriter, r *http.Request) {
 		s.handleNodeDisable(w, r, agentID, true)
 	case action == "enable" && r.Method == http.MethodPost:
 		s.handleNodeDisable(w, r, agentID, false)
+	default:
+		http.NotFound(w, r)
+	}
+}
+
+// handleNodesNew dispatches the /nodes/new* family. sub is
+// the path tail after /nodes/new (empty for the landing
+// page).
+func (s *Server) handleNodesNew(w http.ResponseWriter,
+	r *http.Request, sub string) {
+
+	switch sub {
+	case "":
+		if r.Method != http.MethodGet {
+			http.Error(w, "method not allowed",
+				http.StatusMethodNotAllowed)
+			return
+		}
+		s.render(w, "nodes_new.html",
+			map[string]interface{}{
+				"Title": "New node",
+			})
 	default:
 		http.NotFound(w, r)
 	}

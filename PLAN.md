@@ -65,16 +65,6 @@ owner at the start of the phase):
 - Land scope: 19.1-19.5 land first (the core Permanent Agent
   flow); 19.6 (GCE) + 19.7 (Copy) ship in follow-on pushes.
 
-- [ ] 19.2 /nodes/new landing page + "New node" button on
-        /nodes. Failing test
-        (internal/server/nodes_new_test.go):
-        TestUI_NodesNew_LandingHasThreeCards asserts the
-        landing renders three cards (Permanent Agent,
-        Google Compute Engine, Copy existing node) each
-        pointing at the right /nodes/new/<kind> URL, and
-        TestUI_NodesPageHasNewButton asserts the existing
-        /nodes page now carries a "New node" button that
-        links to /nodes/new.
 - [ ] 19.3 /nodes/new/permanent form. Failing test
         (internal/server/nodes_new_permanent_test.go):
         TestNodesNewPermanent_FormHasFields asserts the

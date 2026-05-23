@@ -4700,3 +4700,22 @@ owner at the start of the phase):
         empty name, foo/bar, foo\bar, .hidden, executors=0,
         executors=-1, plus two "good" cases (plain name +
         ci.linux.01 with internal dots).
+- [x] 19.2 /nodes/new landing page + "New node" button on
+        /nodes. Failing test
+        (internal/server/nodes_new_test.go):
+        TestUI_NodesNew_LandingHasThreeCards asserts the
+        landing renders three cards (Permanent Agent,
+        Google Compute Engine, Copy existing node) each
+        pointing at the right /nodes/new/<kind> URL, and
+        TestUI_NodesPageHasNewButton asserts the existing
+        /nodes page now carries a "New node" button that
+        links to /nodes/new.
+        Done: handleNodeRoutes routes /nodes/new* through a
+        new handleNodesNew dispatcher (the "new"
+        first-segment is reserved so a literal pending-agent
+        named "new" cannot shadow the route); the landing
+        case renders templates/nodes_new.html with the
+        three node-kind cards. nodes.html grew a "New node"
+        primary-button row above the node table linking to
+        /nodes/new. Both gating tests green; full suite
+        clean.
