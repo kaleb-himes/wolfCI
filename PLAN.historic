@@ -3191,4 +3191,33 @@ completed and were moved here:
         rejects every operator-misuse path.
 
 
+- [x] 18.3 Credential store directory layout
+        (internal/credstore/store.go). Failing test:
+        TestStore_AddListGet adds three creds (one of each
+        type), lists ids, gets each back, deletes one, lists
+        again. Storage layout:
+        config-files/credentials/<id>.sealed plus an index
+        file config-files/credentials/index.yaml mapping id to
+        {type, label, created_at}.
+        Done: internal/credstore.Store wraps a directory with
+        Add/Get/List/Delete. Add seals + writes
+        <dir>/<id>.sealed atomically (write tmp + rename) and
+        updates <dir>/index.yaml. Get refuses to return an
+        orphan sealed file that is absent from the index.
+        Delete removes both. NewStore creates the directory
+        (mode 0700) if missing and tolerates a missing
+        index.yaml as the empty-store starting state. id
+        validation rejects empty, "index", path separators,
+        leading/trailing dot, and the reserved ".sealed"
+        suffix so unsafe input cannot escape the directory.
+        Index rows carry CreatedAt as an RFC3339 string for
+        operator readability. SortByID is exported so the
+        wolfci-ctl cred list command (18.4) can render a
+        deterministic order without re-implementing the
+        comparator. Gates: TestStore_AddListGet (the spec's
+        name), TestStore_GetMissing,
+        TestStore_AddRejectsUnsafeID (8 unsafe-id variants),
+        TestStore_ReopensExistingIndex.
+
+
 End of PLAN.historic.

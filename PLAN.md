@@ -91,14 +91,6 @@ owner at the start of the phase):
   github-hook-for-GITScm-polling, poll-SCM, trigger-builds-
   remotely.
 
-- [ ] 18.3 Credential store directory layout
-        (internal/credstore/store.go). Failing test:
-        TestStore_AddListGet adds three creds (one of each
-        type), lists ids, gets each back, deletes one, lists
-        again. Storage layout:
-        config-files/credentials/<id>.sealed plus an index
-        file config-files/credentials/index.yaml mapping id to
-        {type, label, created_at}.
 - [ ] 18.4 wolfci-ctl credential subcommands. Failing test
         (cmd/wolfci-ctl): TestCtl_CredentialLifecycle exercises
         `wolfci-ctl cred add --id X --type secret-text` (reads
