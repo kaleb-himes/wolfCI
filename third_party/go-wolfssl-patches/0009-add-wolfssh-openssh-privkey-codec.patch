@@ -1,0 +1,783 @@
+diff --git a/wolfssh/openssh_privkey.go b/wolfssh/openssh_privkey.go
+new file mode 100644
+index 0000000..35f8e92
+--- /dev/null
++++ b/wolfssh/openssh_privkey.go
+@@ -0,0 +1,475 @@
++/* openssh_privkey.go
++ *
++ * Copyright (C) 2006-2026 wolfSSL Inc.
++ *
++ * This file is part of wolfSSL.
++ *
++ * wolfSSL is free software; you can redistribute it and/or modify
++ * it under the terms of the GNU General Public License as published
++ * by the Free Software Foundation; either version 2 of the License,
++ * or (at your option) any later version.
++ *
++ * wolfSSL is distributed in the hope that it will be useful, but
++ * WITHOUT ANY WARRANTY; without even the implied warranty of
++ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
++ * General Public License for more details.
++ *
++ * You should have received a copy of the GNU General Public License
++ * along with this program; if not, write to the Free Software
++ * Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA
++ * 02110-1335, USA
++ */
++
++/*
++ * Pure-Go decoder + encoder for the OpenSSH PRIVATE KEY format
++ * (the post-base64 binary blob inside
++ * "-----BEGIN OPENSSH PRIVATE KEY-----" PEM blocks).
++ *
++ * Why these live in the wolfssh sub-package: they parse the same
++ * wire formats wolfssh's DoOpenSshKey (src/ssh.c) walks in C.
++ * wolfSSH_ReadKey_buffer's Go wrapper in wolfssh.go strips the
++ * PEM armor and base64-decodes the body; this file walks the
++ * structured binary the wrapper hands back. Both pieces use the
++ * existing ReadSSHString / EncodeSSHString primitives, so the
++ * file pays no CGO cost itself.
++ *
++ * Format (draft-miller-ssh-agent + OpenSSH PROTOCOL.key):
++ *
++ *   "openssh-key-v1\0"               15-byte magic
++ *   string  ciphername               "none" for unencrypted
++ *   string  kdfname                  "none" for unencrypted
++ *   string  kdfoptions               "" for unencrypted
++ *   uint32  number_of_keys           always 1 in the files we ship
++ *   string  publickey                SSH wire-format public key
++ *                                    (string(algo) || body)
++ *   string  encrypted_section        the private-keys-and-comment
++ *                                    block. When ciphername is
++ *                                    "none" this is the same bytes
++ *                                    laid out as:
++ *
++ *     uint32  checkint1              random
++ *     uint32  checkint2              must equal checkint1
++ *     repeat number_of_keys times:
++ *       string key_type              e.g. "ssh-ed25519"
++ *       <algorithm-specific>
++ *       string comment
++ *     padding                        0x01 0x02 ... until 8-byte
++ *                                    aligned
++ *
++ * Per-algorithm body for ssh-ed25519:
++ *
++ *   string pubkey                    32 bytes
++ *   string privkey                   64 bytes (32-byte seed
++ *                                    followed by 32-byte pubkey)
++ *
++ * 18.20 ships ssh-ed25519 only. Other algorithms surface an
++ * actionable error; adding RSA / ECDSA bodies is one switch arm
++ * each on top of the parser skeleton already here.
++ *
++ * When wolfssh upstream exposes a stable C ABI for extracting the
++ * algorithm-specific key bytes out of its DoOpenSshKey output,
++ * the body of ParseOpenSshPrivateKey shrinks to a thin CGO call;
++ * the surrounding Ed25519 helpers stay because they're the
++ * wolfCrypt-side glue, not wolfssh-side parsing.
++ */
++package wolfssh
++
++import (
++    "bytes"
++    "encoding/base64"
++    "encoding/binary"
++    "errors"
++    "fmt"
++    "strings"
++)
++
++/* Magic prefix every OpenSSH PRIVATE KEY binary blob starts with.
++ * The trailing NUL is part of the constant. */
++const opensshKeyMagic = "openssh-key-v1\x00"
++
++const (
++    /* PEM armor headers for the OpenSSH PRIVATE KEY format.
++     * The decoder accepts either CRLF or LF line endings; the
++     * encoder writes LF. */
++    pemBeginOpenSSH = "-----BEGIN OPENSSH PRIVATE KEY-----"
++    pemEndOpenSSH   = "-----END OPENSSH PRIVATE KEY-----"
++)
++
++/*
++ * OpenSshPrivateKey is one identity unpacked from an OpenSSH
++ * PRIVATE KEY file. KeyBlob mirrors the AgentIdentity layout:
++ * it is the algorithm-specific public-key body (for ed25519,
++ * EncodeSSHString of the 32-byte pubkey).
++ *
++ * Ed25519Seed is the 32-byte private seed wolfCrypt's
++ * Wc_ed25519_import_private_key consumes; Ed25519Pub is the
++ * matching 32-byte public key. Both are populated only when
++ * Algorithm == AlgSSHEd25519.
++ */
++type OpenSshPrivateKey struct {
++    Algorithm string
++    Comment   string
++
++    /* KeyBlob is what AgentIdentity.KeyBlob wants directly:
++     * the algorithm-specific body of the SSH wire public key.
++     * For Ed25519 it is EncodeSSHString(pub32bytes). */
++    KeyBlob []byte
++
++    /* AlgSSHEd25519. */
++    Ed25519Pub  []byte /* 32 bytes */
++    Ed25519Seed []byte /* 32 bytes */
++}
++
++/*
++ * ParseOpenSshPrivateKeyPEM accepts a complete PEM blob
++ * ("-----BEGIN OPENSSH PRIVATE KEY-----\n...\n-----END...\n"),
++ * strips the armor, base64-decodes the body, and walks the
++ * structured payload. Unencrypted keys only (ciphername =
++ * kdfname = "none"); an encrypted key surfaces an actionable
++ * error.
++ *
++ * Callers that already have the post-base64 binary (e.g. from
++ * WolfSSH_ReadKey_buffer with FORMAT_OPENSSH) should use
++ * ParseOpenSshPrivateKey directly.
++ */
++func ParseOpenSshPrivateKeyPEM(pem []byte) (*OpenSshPrivateKey,
++    error) {
++    body, err := unwrapOpenSshPEM(pem)
++    if err != nil {
++        return nil, err
++    }
++    return ParseOpenSshPrivateKey(body)
++}
++
++/*
++ * ParseOpenSshPrivateKey walks the post-base64 OpenSSH PRIVATE
++ * KEY binary blob. The expected layout is documented at the top
++ * of this file; this function reports the first violation as an
++ * actionable error rather than a generic short-read.
++ */
++func ParseOpenSshPrivateKey(b []byte) (*OpenSshPrivateKey, error) {
++    if !bytes.HasPrefix(b, []byte(opensshKeyMagic)) {
++        return nil, errors.New(
++            "openssh privkey: missing openssh-key-v1 magic")
++    }
++    rest := b[len(opensshKeyMagic):]
++
++    cipher, rest, err := ReadSSHString(rest)
++    if err != nil {
++        return nil, fmt.Errorf(
++            "openssh privkey: read ciphername: %w", err)
++    }
++    if string(cipher) != "none" {
++        return nil, fmt.Errorf(
++            "openssh privkey: ciphername %q not supported "+
++                "(18.20 unsealed cleartext keys only)",
++            string(cipher))
++    }
++    kdf, rest, err := ReadSSHString(rest)
++    if err != nil {
++        return nil, fmt.Errorf(
++            "openssh privkey: read kdfname: %w", err)
++    }
++    if string(kdf) != "none" {
++        return nil, fmt.Errorf(
++            "openssh privkey: kdfname %q not supported "+
++                "(18.20 unsealed cleartext keys only)",
++            string(kdf))
++    }
++    kdfopts, rest, err := ReadSSHString(rest)
++    if err != nil {
++        return nil, fmt.Errorf(
++            "openssh privkey: read kdfoptions: %w", err)
++    }
++    if len(kdfopts) != 0 {
++        return nil, errors.New(
++            "openssh privkey: non-empty kdfoptions with " +
++                "kdfname=none")
++    }
++    if len(rest) < 4 {
++        return nil, errors.New(
++            "openssh privkey: truncated number_of_keys")
++    }
++    nKeys := binary.BigEndian.Uint32(rest[:4])
++    rest = rest[4:]
++    if nKeys != 1 {
++        return nil, fmt.Errorf(
++            "openssh privkey: number_of_keys = %d, want 1 "+
++                "(multi-identity files not supported)", nKeys)
++    }
++    pubWire, rest, err := ReadSSHString(rest)
++    if err != nil {
++        return nil, fmt.Errorf(
++            "openssh privkey: read public key: %w", err)
++    }
++    /* pubWire = string(algo) || body. Split it so the caller
++     * can match Algorithm against the inner private section's
++     * key_type. */
++    algoBytes, pubBody, err := ReadSSHString(pubWire)
++    if err != nil {
++        return nil, fmt.Errorf(
++            "openssh privkey: parse public wire: %w", err)
++    }
++    pubAlgo := string(algoBytes)
++
++    encrypted, rest, err := ReadSSHString(rest)
++    if err != nil {
++        return nil, fmt.Errorf(
++            "openssh privkey: read private section: %w", err)
++    }
++    if len(rest) != 0 {
++        return nil, errors.New(
++            "openssh privkey: trailing bytes after private " +
++                "section")
++    }
++    if len(encrypted) < 8 {
++        return nil, errors.New(
++            "openssh privkey: private section shorter than " +
++                "checkints")
++    }
++    c1 := binary.BigEndian.Uint32(encrypted[:4])
++    c2 := binary.BigEndian.Uint32(encrypted[4:8])
++    if c1 != c2 {
++        return nil, errors.New(
++            "openssh privkey: checkints mismatch (corrupt " +
++                "or wrong passphrase)")
++    }
++    rest = encrypted[8:]
++
++    keyType, rest, err := ReadSSHString(rest)
++    if err != nil {
++        return nil, fmt.Errorf(
++            "openssh privkey: read key_type: %w", err)
++    }
++    if string(keyType) != pubAlgo {
++        return nil, fmt.Errorf(
++            "openssh privkey: key_type %q does not match "+
++                "outer algo %q",
++            string(keyType), pubAlgo)
++    }
++
++    out := &OpenSshPrivateKey{Algorithm: pubAlgo}
++    switch pubAlgo {
++    case AlgSSHEd25519:
++        /* pubBody = string(rawPub32). Peel one more layer to
++         * get the raw 32-byte public key, then set KeyBlob to
++         * its length-prefixed form (which is what
++         * AgentIdentity.KeyBlob wants for Ed25519). */
++        rawPub, tail, err := ReadSSHString(pubBody)
++        if err != nil {
++            return nil, fmt.Errorf(
++                "openssh privkey: ed25519: parse outer "+
++                    "pub: %w", err)
++        }
++        if len(tail) != 0 {
++            return nil, errors.New(
++                "openssh privkey: ed25519: trailing bytes " +
++                    "after outer pub")
++        }
++        out.KeyBlob = EncodeSSHString(rawPub)
++        if err := readEd25519Private(rest, rawPub, out); err != nil {
++            return nil, err
++        }
++    default:
++        return nil, fmt.Errorf(
++            "openssh privkey: algorithm %q not supported in "+
++                "18.20 (Ed25519 only; RSA / ECDSA land in "+
++                "follow-on phases)", pubAlgo)
++    }
++    return out, nil
++}
++
++/*
++ * readEd25519Private fills out the Ed25519-specific fields of
++ * OpenSshPrivateKey and validates the private body's
++ * comment/padding tail. The pubBody parameter is the 32-byte
++ * raw public key already extracted from the outer public-key
++ * section; we cross-check it against the public copy carried
++ * inside the private section.
++ */
++func readEd25519Private(rest, pubBody []byte,
++    out *OpenSshPrivateKey) error {
++    /* string pubkey  (32 bytes) */
++    pubInner, rest, err := ReadSSHString(rest)
++    if err != nil {
++        return fmt.Errorf(
++            "openssh privkey: ed25519: read inner pub: %w",
++            err)
++    }
++    if len(pubInner) != 32 {
++        return fmt.Errorf(
++            "openssh privkey: ed25519: inner pub is %d bytes, "+
++                "want 32", len(pubInner))
++    }
++    if !bytes.Equal(pubInner, pubBody) {
++        return errors.New(
++            "openssh privkey: ed25519: inner pubkey does not " +
++                "match outer pubkey")
++    }
++    /* string privkey  (64 bytes: 32-byte seed + 32-byte pub) */
++    priv, rest, err := ReadSSHString(rest)
++    if err != nil {
++        return fmt.Errorf(
++            "openssh privkey: ed25519: read private: %w", err)
++    }
++    if len(priv) != 64 {
++        return fmt.Errorf(
++            "openssh privkey: ed25519: private is %d bytes, "+
++                "want 64", len(priv))
++    }
++    if !bytes.Equal(priv[32:], pubBody) {
++        return errors.New(
++            "openssh privkey: ed25519: private's trailing " +
++                "pub does not match outer pubkey")
++    }
++    out.Ed25519Seed = append([]byte{}, priv[:32]...)
++    out.Ed25519Pub = append([]byte{}, priv[32:]...)
++    /* string comment */
++    comment, rest, err := ReadSSHString(rest)
++    if err != nil {
++        return fmt.Errorf(
++            "openssh privkey: ed25519: read comment: %w", err)
++    }
++    out.Comment = string(comment)
++    /* padding bytes: 0x01 0x02 ... until 8-byte aligned. */
++    for i, p := range rest {
++        if p != byte(i+1) {
++            return fmt.Errorf(
++                "openssh privkey: ed25519: padding byte %d = "+
++                    "0x%02x, want 0x%02x", i, p, i+1)
++        }
++    }
++    return nil
++}
++
++/*
++ * EncodeOpenSshPrivateKeyEd25519PEM produces a PEM-armored
++ * OpenSSH PRIVATE KEY file for an Ed25519 identity. seed is the
++ * 32-byte ed25519 private seed; pub is the matching 32-byte
++ * public key; comment is the human-readable label (often
++ * "user@host"). The encoded PEM is byte-identical to what
++ * ssh-keygen -t ed25519 produces for the same inputs (modulo the
++ * checkint randomness, which is fixed here for reproducibility -
++ * see the checkint parameter).
++ *
++ * checkint is the 32-bit "checkint" value the OpenSSH format
++ * repeats twice inside the private section; ssh-keygen picks a
++ * random one, but for deterministic test fixtures a fixed value
++ * is convenient. Callers that want randomness should supply a
++ * fresh wc_RNG-derived value.
++ */
++func EncodeOpenSshPrivateKeyEd25519PEM(seed, pub []byte,
++    comment string, checkint uint32) ([]byte, error) {
++    if len(seed) != 32 {
++        return nil, fmt.Errorf(
++            "openssh privkey encode: seed must be 32 bytes, "+
++                "got %d", len(seed))
++    }
++    if len(pub) != 32 {
++        return nil, fmt.Errorf(
++            "openssh privkey encode: pub must be 32 bytes, "+
++                "got %d", len(pub))
++    }
++    body := encodeOpenSshPrivateKeyEd25519Binary(seed, pub,
++        comment, checkint)
++    return wrapOpenSshPEM(body), nil
++}
++
++/*
++ * encodeOpenSshPrivateKeyEd25519Binary builds the post-base64
++ * binary blob (no PEM armor). Split out so tests can verify the
++ * binary shape without re-doing base64.
++ */
++func encodeOpenSshPrivateKeyEd25519Binary(seed, pub []byte,
++    comment string, checkint uint32) []byte {
++    var out bytes.Buffer
++    out.WriteString(opensshKeyMagic)
++    out.Write(EncodeSSHString([]byte("none")))
++    out.Write(EncodeSSHString([]byte("none")))
++    out.Write(EncodeSSHString(nil))
++    var n [4]byte
++    binary.BigEndian.PutUint32(n[:], 1)
++    out.Write(n[:])
++    /* publickey: string(algo) || string(pub32) */
++    pubWire := append(
++        EncodeSSHString([]byte(AlgSSHEd25519)),
++        EncodeSSHString(pub)...)
++    out.Write(EncodeSSHString(pubWire))
++    /* private section. */
++    var priv bytes.Buffer
++    binary.BigEndian.PutUint32(n[:], checkint)
++    priv.Write(n[:])
++    priv.Write(n[:])
++    priv.Write(EncodeSSHString([]byte(AlgSSHEd25519)))
++    priv.Write(EncodeSSHString(pub))
++    full := append([]byte{}, seed...)
++    full = append(full, pub...)
++    priv.Write(EncodeSSHString(full))
++    priv.Write(EncodeSSHString([]byte(comment)))
++    /* padding to 8-byte alignment, 0x01 0x02 0x03 ... */
++    for i := byte(1); priv.Len()%8 != 0; i++ {
++        priv.WriteByte(i)
++    }
++    out.Write(EncodeSSHString(priv.Bytes()))
++    return out.Bytes()
++}
++
++/*
++ * unwrapOpenSshPEM strips the PEM armor and decodes the base64
++ * body. Accepts CRLF and LF line endings. Trailing whitespace
++ * between the body and the END marker is allowed.
++ */
++func unwrapOpenSshPEM(pem []byte) ([]byte, error) {
++    s := string(pem)
++    /* Tolerate CRLF by normalising to LF for the substring
++     * search; base64.StdEncoding.DecodeString ignores both. */
++    s = strings.ReplaceAll(s, "\r\n", "\n")
++    begin := strings.Index(s, pemBeginOpenSSH)
++    if begin < 0 {
++        return nil, errors.New(
++            "openssh privkey: missing BEGIN marker")
++    }
++    after := begin + len(pemBeginOpenSSH)
++    end := strings.Index(s[after:], pemEndOpenSSH)
++    if end < 0 {
++        return nil, errors.New(
++            "openssh privkey: missing END marker")
++    }
++    body := s[after : after+end]
++    body = strings.Map(func(r rune) rune {
++        if r == '\n' || r == ' ' || r == '\t' {
++            return -1
++        }
++        return r
++    }, body)
++    decoded, err := base64.StdEncoding.DecodeString(body)
++    if err != nil {
++        return nil, fmt.Errorf(
++            "openssh privkey: base64 decode: %w", err)
++    }
++    return decoded, nil
++}
++
++/*
++ * wrapOpenSshPEM wraps a binary OpenSSH PRIVATE KEY payload in
++ * the standard PEM armor with 70-column base64 lines (matching
++ * ssh-keygen's default wrap width).
++ */
++func wrapOpenSshPEM(body []byte) []byte {
++    enc := base64.StdEncoding.EncodeToString(body)
++    var buf bytes.Buffer
++    buf.WriteString(pemBeginOpenSSH)
++    buf.WriteByte('\n')
++    const wrap = 70
++    for i := 0; i < len(enc); i += wrap {
++        j := i + wrap
++        if j > len(enc) {
++            j = len(enc)
++        }
++        buf.WriteString(enc[i:j])
++        buf.WriteByte('\n')
++    }
++    buf.WriteString(pemEndOpenSSH)
++    buf.WriteByte('\n')
++    return buf.Bytes()
++}
+diff --git a/wolfssh/openssh_privkey_test.go b/wolfssh/openssh_privkey_test.go
+new file mode 100644
+index 0000000..4477dab
+--- /dev/null
++++ b/wolfssh/openssh_privkey_test.go
+@@ -0,0 +1,178 @@
++/* openssh_privkey_test.go
++ *
++ * Copyright (C) 2006-2026 wolfSSL Inc.
++ *
++ * This file is part of wolfSSL.
++ *
++ * wolfSSL is free software; you can redistribute it and/or modify
++ * it under the terms of the GNU General Public License as published
++ * by the Free Software Foundation; either version 2 of the License,
++ * or (at your option) any later version.
++ *
++ * wolfSSL is distributed in the hope that it will be useful, but
++ * WITHOUT ANY WARRANTY; without even the implied warranty of
++ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
++ * General Public License for more details.
++ *
++ * You should have received a copy of the GNU General Public License
++ * along with this program; if not, write to the Free Software
++ * Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA
++ * 02110-1335, USA
++ */
++
++/*
++ * Exercises the OpenSSH PRIVATE KEY encoder + decoder + the
++ * wolfSSH_ReadKey_buffer Go wrapper. Round-trips an Ed25519
++ * keypair through both paths and verifies the decoded seed /
++ * pubkey match the originals.
++ */
++package wolfssh_test
++
++import (
++    "bytes"
++    "testing"
++
++    gowolf "github.com/wolfssl/go-wolfssl"
++    "github.com/wolfssl/go-wolfssl/wolfssh"
++)
++
++/*
++ * TestOpenSshPrivateKey_Ed25519_RoundTrip generates an Ed25519
++ * key via wolfCrypt, encodes it as an OPENSSH PRIVATE KEY PEM,
++ * then walks the PEM with both ParseOpenSshPrivateKeyPEM (pure
++ * Go) and WolfSSH_ReadKey_buffer + ParseOpenSshPrivateKey
++ * (wolfssh-backed PEM unwrap, then Go structural walk). Both
++ * paths must yield the same seed + pubkey bytes.
++ */
++func TestOpenSshPrivateKey_Ed25519_RoundTrip(t *testing.T) {
++    seed, pub := newEd25519KeyForPEM(t)
++    pem, err := wolfssh.EncodeOpenSshPrivateKeyEd25519PEM(
++        seed, pub, "wolfci-bot@localhost", 0xdeadbeef)
++    if err != nil {
++        t.Fatalf("EncodeOpenSshPrivateKeyEd25519PEM: %v", err)
++    }
++
++    /* (1) Pure-Go parse path. */
++    parsed, err := wolfssh.ParseOpenSshPrivateKeyPEM(pem)
++    if err != nil {
++        t.Fatalf("ParseOpenSshPrivateKeyPEM: %v", err)
++    }
++    if parsed.Algorithm != wolfssh.AlgSSHEd25519 {
++        t.Errorf("Algorithm = %q", parsed.Algorithm)
++    }
++    if parsed.Comment != "wolfci-bot@localhost" {
++        t.Errorf("Comment = %q", parsed.Comment)
++    }
++    if !bytes.Equal(parsed.Ed25519Seed, seed) {
++        t.Errorf("Ed25519Seed round-trip mismatch")
++    }
++    if !bytes.Equal(parsed.Ed25519Pub, pub) {
++        t.Errorf("Ed25519Pub round-trip mismatch")
++    }
++    if !bytes.Equal(parsed.KeyBlob,
++        wolfssh.EncodeSSHString(pub)) {
++        t.Errorf("KeyBlob = % x, want EncodeSSHString(pub)",
++            parsed.KeyBlob)
++    }
++
++    /* (2) wolfssh-backed PEM unwrap then Go structural walk.
++     * The C-side DoOpenSshKey path only recognises Ed25519
++     * when the linked wolfSSL was built with the streaming
++     * verify + key-import + key-export ed25519 features
++     * (HAVE_ED25519_KEY_IMPORT / _EXPORT /
++     * WOLFSSL_ED25519_STREAMING_VERIFY). The current
++     * wolfCI wolfSSL profile enables --enable-ed25519 but not
++     * the stream/key-import variants, so wolfssh's
++     * GetOpenSshKey falls through to WS_UNIMPLEMENTED_E (-1017).
++     * The wrapper itself is still useful for other algorithms
++     * / formats; skip the round-trip half of this test when
++     * the C side returns WS_UNIMPLEMENTED_E and surface the
++     * skip reason so future builds (with the extra ed25519
++     * flags) automatically promote the gate. */
++    raw, algo, rc := wolfssh.WolfSSH_ReadKey_buffer(pem,
++        wolfssh.FORMAT_OPENSSH)
++    if rc == -1017 {
++        t.Skipf("WolfSSH_ReadKey_buffer returned " +
++            "WS_UNIMPLEMENTED_E for ed25519 OPENSSH key; " +
++            "rebuild wolfSSL with --enable-ed25519-stream " +
++            "and HAVE_ED25519_KEY_EXPORT to promote this " +
++            "half of the test")
++        return
++    }
++    if rc != 0 {
++        t.Fatalf("WolfSSH_ReadKey_buffer rc=%d", rc)
++    }
++    if algo != wolfssh.AlgSSHEd25519 {
++        t.Errorf("wolfssh wrapper algo = %q", algo)
++    }
++    walked, err := wolfssh.ParseOpenSshPrivateKey(raw)
++    if err != nil {
++        t.Fatalf("ParseOpenSshPrivateKey: %v", err)
++    }
++    if !bytes.Equal(walked.Ed25519Seed, seed) {
++        t.Errorf("wolfssh-wrapper Ed25519Seed mismatch")
++    }
++    if !bytes.Equal(walked.Ed25519Pub, pub) {
++        t.Errorf("wolfssh-wrapper Ed25519Pub mismatch")
++    }
++}
++
++/*
++ * TestOpenSshPrivateKey_RejectsEncrypted locks in the
++ * actionable error path: a key with a non-"none" cipher must
++ * surface as a clean error, not a crash.
++ */
++func TestOpenSshPrivateKey_RejectsEncrypted(t *testing.T) {
++    /* Build a hand-crafted blob with ciphername = "aes256-ctr". */
++    var buf bytes.Buffer
++    buf.WriteString("openssh-key-v1\x00")
++    buf.Write(wolfssh.EncodeSSHString([]byte("aes256-ctr")))
++    buf.Write(wolfssh.EncodeSSHString([]byte("bcrypt")))
++    buf.Write(wolfssh.EncodeSSHString([]byte("opts")))
++    buf.Write([]byte{0, 0, 0, 1})
++    buf.Write(wolfssh.EncodeSSHString(
++        wolfssh.EncodeSSHString([]byte("ssh-ed25519"))))
++    buf.Write(wolfssh.EncodeSSHString([]byte("garbage")))
++    _, err := wolfssh.ParseOpenSshPrivateKey(buf.Bytes())
++    if err == nil {
++        t.Fatalf("expected error for ciphername != none")
++    }
++}
++
++/*
++ * newEd25519KeyForPEM mints a fresh Ed25519 keypair via the
++ * root go-wolfssl package's wolfCrypt wrappers. The shape
++ * matches what 18.20's sshagent step will see at runtime: a
++ * 32-byte seed plus a 32-byte public key.
++ */
++func newEd25519KeyForPEM(t *testing.T) (seed, pub []byte) {
++    t.Helper()
++    var rng gowolf.WC_RNG
++    if rc := gowolf.Wc_InitRng(&rng); rc != 0 {
++        t.Fatalf("Wc_InitRng: %d", rc)
++    }
++    t.Cleanup(func() { gowolf.Wc_FreeRng(&rng) })
++
++    var key gowolf.Ed25519_key
++    if rc := gowolf.Wc_ed25519_init(&key); rc != 0 {
++        t.Fatalf("Wc_ed25519_init: %d", rc)
++    }
++    t.Cleanup(func() { gowolf.Wc_ed25519_free(&key) })
++
++    if rc := gowolf.Wc_ed25519_make_key(&rng, 32, &key); rc != 0 {
++        t.Fatalf("Wc_ed25519_make_key: %d", rc)
++    }
++    pub = make([]byte, 32)
++    pubLen := 32
++    if rc := gowolf.Wc_ed25519_export_public(&key, pub,
++        &pubLen); rc != 0 {
++        t.Fatalf("Wc_ed25519_export_public: %d", rc)
++    }
++    seed = make([]byte, 32)
++    seedLen := 32
++    if rc := gowolf.Wc_ed25519_export_private_only(&key, seed,
++        &seedLen); rc != 0 {
++        t.Fatalf("Wc_ed25519_export_private_only: %d", rc)
++    }
++    return seed, pub
++}
+diff --git a/wolfssh/readkey.go b/wolfssh/readkey.go
+new file mode 100644
+index 0000000..32ab300
+--- /dev/null
++++ b/wolfssh/readkey.go
+@@ -0,0 +1,112 @@
++/* readkey.go
++ *
++ * Copyright (C) 2006-2026 wolfSSL Inc.
++ *
++ * This file is part of wolfSSL.
++ *
++ * wolfSSL is free software; you can redistribute it and/or modify
++ * it under the terms of the GNU General Public License as published
++ * by the Free Software Foundation; either version 2 of the License,
++ * or (at your option) any later version.
++ *
++ * wolfSSL is distributed in the hope that it will be useful, but
++ * WITHOUT ANY WARRANTY; without even the implied warranty of
++ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
++ * General Public License for more details.
++ *
++ * You should have received a copy of the GNU General Public License
++ * along with this program; if not, write to the Free Software
++ * Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA
++ * 02110-1335, USA
++ */
++
++/*
++ * Go wrapper for wolfssh's wolfSSH_ReadKey_buffer entry point in
++ * src/ssh.c. wolfssh.go covers the analogous *public* key path
++ * (WolfSSH_ReadPublicKey_buffer); this file ships the private
++ * key path so callers loading PEM-armored OpenSSH PRIVATE KEY
++ * blocks (or PKCS-armored DER) can hand the bytes off to
++ * wolfssh's identifier without re-deriving the base64 decode +
++ * algorithm detection in Go.
++ *
++ * The cgo preamble repeats the wolfssh include directive
++ * because every Go file using `import "C"` gets its own
++ * preamble; the package's #cgo CFLAGS / LDFLAGS live in
++ * wolfssh.go and apply package-wide.
++ */
++package wolfssh
++
++// #include <wolfssh/ssh.h>
++// #include <stdlib.h>
++import "C"
++
++import (
++    "unsafe"
++)
++
++/*
++ * WolfSSH_ReadKey_buffer parses an SSH PRIVATE key from a
++ * caller-provided buffer using wolfssh's wolfSSH_ReadKey_buffer
++ * / DoOpenSshKey / DoPemKey machinery in src/ssh.c. The input
++ * is the raw bytes of a PEM blob ("-----BEGIN OPENSSH PRIVATE
++ * KEY-----..." for FORMAT_OPENSSH or a PKCS-style "-----BEGIN
++ * ... PRIVATE KEY-----" for FORMAT_PEM).
++ *
++ * Returns:
++ *   out  - the parsed binary key payload. For FORMAT_OPENSSH
++ *          this is the post-base64 binary OpenSSH PRIVATE KEY
++ *          blob (the "openssh-key-v1\0..." structured payload
++ *          that ParseOpenSshPrivateKey in openssh_privkey.go
++ *          walks). For FORMAT_PEM this is the DER-encoded
++ *          private key.
++ *   algo - the algorithm name wolfssh identified (e.g.
++ *          "ssh-ed25519").
++ *   rc   - wolfssh return code; 0 on success. Note: when the
++ *          linked wolfSSL was not built with HAVE_ED25519_KEY_-
++ *          IMPORT / _EXPORT / WOLFSSL_ED25519_STREAMING_VERIFY,
++ *          wolfssh's GetOpenSshKey returns WS_UNIMPLEMENTED_E
++ *          (-1017) for ed25519 OpenSSH PRIVATE KEY blobs. The
++ *          pure-Go ParseOpenSshPrivateKeyPEM path in
++ *          openssh_privkey.go covers that gap until the build
++ *          profile picks up the extra ed25519 flags.
++ *
++ * The wolfssh C side WMALLOC's the output buffer; this wrapper
++ * copies the bytes into a Go []byte and releases the C
++ * allocation before returning, so callers do not need to worry
++ * about lifetimes. algo points into wolfssh's static IdToName
++ * string table on the C side, but the wrapper returns it as a
++ * Go string built via C.GoBytes-style copy, so it survives the
++ * wrapper's lifetime independent of wolfssh's tables.
++ */
++func WolfSSH_ReadKey_buffer(in []byte,
++    format int) (out []byte, algo string, rc int) {
++    if len(in) == 0 {
++        return nil, "", -1
++    }
++    var cOut *C.byte
++    var cOutSz C.word32
++    var cOutType *C.byte
++    var cOutTypeSz C.word32
++
++    rcCInt := C.wolfSSH_ReadKey_buffer(
++        (*C.byte)(unsafe.Pointer(&in[0])),
++        C.word32(len(in)),
++        C.int(format),
++        &cOut, &cOutSz,
++        (**C.byte)(unsafe.Pointer(&cOutType)),
++        &cOutTypeSz,
++        nil)
++    if rcCInt != 0 {
++        if cOut != nil {
++            C.free(unsafe.Pointer(cOut))
++        }
++        /* cOutType points into wolfssh's static IdToName
++         * table - never free it. */
++        return nil, "", int(rcCInt)
++    }
++    defer C.free(unsafe.Pointer(cOut))
++    out = C.GoBytes(unsafe.Pointer(cOut), C.int(cOutSz))
++    algo = string(C.GoBytes(unsafe.Pointer(cOutType),
++        C.int(cOutTypeSz)))
++    return out, algo, 0
++}

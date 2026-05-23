@@ -91,15 +91,6 @@ owner at the start of the phase):
   github-hook-for-GITScm-polling, poll-SCM, trigger-builds-
   remotely.
 
-- [ ] 18.20 Step library: sshagent
-        (internal/pipeline/steps_ssh.go). Failing test:
-        TestStep_SshagentGitClone loads an ssh-private-key cred
-        from credstore, wraps `sh "git clone git@..."` in
-        sshagent { ... }, asserts that the wrapped git call
-        connects via wolfssh's agent socket (a temp
-        SSH_AUTH_SOCK in the build workspace) and succeeds
-        against a local SSH server fixture. Uses the wolfssh
-        agent from 18.19. NO openssh ssh-agent binary.
 - [ ] 18.21 Step library: load
         (internal/pipeline/steps_load.go). Failing test:
         TestStep_LoadHelperGroovy loads

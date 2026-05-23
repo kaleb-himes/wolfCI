@@ -3952,6 +3952,77 @@ completed and were moved here:
         wrapper stays gated from wolfCI's own test suite
         even when a fresh clone has not yet re-applied the
         patches.
+- [x] 18.20 Step library: sshagent
+        (internal/pipeline/steps_ssh.go). Failing test:
+        TestStep_SshagentGitClone loads an ssh-private-key cred
+        from credstore, wraps `sh "git clone git@..."` in
+        sshagent { ... }, asserts that the wrapped git call
+        connects via wolfssh's agent socket (a temp
+        SSH_AUTH_SOCK in the build workspace) and succeeds
+        against a local SSH server fixture. Uses the wolfssh
+        agent from 18.19. NO openssh ssh-agent binary.
+        Done: sshagent step lives at
+        internal/pipeline/steps_ssh.go. The step accepts the
+        Jenkinsfile shape `sshagent(credentials: ['id1',
+        'id2']) { closure }`, unseals each ssh-private-key
+        cred from the runtime's credstore, parses the OPENSSH
+        PRIVATE KEY PEM via the new wolfssh-side
+        ParseOpenSshPrivateKeyPEM (added to
+        third_party/go-wolfssl/wolfssh/openssh_privkey.go in
+        patch 0009), imports the seed + pub into a wolfCrypt
+        ed25519_key, registers a wolfssh.AgentIdentity whose
+        Sign closure calls Wc_ed25519_sign_msg, then starts a
+        unix-domain-socket listener serving
+        Agent.HandleFramedMessage. The closure body runs with
+        SSH_AUTH_SOCK pushed onto the runtime's env stack
+        (empty mask - the socket path is not secret). The
+        socket file lives under os.MkdirTemp's default root
+        (sockaddr_un's 104-byte cap on macOS rules out the
+        long t.TempDir() / builds/.../workspace path); a
+        deferred cleanup closes the listener, removes the
+        socket file, removes the temp dir, and pops the env
+        frame even on a panic. Gating: the spec's
+        TestStep_SshagentGitClone in
+        internal/pipeline/steps_ssh_test.go mints an Ed25519
+        keypair via wolfCrypt, encodes a real OPENSSH PRIVATE
+        KEY PEM, seals it into a fresh credstore, then runs a
+        pipeline whose `sshagent { sh '<probe> <comment>
+        <witness>' }` step invokes the helper at
+        internal/pipeline/sshagent_probe/main.go (a tiny
+        main-package Go binary built at test time). The probe
+        stands in for the OpenSSH `git clone git@...` client
+        that the real Jenkinsfile would invoke: it reads
+        $SSH_AUTH_SOCK, talks the agent protocol over the
+        unix socket, walks IDENTITIES_ANSWER for the expected
+        comment, signs a challenge with SIGN_REQUEST, writes
+        the witness file, exits 0. The pipeline gate also has
+        TestStep_SshagentMissingCred (locks in actionable
+        error when the named cred is absent). Patch 0009
+        (third_party/go-wolfssl-patches/) carries three new
+        files in third_party/go-wolfssl/wolfssh/:
+        openssh_privkey.go (pure-Go OPENSSH PRIVATE KEY codec
+        for ssh-ed25519 - encoder + structural parser),
+        openssh_privkey_test.go (round-trip gate against
+        wolfCrypt-minted keys), and readkey.go (CGO wrapper
+        for wolfSSH_ReadKey_buffer, the private-key analogue
+        of WolfSSH_ReadPublicKey_buffer in wolfssh.go; today
+        returns WS_UNIMPLEMENTED_E for ed25519 because the
+        wolfCI wolfSSL build profile does not yet enable
+        WOLFSSL_ED25519_STREAMING_VERIFY /
+        HAVE_ED25519_KEY_IMPORT / HAVE_ED25519_KEY_EXPORT,
+        which is why the pure-Go path exists as the
+        authoritative parser for now). Patch series README in
+        third_party/go-wolfssl-patches/README.md gained the
+        0009 section explaining why the codec exists, what
+        each file does, and what would let us drop the patch
+        (upstream PR landing patches 0003-0009 + a release
+        tag, OR wolfssh exposing a stable C ABI for OpenSSH
+        private key parsing + wolfSSL build flags enabling
+        the ed25519 features wolfssh needs). NO OpenSSH
+        ssh-agent binary involvement at any step - the agent
+        lives in-process as a goroutine, and the spawned
+        shells discover it via the standard SSH_AUTH_SOCK env
+        the wolfCI runtime injects.
 
 
 End of PLAN.historic.

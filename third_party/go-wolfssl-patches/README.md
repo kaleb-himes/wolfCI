@@ -429,3 +429,95 @@ file lands plus a release tag is cut. OR wolfssh upstream
 exposes a stable C-ABI agent state machine through
 agent.h, at which point this file shrinks to a thin CGO
 bridge.
+
+## 0009-add-wolfssh-openssh-privkey-codec.patch
+
+Adds three files to the wolfssh sub-package:
+
+  `wolfssh/openssh_privkey.go`      - pure-Go OpenSSH PRIVATE
+                                       KEY format decoder +
+                                       encoder for ssh-ed25519.
+  `wolfssh/openssh_privkey_test.go` - round-trip gate that
+                                       generates a fresh Ed25519
+                                       keypair via wolfCrypt,
+                                       encodes it as a PEM, and
+                                       walks both the pure-Go
+                                       parse path AND the
+                                       wolfSSH_ReadKey_buffer
+                                       wrapper (the latter
+                                       currently skips when the
+                                       linked wolfSSL lacks the
+                                       extra ed25519 features
+                                       wolfssh needs).
+  `wolfssh/readkey.go`              - thin CGO wrapper for
+                                       wolfSSH_ReadKey_buffer
+                                       (src/ssh.c), the private
+                                       key counterpart to
+                                       wolfssh.go's existing
+                                       WolfSSH_ReadPublicKey_buffer.
+
+Contents:
+
+  ParseOpenSshPrivateKeyPEM strips the "-----BEGIN OPENSSH
+  PRIVATE KEY-----" / "-----END OPENSSH PRIVATE KEY-----"
+  armor, base64-decodes the body, and dispatches to
+  ParseOpenSshPrivateKey which walks the documented post-base64
+  binary layout (openssh-key-v1\0 magic + length-prefixed
+  cipher / kdf / kdfoptions strings + number_of_keys + outer
+  public + private section). The private section in turn
+  carries the two 32-bit checkints, the algorithm-specific
+  body, the comment, and the 0x01 0x02 ... padding tail.
+
+  EncodeOpenSshPrivateKeyEd25519PEM is the inverse: given a
+  32-byte seed, a 32-byte public key, a comment, and a
+  caller-chosen checkint, it produces a PEM blob in the same
+  shape ssh-keygen -t ed25519 emits (modulo the checkint
+  randomness, which callers control for reproducibility).
+
+  WolfSSH_ReadKey_buffer is the Go wrapper around wolfssh's
+  src/ssh.c entry point. It is the private-key analogue of
+  the existing WolfSSH_ReadPublicKey_buffer wrapper in
+  wolfssh.go; the wrapper does the PEM unwrap + base64 decode
+  + IdToName identification in C, then hands the binary blob
+  back as a Go []byte so ParseOpenSshPrivateKey can walk it.
+  Today the wrapper returns WS_UNIMPLEMENTED_E for ed25519
+  OpenSSH keys because the wolfCI wolfSSL build profile does
+  not yet enable WOLFSSL_ED25519_STREAMING_VERIFY /
+  HAVE_ED25519_KEY_IMPORT / HAVE_ED25519_KEY_EXPORT (the
+  triple wolfssh's WOLFSSH_NO_ED25519 gate consults); the
+  pure-Go ParseOpenSshPrivateKeyPEM covers that gap, and the
+  wrapper remains useful for RSA / ECDSA paths and for the
+  Ed25519 path the moment those wolfSSL flags are enabled.
+
+**Why:** PLAN.md 18.20 (`sshagent` step) needs to unseal an
+ssh-private-key cred whose payload is the OPENSSH PRIVATE KEY
+PEM real Jenkins credentials carry. CLAUDE.md Hard Rule #11
+says SSH wire parsers go through wolfssh; this patch adds the
+wolfssh wrapper for the C path AND a pure-Go structural walker
+that builds on the existing ReadSSHString / EncodeSSHString
+helpers in sshwire.go for the ssh-ed25519 case the wolfSSL
+build profile doesn't yet light up. Neither piece hand-rolls
+crypto: wolfCrypt's Wc_ed25519_sign_msg is still the only
+signing primitive the surrounding 18.20 sshagent step uses;
+this codec only walks length-prefixed wire fields.
+
+**Gate:** `third_party/go-wolfssl/wolfssh/openssh_privkey_test.go`
+ships `TestOpenSshPrivateKey_Ed25519_RoundTrip` (mints an
+Ed25519 keypair via wolfCrypt, encodes a PEM, parses both
+sides) and `TestOpenSshPrivateKey_RejectsEncrypted` (locks in
+the actionable error for non-"none" ciphernames). The pipeline-
+side gate is `internal/pipeline/steps_ssh_test.go`'s
+`TestStep_SshagentGitClone`, which exercises the codec end to
+end via the sshagent step + a probe binary at
+`internal/pipeline/sshagent_probe/`.
+
+**What would let us drop this patch:** the project owner files
+the upstream PR carrying patches 0003-0009 at
+https://github.com/wolfSSL/go-wolfssl and the OpenSSH private
+key codec files land plus a release tag is cut. OR wolfssh
+upstream gains a stable C ABI for extracting the algorithm-
+specific key material out of its DoOpenSshKey output AND the
+wolfCI wolfSSL build profile picks up the extra ed25519
+features wolfssh needs, at which point ParseOpenSshPrivateKey
+shrinks to a thin CGO call and EncodeOpenSshPrivateKey...PEM
+moves to a wolfssh-keygen helper.
