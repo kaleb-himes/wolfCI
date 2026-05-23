@@ -91,14 +91,6 @@ owner at the start of the phase):
   github-hook-for-GITScm-polling, poll-SCM, trigger-builds-
   remotely.
 
-- [ ] 18.15 Pipeline interpreter - script {} block execution
-        (internal/pipeline/exec_script.go). Failing test:
-        TestExec_ScriptParallel runs a script block that builds
-        a map of three named closures and calls
-        `parallel <map>`; all three closures execute (echo
-        captures their messages), and the build succeeds. A
-        second test asserts that throwing inside one closure
-        fails the build and the other closures still finish.
 - [ ] 18.16 Step library: sh, echo, sleep, error
         (internal/pipeline/steps_core.go). Failing test:
         TestStep_ShReturnStatus exercises

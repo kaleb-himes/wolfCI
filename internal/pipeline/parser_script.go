@@ -465,9 +465,22 @@ func ParseScript(src []byte) (*ScriptFile, error) {
 /* ParseScriptTokens is the entry point used by the declarative
  * parser (and 18.15's interpreter) when the source has already
  * been tokenised - e.g. when the input is the raw token slice
- * captured from a script {} block inside a Jenkinsfile.
+ * captured from a script {} block inside a Jenkinsfile. The
+ * captured slice does not carry the file-level TokEOF that
+ * Tokenize appends, so we synthesize one here whenever the
+ * trailing token is missing; peek()/atEOF() can then rely on
+ * a uniform sentinel.
  */
 func ParseScriptTokens(tokens []Token) (*ScriptFile, error) {
+    if len(tokens) == 0 || tokens[len(tokens)-1].Kind != TokEOF {
+        line, col := 1, 1
+        if n := len(tokens); n > 0 {
+            line = tokens[n-1].Line
+            col = tokens[n-1].Col
+        }
+        tokens = append(tokens, Token{Kind: TokEOF,
+            Line: line, Col: col})
+    }
     p := &scriptParser{tokens: tokens}
     block, err := p.parseTopBlock()
     if err != nil {

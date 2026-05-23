@@ -3631,4 +3631,74 @@ completed and were moved here:
         contains exactly one entry).
 
 
+- [x] 18.15 Pipeline interpreter - script {} block execution
+        (internal/pipeline/exec_script.go). Failing test:
+        TestExec_ScriptParallel runs a script block that
+        builds a map of three named closures and calls
+        `parallel <map>`; all three closures execute (echo
+        captures their messages), and the build succeeds. A
+        second test asserts that throwing inside one closure
+        fails the build and the other closures still finish.
+        Done: internal/pipeline/exec_script.go is a tree-
+        walking interpreter for the script-subset AST from
+        18.13. The declarative interpreter (exec_declarative)
+        gained a 'script' step dispatcher that calls
+        ParseScriptTokens on the step's captured Block tokens,
+        evaluates the resulting Block under a fresh
+        scriptRuntime, and downgrades a top-level throwSignal
+        to BuildFailure so a thrown exception inside a
+        parallel branch becomes a graceful failure rather
+        than an infrastructure-level error. Value model:
+        sNull / sBool / sNum (int64) / sStr / sList /
+        sMap (insertion-ordered keys) / sClosure (Params,
+        Body, captured env) / sNative / sExcept (typ, msg).
+        Environment chain uses a per-scope mutex and `define`
+        / `assign` semantics that distinguish def (always
+        local) from naked assignment (walks up the chain;
+        falls through to root if undefined). Control flow is
+        plumbed through Go's error return with sentinel
+        types - retSignal, brSignal, contSignal, throwSignal
+        - so return / break / continue / throw unwind the
+        statement stack without polluting the value path.
+        Statements covered: VarDecl, AssignStmt (with Subscript
+        target), ExprStmt, ReturnStmt, ThrowStmt, BreakStmt,
+        ContinueStmt, IfStmt, WhileStmt, ForInStmt (over
+        lists and map keys), BlockStmt, FuncDecl, TryStmt
+        (single-catch-first matching for now; typed catch
+        routing is a follow-on). Expressions covered: every
+        literal kind, IdentExpr, MemberExpr (map field +
+        Exception.message/type), SubscriptExpr (list + map),
+        CallExpr (with optional ClosureArg), CommandCallExpr,
+        BinaryExpr (+ for both numeric add and string concat;
+        - * / / arithmetic; == != < > <= >= comparison;
+        instanceof string-type matching; && || with short
+        circuit), UnaryExpr (! and -), TernaryExpr, NewExpr,
+        AssignExpr. Native functions registered in the
+        runtime: `echo` (appends a formatted line to a mutex-
+        protected echoBuf that becomes the StepRun.Output)
+        and `parallel` (spawns a goroutine per map value,
+        waits for all to finish even if one fails, and
+        surfaces the first error to the caller). Closures
+        always create their own child env on invocation so
+        parallel branches never share mutable scope; the
+        runtime carries only goroutine-safe shared state
+        (executor, echo buffer + mutex). ParseScriptTokens
+        was extended to synthesize a trailing TokEOF when the
+        caller's token slice does not already carry one (the
+        declarative parser's captured script-block bodies do
+        not include the EOF sentinel that Tokenize appends).
+        Gates: TestExec_ScriptParallel (the spec's name; a
+        script that builds a 3-entry closure map via
+        subscript assignment, calls parallel, asserts SUCCESS
+        with all three echo messages in the step output),
+        TestExec_ScriptParallel_OneThrows (the spec's second
+        test; one closure throws new Exception, build is
+        BuildFailure, the other branches' echoes are still
+        in the output), and TestExec_ScriptSequential (a
+        non-parallel script with two echo statements in
+        order; locks in the trivial sequential flow and the
+        output-ordering contract that 18.16's step library
+        will build on).
+
+
 End of PLAN.historic.

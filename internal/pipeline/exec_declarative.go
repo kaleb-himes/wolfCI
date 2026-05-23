@@ -216,11 +216,39 @@ func execStep(ctx context.Context, step StepCall,
         }
         sr.Status = BuildSuccess
         return sr, nil
+    case "script":
+        /* The declarative parser captured the script body as
+         * raw tokens (StepCall.Block). 18.15 parses them as
+         * a script-subset AST and evaluates them under a
+         * fresh runtime; native echo/parallel are registered
+         * automatically. A throwSignal that reaches the top
+         * is treated as a build failure rather than an
+         * infrastructure error, so the build's err channel
+         * stays reserved for spawn/IO/parse failures. */
+        sf, err := ParseScriptTokens(step.Block)
+        if err != nil {
+            sr.Status = BuildFailure
+            return sr, fmt.Errorf(
+                "pipeline.ExecDeclarative: script step "+
+                    "parse: %w", err)
+        }
+        out, err := evalScriptBlock(ctx, executor, sf.Block)
+        sr.Output = out
+        if err != nil {
+            if _, ok := err.(*throwSignal); ok {
+                sr.Status = BuildFailure
+                return sr, nil
+            }
+            sr.Status = BuildFailure
+            return sr, err
+        }
+        sr.Status = BuildSuccess
+        return sr, nil
     }
     sr.Status = BuildFailure
     return sr, fmt.Errorf(
         "pipeline.ExecDeclarative: unknown step %q at %d:%d "+
-            "(18.14 implements 'sh' only)",
+            "(18.14/18.15 implement 'sh' and 'script' only)",
         step.Name, step.Pos.Line, step.Pos.Col)
 }
 
