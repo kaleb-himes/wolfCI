@@ -2,9 +2,12 @@
 <section class="panel">
 <h2>{{ if .IsNew }}New job{{ else }}Edit job: {{ .Name }}{{ end }}</h2>
 
+{{ if and .IsNew .KindLabel }}<p class="job-kind-banner muted">Kind: {{ .KindLabel }}
+&middot; <a href="/jobs/new">change</a></p>{{ end }}
+
 <nav class="editor-tabs">
-<a href="?view=raw" class="tab {{ if ne .View "form" }}tab-active{{ end }}">Raw YAML</a>
-<a href="?view=form" class="tab {{ if eq .View "form" }}tab-active{{ end }}">Form</a>
+<a href="?{{ if and .IsNew .Kind }}kind={{ .Kind }}&amp;{{ end }}view=form" class="tab {{ if eq .View "form" }}tab-active{{ end }}">Form</a>
+<a href="?{{ if and .IsNew .Kind }}kind={{ .Kind }}&amp;{{ end }}view=raw" class="tab {{ if eq .View "raw" }}tab-active{{ end }}">Raw YAML</a>
 </nav>
 
 {{ if .Error }}<p class="error">{{ .Error }}</p>{{ end }}

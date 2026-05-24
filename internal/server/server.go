@@ -160,8 +160,23 @@ func (s *Server) handleJobRoutes(w http.ResponseWriter, r *http.Request) {
 	case rest == "new":
 		switch r.Method {
 		case http.MethodGet:
+			/* No ?kind= -> render the Jenkins-style
+			 * 3-card picker so the operator picks a job
+			 * shape before landing on the form. The kind
+			 * card hrefs include ?kind=<X> which routes
+			 * back here and skips the picker. */
+			if r.URL.Query().Get("kind") == "" {
+				s.render(w, "jobs_new.html",
+					map[string]interface{}{
+						"Title": "New job",
+					})
+				return
+			}
 			view := normalizeView(r.URL.Query().Get("view"))
-			s.renderJobForm(w, "", "", "", view, nil)
+			kind := normalizeJobKind(
+				r.URL.Query().Get("kind"))
+			s.renderJobFormWithKind(w, "", "", "", view,
+				nil, kind)
 		case http.MethodPost:
 			s.handleJobCreate(w, r)
 		default:
@@ -983,7 +998,7 @@ func (s *Server) handleJobCreate(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "bad request", http.StatusBadRequest)
 		return
 	}
-	view := normalizeView(r.FormValue("view"))
+	view := detectPostView(r)
 	job, spec, err := s.parseJobFromRequest(r, view)
 	if err != nil {
 		s.renderJobForm(w, "", spec, err.Error(), view, job)
@@ -1027,7 +1042,7 @@ func (s *Server) handleJobEditPost(w http.ResponseWriter, r *http.Request, name 
 		http.Error(w, "bad request", http.StatusBadRequest)
 		return
 	}
-	view := normalizeView(r.FormValue("view"))
+	view := detectPostView(r)
 	job, spec, err := s.parseJobFromRequest(r, view)
 	if err != nil {
 		s.renderJobForm(w, name, spec, err.Error(), view, job)
@@ -1076,12 +1091,92 @@ func (s *Server) parseJobFromRequest(r *http.Request,
 }
 
 // normalizeView clamps the ?view= query / hidden-field
-// value to the two we render. Anything unrecognized -> raw.
+// value to the two we render. The default (empty value)
+// resolves to "form" so the operator lands on the friendlier
+// form-view first; "raw" is the explicit opt-in for the
+// YAML textarea. Anything else also resolves to "form" so a
+// stray ?view= typo does not surprise the operator with the
+// raw editor.
 func normalizeView(v string) string {
-	if v == "form" {
+	if v == "raw" {
+		return "raw"
+	}
+	return "form"
+}
+
+// detectPostView picks the view a job-form POST should be
+// parsed under. Explicit ?view= or hidden-input value wins:
+// "raw" routes to the YAML textarea path, "form" routes to
+// the per-field path. An empty value triggers a content-
+// based fallback: if the request carries a non-empty `spec`
+// field (the raw textarea's name) the POST is treated as
+// raw; otherwise it is treated as form. The fallback keeps
+// existing operator scripts + tests that POST raw YAML
+// without an explicit view field working after the GET
+// default flipped to "form".
+func detectPostView(r *http.Request) string {
+	switch r.FormValue("view") {
+	case "raw":
+		return "raw"
+	case "form":
 		return "form"
 	}
-	return "raw"
+	if strings.TrimSpace(r.FormValue("spec")) != "" {
+		return "raw"
+	}
+	return "form"
+}
+
+// JobKind enumerates the three job shapes the /jobs/new
+// picker offers. The kind is a UI hint; the underlying
+// storage.Job model is the same for every kind, and the
+// form view renders the same fieldsets either way. The kind
+// surfaces as a header on the form so the operator
+// remembers which shape they picked when filling fields out.
+const (
+	JobKindInline      = "inline"
+	JobKindPipeline    = "pipeline"
+	JobKindMultibranch = "multibranch"
+)
+
+// normalizeJobKind clamps the ?kind= query value to one of
+// the three recognised kinds. An empty / unrecognised value
+// falls through to JobKindInline (the simplest shape).
+func normalizeJobKind(v string) string {
+	switch v {
+	case JobKindPipeline:
+		return JobKindPipeline
+	case JobKindMultibranch:
+		return JobKindMultibranch
+	}
+	return JobKindInline
+}
+
+// jobKindLabel maps a JobKind* constant to the
+// human-readable label the form's header + tabs use.
+func jobKindLabel(kind string) string {
+	switch kind {
+	case JobKindPipeline:
+		return "Pipeline (more complex, multi-step job)"
+	case JobKindMultibranch:
+		return "Multibranch Pipeline (most complex, " +
+			"multi-path, multi-step job)"
+	}
+	return "Inline script (simple job)"
+}
+
+// renderJobFormWithKind is renderJobForm + a JobKind hint
+// for /jobs/new picker-driven entry. The Kind value lands on
+// the template so the form's header shows which shape the
+// operator picked. Edit pages (which load an existing job)
+// can call renderJobForm directly; the kind defaults to
+// "inline" there since wolfCI does not yet store the kind
+// alongside the Job.
+func (s *Server) renderJobFormWithKind(w http.ResponseWriter,
+	name, spec, errMsg, view string, job *storage.Job,
+	kind string) {
+	s.renderJobFormFull(w, name, spec, errMsg, view, job,
+		kind)
 }
 
 // renderJobForm writes the create/edit form. name=="" means
@@ -1090,6 +1185,18 @@ func normalizeView(v string) string {
 // prefill (nil for /jobs/new on first paint).
 func (s *Server) renderJobForm(w http.ResponseWriter, name,
 	spec, errMsg, view string, job *storage.Job) {
+	s.renderJobFormFull(w, name, spec, errMsg, view, job,
+		JobKindInline)
+}
+
+// renderJobFormFull is the common implementation behind
+// renderJobForm + renderJobFormWithKind. The split keeps
+// every existing call site working with the JobKindInline
+// default while letting the picker-driven entry pass a
+// non-default kind.
+func (s *Server) renderJobFormFull(w http.ResponseWriter, name,
+	spec, errMsg, view string, job *storage.Job,
+	kind string) {
 
 	isNew := name == ""
 	action := "/jobs/new"
@@ -1110,6 +1217,8 @@ func (s *Server) renderJobForm(w http.ResponseWriter, name,
 	credOptions := s.credentialOptions()
 	s.render(w, "jobedit.html", map[string]interface{}{
 		"Title":              title,
+		"Kind":               kind,
+		"KindLabel":          jobKindLabel(kind),
 		"IsNew":              isNew,
 		"Name":               name,
 		"Spec":               spec,

@@ -1,0 +1,39 @@
+{{ define "content" }}
+<section class="panel">
+<h2>New job</h2>
+
+<p class="muted">Pick the job shape. Each option drops you on
+the same job-edit form afterwards; the choice you make here
+seeds which fields you'll typically reach for.</p>
+
+<div class="node-kind-grid">
+
+<a class="node-kind-card" href="/jobs/new?kind=inline">
+<h3>Inline script, simple job</h3>
+<p>A single-stage job whose steps are shell commands typed
+inline. Closest to a Jenkins Freestyle Project. Best for
+small builds, one-shot scripts, and anything that does not
+need parallel stages.</p>
+</a>
+
+<a class="node-kind-card" href="/jobs/new?kind=pipeline">
+<h3>More complex, multi-step job</h3>
+<p>A pipeline-driven job with stages, parallel branches, and
+the Jenkinsfile-style DSL. Closest to a Jenkins Pipeline.
+Best for builds with setup / build / test / deploy stages
+or work that fans out across labeled nodes.</p>
+</a>
+
+<a class="node-kind-card" href="/jobs/new?kind=multibranch">
+<h3>Most complex, multi-path, multi-step job</h3>
+<p>A pipeline that fetches its script from source control and
+fans across multiple branches automatically. Closest to a
+Jenkins Multibranch Pipeline. Best for repositories where
+every release branch should build the same Jenkinsfile.</p>
+</a>
+
+</div>
+
+<p class="form-actions"><a href="/jobs">Back to jobs</a></p>
+</section>
+{{ end }}

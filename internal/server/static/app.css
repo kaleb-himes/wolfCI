@@ -572,8 +572,22 @@ fieldset.form-group label.checkbox-row input[type="checkbox"] {
 }
 .form-actions a:hover { text-decoration: underline; }
 
-/* Primary button variant used by "New node" + landing cards. */
-.btn-primary {
+/* Primary button variant used by "New node" + landing cards.
+ * The link-state selectors (:link, :visited, :hover, :focus,
+ * :active) all force the white-on-accent color: the base
+ * `a { color: var(--link) }` and `a:visited` rules earlier
+ * in this file have equal specificity and visited links in
+ * particular get a privileged path that browsers honor over
+ * a plain `.btn-primary` declaration. Listing every state
+ * explicitly is the simplest fix and guarantees the button
+ * text is always white on the accent background.
+ */
+.btn-primary,
+.btn-primary:link,
+.btn-primary:visited,
+.btn-primary:hover,
+.btn-primary:focus,
+.btn-primary:active {
     display: inline-block;
     background: var(--accent);
     color: var(--accent-fg);

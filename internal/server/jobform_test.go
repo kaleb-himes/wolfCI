@@ -30,16 +30,22 @@ func TestUI_JobCreateAndEdit(t *testing.T) {
 		return http.ErrUseLastResponse
 	}}
 
-	// GET /jobs/new
+	// GET /jobs/new -> 3-card picker (feedback follow-up).
+	// The operator picks a kind, then GET the form. The
+	// dedicated TestUI_JobsNew_LandingHasThreeCards test
+	// covers the picker shape; here we just assert the
+	// landing renders so the rest of this test can proceed
+	// to POST against /jobs/new without first having to
+	// pick a kind (POSTs to /jobs/new still route to
+	// handleJobCreate regardless of the kind hint).
 	resp := mustGet(t, client, ts.URL+"/jobs/new")
 	body := readBody(t, resp)
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("GET /jobs/new status = %d, want 200", resp.StatusCode)
 	}
-	for _, want := range []string{"<textarea", `name="spec"`, "/jobs/new"} {
-		if !strings.Contains(body, want) {
-			t.Errorf("GET /jobs/new body missing %q", want)
-		}
+	if !strings.Contains(body, "Inline script") {
+		t.Errorf("GET /jobs/new body missing the picker's " +
+			"Inline script card; the picker may have regressed")
 	}
 
 	// POST /jobs/new (good)
@@ -68,16 +74,31 @@ func TestUI_JobCreateAndEdit(t *testing.T) {
 		t.Errorf("duplicate POST body missing 'already exists':\n%s", body)
 	}
 
-	// GET /jobs/build-foo/edit
+	// GET /jobs/build-foo/edit (default view = form after
+	// the feedback follow-up). The raw spec content lives
+	// under ?view=raw now; this test asserts the form view
+	// pre-fills the Name input.
 	resp = mustGet(t, client, ts.URL+"/jobs/build-foo/edit")
 	body = readBody(t, resp)
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("GET edit status = %d, want 200", resp.StatusCode)
 	}
-	for _, want := range []string{"<textarea", "name: build-foo", "/jobs/build-foo/edit"} {
+	for _, want := range []string{"<textarea", `value="build-foo"`, "/jobs/build-foo/edit"} {
 		if !strings.Contains(body, want) {
 			t.Errorf("GET edit body missing %q", want)
 		}
+	}
+	// And the raw view is still reachable via ?view=raw.
+	resp = mustGet(t, client,
+		ts.URL+"/jobs/build-foo/edit?view=raw")
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("GET edit?view=raw status = %d, want 200",
+			resp.StatusCode)
+	}
+	rawBody := readBody(t, resp)
+	if !strings.Contains(rawBody, "name: build-foo") {
+		t.Errorf("?view=raw body missing the raw " +
+			"spec content")
 	}
 
 	// POST edit with a renamed YAML -> error.
